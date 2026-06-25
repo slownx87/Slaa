@@ -1,0 +1,6 @@
+admin:senha123
+joao:errada
+maria:pass789
+teste:1234
+root:toor
+joao:abc456
