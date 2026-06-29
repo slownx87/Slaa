@@ -532,13 +532,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = u.id
     ensure_user(uid, u.username, u.full_name)
 
-    if is_admin(uid):
-        await update.message.reply_text(
-            "⚡ *Painel Admin*\nUse /admin para acessar o painel.",
-            parse_mode="Markdown",
-        )
-        return ConversationHandler.END
-
     if not is_auth(uid):
         await update.message.reply_text(
             f"⛔ *Acesso negado.*\nSolicite acesso ao admin.\n\n`Seu ID: {uid}`",
