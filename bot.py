@@ -41,7 +41,7 @@ DB_PATH  = "bot.db"
 TMP_DIR  = Path("tmp")
 TMP_DIR.mkdir(exist_ok=True)
 
-CHOOSE_CHECKER, CHOOSE_DELIM = range(2)
+CHOOSE_CHECKER, WAIT_FILE, CHOOSE_DELIM = range(3)
 
 CHECKERS = {
     "checkok":       "CheckOK",
@@ -538,29 +538,28 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "⚡ *Painel Admin*\nUse /admin para acessar o painel.",
             parse_mode="Markdown",
         )
-        return
+        return ConversationHandler.END
 
     if not is_auth(uid):
         await update.message.reply_text(
             f"⛔ *Acesso negado.*\nSolicite acesso ao admin.\n\n`Seu ID: {uid}`",
             parse_mode="Markdown",
         )
-        return
+        return ConversationHandler.END
 
     chks = get_user_checkers(uid)
     if not chks:
         await update.message.reply_text("⚠️ Nenhum checker liberado. Aguarde o admin.")
-        return
+        return ConversationHandler.END
 
     px_count = len(get_user_proxies(uid))
-    px_text  = f"✅ {px_count} proxies" if px_count else "❌ sem proxies"
+    px_text  = f"✅ {px_count} proxies" if px_count else "❌ sem proxies · /myproxy"
     await update.message.reply_text(
-        f"👋 Olá, *{u.full_name or u.username}*!\n\n"
-        f"📂 Envie um arquivo *.txt* para iniciar.\n"
-        f"🌐 Proxy: {px_text}\n\n"
-        f"Use /myproxy para atualizar seus proxies.",
+        f"🔍 *Escolha o checker:*\n\n🌐 {px_text}",
         parse_mode="Markdown",
+        reply_markup=_kb_checkers(uid),
     )
+    return CHOOSE_CHECKER
 
 async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -592,7 +591,7 @@ async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Cancelado.")
     return ConversationHandler.END
 
-# ── Document handler (entry point for ConversationHandler) ──────────────────────
+# ── Document handler ────────────────────────────────────────────────────────────
 async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     u   = update.effective_user
     uid = u.id
@@ -606,7 +605,7 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     doc = update.message.document
 
-    # ── proxy file upload ──
+    # proxy file upload
     if ctx.user_data.pop("waiting_proxy", False):
         f   = await doc.get_file()
         tmp = TMP_DIR / f"proxy_{uid}.txt"
@@ -618,20 +617,30 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ {count} proxies salvos!")
         return ConversationHandler.END
 
-    # ── credentials file ──
     if not doc.file_name.lower().endswith(".txt"):
         await update.message.reply_text("⚠️ Envie um arquivo *.txt*", parse_mode="Markdown")
         return ConversationHandler.END
 
-    chks = get_user_checkers(uid)
-    if not chks:
-        await update.message.reply_text("⚠️ Nenhum checker liberado. Aguarde o admin.")
-        return ConversationHandler.END
-
+    # save file
     f   = await doc.get_file()
     tmp = TMP_DIR / f"in_{uid}_{int(time.time())}.txt"
     await f.download_to_drive(str(tmp))
     ctx.user_data["tmp_file"] = str(tmp)
+
+    # if checker already chosen (new flow: /start → checker → file)
+    if ctx.user_data.get("checker"):
+        await update.message.reply_text(
+            f"✅ *{CHECKERS[ctx.user_data['checker']]}*\n\n🔤 Qual o *delimitador*?",
+            parse_mode="Markdown",
+            reply_markup=_kb_delim(),
+        )
+        return CHOOSE_DELIM
+
+    # legacy flow: file sent first → show checkers
+    chks = get_user_checkers(uid)
+    if not chks:
+        await update.message.reply_text("⚠️ Nenhum checker liberado. Aguarde o admin.")
+        return ConversationHandler.END
 
     await update.message.reply_text(
         "🔍 *Escolha o checker:*",
@@ -659,12 +668,21 @@ async def on_checker_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return CHOOSE_CHECKER
 
     ctx.user_data["checker"] = val
+
+    # if file already uploaded (legacy flow: file sent before /start)
+    if ctx.user_data.get("tmp_file"):
+        await q.edit_message_text(
+            f"✅ *{CHECKERS[val]}*\n\n🔤 Qual o *delimitador*?",
+            parse_mode="Markdown",
+            reply_markup=_kb_delim(),
+        )
+        return CHOOSE_DELIM
+
     await q.edit_message_text(
-        f"✅ Checker: *{CHECKERS[val]}*\n\n🔤 Qual o *delimitador*?",
+        f"✅ *{CHECKERS[val]}*\n\n📂 Agora envie o arquivo *.txt* com as credenciais.",
         parse_mode="Markdown",
-        reply_markup=_kb_delim(),
     )
-    return CHOOSE_DELIM
+    return WAIT_FILE
 
 async def on_delim_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q   = update.callback_query
@@ -957,9 +975,13 @@ def main():
     app = Application.builder().token(TOKEN).build()
 
     conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Document.ALL, on_document)],
+        entry_points=[
+            CommandHandler("start",        cmd_start),
+            MessageHandler(filters.Document.ALL, on_document),
+        ],
         states={
             CHOOSE_CHECKER: [CallbackQueryHandler(on_checker_chosen, pattern=r"^chk:")],
+            WAIT_FILE:      [MessageHandler(filters.Document.ALL, on_document)],
             CHOOSE_DELIM:   [CallbackQueryHandler(on_delim_chosen,   pattern=r"^dl:")],
         },
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
@@ -967,10 +989,9 @@ def main():
         per_chat=False,
     )
 
-    app.add_handler(CommandHandler("start",   cmd_start))
+    app.add_handler(conv)
     app.add_handler(CommandHandler("admin",   cmd_admin))
     app.add_handler(CommandHandler("myproxy", cmd_myproxy))
-    app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(on_admin_cb, pattern=r"^(adm:|usr:|auth:|perm:)"))
 
     print("✅ Bot iniciado.")
