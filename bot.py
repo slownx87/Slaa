@@ -78,6 +78,14 @@ def db_init():
                 user_id INTEGER PRIMARY KEY,
                 proxies TEXT    DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS cx2_lives (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id  INTEGER,
+                username TEXT    DEFAULT '',
+                checker  TEXT,
+                entry    TEXT,
+                saved_at TEXT    DEFAULT (datetime('now'))
+            );
         """)
         # Safe migration for existing DBs without threads column
         cols = [r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()]
@@ -123,6 +131,21 @@ def toggle_checker(uid, checker):
 
 def list_users():
     return _db("SELECT user_id, username, full_name, is_auth FROM users ORDER BY added_at DESC", fetch="all") or []
+
+def cx2_save(uid, username, checker_name, entry):
+    _db("INSERT INTO cx2_lives (user_id, username, checker, entry) VALUES (?,?,?,?)",
+        uid, username or str(uid), checker_name, entry)
+
+def cx2_count():
+    r = _db("SELECT COUNT(*) FROM cx2_lives", fetch="one")
+    return r[0] if r else 0
+
+def cx2_all():
+    rows = _db("SELECT checker, username, entry, saved_at FROM cx2_lives ORDER BY saved_at DESC", fetch="all") or []
+    return rows
+
+def cx2_clear():
+    _db("DELETE FROM cx2_lives")
 
 def get_user_proxies(uid):
     r = _db("SELECT proxies FROM user_proxies WHERE user_id=?", uid, fetch="one")
@@ -479,12 +502,9 @@ def _check_proxy_alive(proxy):
 # ── Keyboards ───────────────────────────────────────────────────────────────────
 def _kb_checkers(uid):
     chks = get_user_checkers(uid)
-    admin = is_admin(uid)
-    if not chks and not admin:
+    if not chks:
         return None
     rows = []
-    if admin:
-        rows.append([InlineKeyboardButton("🔀 CX2 Multi", callback_data="chk:cx2")])
     for i in range(0, len(chks), 2):
         row = [InlineKeyboardButton(CHECKERS[chks[i]], callback_data=f"chk:{chks[i]}")]
         if i + 1 < len(chks):
@@ -509,7 +529,20 @@ def _kb_admin():
             InlineKeyboardButton("👥 Usuários",      callback_data="adm:users"),
             InlineKeyboardButton("🌐 Gerar Proxies", callback_data="adm:proxygen"),
         ],
-        [InlineKeyboardButton("📊 Status",           callback_data="adm:status")],
+        [
+            InlineKeyboardButton("📦 CX2 Lives",     callback_data="adm:cx2"),
+            InlineKeyboardButton("📊 Status",        callback_data="adm:status"),
+        ],
+    ])
+
+def _kb_cx2(count):
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"📥 Exportar ({count})", callback_data="adm:cx2export"),
+            InlineKeyboardButton("🔀 Testar lista",        callback_data="adm:cx2test"),
+        ],
+        [InlineKeyboardButton("🗑️ Limpar tudo",           callback_data="adm:cx2clear")],
+        [InlineKeyboardButton("🔙 Voltar",                callback_data="adm:back")],
     ])
 
 def _kb_users(users):
@@ -674,11 +707,34 @@ async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── Proxy document handler (runs in group -1, BEFORE the conversation) ──────────
 async def handle_proxy_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Intercepts document uploads when waiting_proxy is set, before the conv handler."""
-    if not ctx.user_data.get("waiting_proxy"):
+    """Intercepts document uploads for proxy and CX2 test flows before the conv handler."""
+    waiting_proxy = ctx.user_data.get("waiting_proxy")
+    waiting_cx2   = ctx.user_data.get("waiting_cx2_test")
+    if not waiting_proxy and not waiting_cx2:
         return  # not for us — let the conv handler proceed
 
     uid = update.effective_user.id
+
+    if waiting_cx2:
+        ctx.user_data.pop("waiting_cx2_test")
+        if not is_admin(uid):
+            raise ApplicationHandlerStop
+        doc = update.message.document
+        f   = await doc.get_file()
+        tmp = TMP_DIR / f"cx2test_{uid}_{int(time.time())}.txt"
+        await f.download_to_drive(str(tmp))
+        ctx.user_data["cx2_test_file"] = str(tmp)
+        await update.message.reply_text(
+            "🔤 Qual o *delimitador*?",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("  :  ", callback_data="cx2dl::"),
+                InlineKeyboardButton("  ;  ", callback_data="cx2dl:;"),
+                InlineKeyboardButton("  |  ", callback_data="cx2dl:|"),
+            ]]),
+        )
+        raise ApplicationHandlerStop
+
     if not is_auth(uid):
         ctx.user_data.pop("waiting_proxy", None)
         raise ApplicationHandlerStop
@@ -735,6 +791,32 @@ async def on_proxy_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(f"🔍 Testando {len(proxies)} proxies... aguarde ⏳")
         asyncio.create_task(_run_proxy_test(uid, proxies, q.message.chat_id, ctx.application))
 
+# ── CX2 delimiter callback ─────────────────────────────────────────────────────
+async def on_cx2_delim_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    if not is_admin(uid):
+        return
+    delim    = q.data.split(":", 1)[1]
+    tmp_file = ctx.user_data.pop("cx2_test_file", None)
+    if not tmp_file:
+        await q.edit_message_text("❌ Arquivo não encontrado. Tente novamente.")
+        return
+    path = Path(tmp_file)
+    try:
+        lines = [l.strip() for l in path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                 if l.strip() and delim in l]
+    finally:
+        path.unlink(missing_ok=True)
+    if not lines:
+        await q.edit_message_text("⚠️ Nenhuma credencial válida encontrada.")
+        return
+    await q.edit_message_text(
+        f"🔀 *CX2 Multi* iniciando com delimitador `{delim}`...", parse_mode="Markdown"
+    )
+    asyncio.create_task(_run_cx2(q.message.chat_id, uid, lines, delim, ctx.application))
+
 # ── Document handler (inside ConversationHandler) ───────────────────────────────
 async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     u   = update.effective_user
@@ -760,9 +842,8 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # new flow: checker already chosen → ask delimiter
     if ctx.user_data.get("checker"):
         ck = ctx.user_data["checker"]
-        display = "CX2 Multi" if ck == "cx2" else CHECKERS[ck]
         await update.message.reply_text(
-            f"✅ *{display}*\n\n🔤 Qual o *delimitador*?",
+            f"✅ *{CHECKERS[ck]}*\n\n🔤 Qual o *delimitador*?",
             parse_mode="Markdown",
             reply_markup=_kb_delim(),
         )
@@ -795,24 +876,22 @@ async def on_checker_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("❌ Cancelado.")
         return ConversationHandler.END
 
-    is_cx2 = val == "cx2" and is_admin(uid)
-    if not is_cx2 and val not in get_user_checkers(uid):
+    if val not in get_user_checkers(uid):
         await q.answer("⛔ Sem permissão para este checker.", show_alert=True)
         return CHOOSE_CHECKER
 
     ctx.user_data["checker"] = val
-    display = "CX2 Multi" if val == "cx2" else CHECKERS[val]
 
     if ctx.user_data.get("tmp_file"):
         await q.edit_message_text(
-            f"✅ *{display}*\n\n🔤 Qual o *delimitador*?",
+            f"✅ *{CHECKERS[val]}*\n\n🔤 Qual o *delimitador*?",
             parse_mode="Markdown",
             reply_markup=_kb_delim(),
         )
         return CHOOSE_DELIM
 
     await q.edit_message_text(
-        f"✅ *{display}*\n\n📂 Agora envie o arquivo *.txt* com as credenciais.",
+        f"✅ *{CHECKERS[val]}*\n\n📂 Agora envie o arquivo *.txt* com as credenciais.",
         parse_mode="Markdown",
     )
     return WAIT_FILE
@@ -883,6 +962,47 @@ async def on_admin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data == "adm:proxygen":
         await q.edit_message_text("🌐 Gerando proxies BR... aguarde ⏳")
         asyncio.create_task(_run_proxy_gen(q.message.chat_id, ctx.application))
+
+    elif data == "adm:cx2":
+        count = cx2_count()
+        await q.edit_message_text(
+            f"📦 *CX2 — Lives Acumulados*\n`Total: {count} lives de todos os usuários`",
+            parse_mode="Markdown",
+            reply_markup=_kb_cx2(count),
+        )
+
+    elif data == "adm:cx2export":
+        rows = cx2_all()
+        if not rows:
+            await q.answer("Nenhum live acumulado ainda.", show_alert=True)
+            return
+        lines = [f"[{r[0]}] [@{r[1]}] {r[2]}" for r in rows]
+        out   = TMP_DIR / f"cx2_export_{int(time.time())}.txt"
+        out.write_text("\n".join(lines), encoding="utf-8")
+        await q.answer()
+        with out.open("rb") as fh:
+            await ctx.application.bot.send_document(
+                q.message.chat_id, document=fh,
+                filename="cx2_lives_todos.txt",
+                caption=f"📦 {len(lines)} lives acumulados · CX2",
+            )
+        out.unlink(missing_ok=True)
+
+    elif data == "adm:cx2test":
+        ctx.user_data["waiting_cx2_test"] = True
+        await q.edit_message_text(
+            "📂 Envie o arquivo *.txt* com as credenciais para testar em todos os checkers.",
+            parse_mode="Markdown",
+        )
+
+    elif data == "adm:cx2clear":
+        cx2_clear()
+        await q.answer("CX2 limpo!", show_alert=True)
+        await q.edit_message_text(
+            "📦 *CX2 — Lives Acumulados*\n`Total: 0 lives de todos os usuários`",
+            parse_mode="Markdown",
+            reply_markup=_kb_cx2(0),
+        )
 
     elif data == "adm:status":
         users  = list_users()
@@ -989,10 +1109,6 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
             await app.bot.send_message(chat_id, "⚠️ Nenhuma credencial válida encontrada.")
             return
 
-        if checker == "cx2":
-            await _run_cx2(chat_id, uid, lines, delim, app)
-            return
-
         total     = len(lines)
         fn        = CHECKER_FN[checker]
         name      = CHECKERS[checker]
@@ -1008,6 +1124,8 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
 
         px_count = len(get_user_proxies(uid))
         threads  = get_user_threads(uid)
+        urow     = _db("SELECT username FROM users WHERE user_id=?", uid, fetch="one")
+        uname    = (urow[0] if urow and urow[0] else None) or str(uid)
 
         def px_fn():
             return _proxy_for(uid)
@@ -1025,6 +1143,7 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
             entry = f"{user}:{pwd}" + (f" | {extra}" if extra else "")
             if result == "live":
                 lives.append(entry)
+                cx2_save(uid, uname, name, entry)
             elif result == "nvinculado":
                 nvinc.append(f"{user}:{pwd}")
             elif result == "erro" and len(erros) < 5:
@@ -1112,10 +1231,13 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
 # ── Background: CX2 multi-checker (admin only) ─────────────────────────────────
 async def _run_cx2(chat_id, uid, lines, delim, app):
     try:
-        total_creds   = len(lines)
-        total_chk     = len(CHECKERS)
+        total_creds = len(lines)
+        total_chk   = len(CHECKERS)
         all_lives:  list[str] = []
-        state = {"done": 0, "last_edit": time.time()}
+        state       = {"done": 0}
+        px_count    = len(get_user_proxies(uid))
+        urow        = _db("SELECT username FROM users WHERE user_id=?", uid, fetch="one")
+        uname       = (urow[0] if urow and urow[0] else None) or str(uid)
 
         prog = await app.bot.send_message(
             chat_id,
@@ -1123,13 +1245,11 @@ async def _run_cx2(chat_id, uid, lines, delim, app):
             parse_mode="Markdown",
         )
 
-        px_count = len(get_user_proxies(uid))
-
         for ck_key, ck_name in CHECKERS.items():
             try:
                 await prog.edit_text(
-                    f"🔀 *CX2 Multi* · checker {state['done']+1}/{total_chk}\n"
-                    f"`▶ {ck_name}` · lives até agora: `{len(all_lives)}`",
+                    f"🔀 *CX2 Multi* · {state['done']+1}/{total_chk}\n"
+                    f"`▶ {ck_name}` · lives: `{len(all_lives)}`",
                     parse_mode="Markdown",
                 )
             except Exception:
@@ -1150,6 +1270,7 @@ async def _run_cx2(chat_id, uid, lines, delim, app):
                 if result == "live":
                     entry = f"[{ck_name}] {user}:{pwd}" + (f" | {extra}" if extra else "")
                     ck_lives.append(entry)
+                    cx2_save(uid, uname, ck_name, entry)
 
             async def _inner(line):
                 async with inner_sem:
@@ -1296,8 +1417,9 @@ def main():
     app.add_handler(CommandHandler("admin",   cmd_admin))
     app.add_handler(CommandHandler("myproxy", cmd_myproxy))
     app.add_handler(CommandHandler("perfil",  cmd_perfil))
-    app.add_handler(CallbackQueryHandler(on_proxy_cb,  pattern=r"^px:"))
-    app.add_handler(CallbackQueryHandler(on_admin_cb,  pattern=r"^(adm:|usr:|auth:|perm:|thd:|delpx:)"))
+    app.add_handler(CallbackQueryHandler(on_proxy_cb,    pattern=r"^px:"))
+    app.add_handler(CallbackQueryHandler(on_cx2_delim_cb, pattern=r"^cx2dl:"))
+    app.add_handler(CallbackQueryHandler(on_admin_cb,    pattern=r"^(adm:|usr:|auth:|perm:|thd:|delpx:)"))
 
     print("✅ Bot iniciado.")
     app.run_polling(drop_pending_updates=True)
