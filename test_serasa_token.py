@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Teste isolado: pega o bearer (accessToken) do Serasa Empresas."""
 
+import ssl
+
 import requests
 import urllib3
 from requests.adapters import HTTPAdapter
@@ -16,11 +18,15 @@ class _LegacyTLSAdapter(HTTPAdapter):
 
     def init_poolmanager(self, *args, **kwargs):
         ctx = create_urllib3_context(ciphers="DEFAULT@SECLEVEL=1")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         kwargs["ssl_context"] = ctx
         return super().init_poolmanager(*args, **kwargs)
 
     def proxy_manager_for(self, *args, **kwargs):
         ctx = create_urllib3_context(ciphers="DEFAULT@SECLEVEL=1")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         kwargs["ssl_context"] = ctx
         return super().proxy_manager_for(*args, **kwargs)
 
