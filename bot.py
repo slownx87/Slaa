@@ -214,18 +214,12 @@ def _chk_consultcenter(user, pwd, px_fn):
         if "senha incorretos" in html or "bloqueado" in html:
             return ("die", "")
 
-        portal = s.get(
-            "https://sistema.consultcenter.com.br/portal",
-            headers={
-                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "accept-language": "pt-BR,pt;q=0.9",
-                "referer": "https://sistema.consultcenter.com.br/portal",
-                "upgrade-insecure-requests": "1",
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-            },
-            proxies=px, timeout=15,
-        )
-        faturas = "faturas_abertoMessage" in portal.text
+        # The "faturas em aberto" alert is a CakePHP flash message: it only
+        # renders once, on the page the login redirect lands on (r.text,
+        # since requests follows redirects by default). A second GET to
+        # /portal arrives after the flash was already consumed/cleared by
+        # the server, so it must NOT be fetched separately.
+        faturas = "faturas_abertoMessage" in r.text
         return ("live", "faturas em aberto" if faturas else "sem faturas em aberto")
     except Exception as e:
         return ("erro", str(e)[:60])
