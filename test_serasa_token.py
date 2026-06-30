@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Teste isolado: pega o bearer (accessToken) do Serasa Empresas."""
 
+import base64
 import ssl
 
 import requests
@@ -31,8 +32,9 @@ class _LegacyTLSAdapter(HTTPAdapter):
         return super().proxy_manager_for(*args, **kwargs)
 
 
-def get_serasa_token(proxy=None):
+def get_serasa_token(user, pwd, proxy=None):
     px = {"http": f"http://{proxy}", "https": f"http://{proxy}"} if proxy else None
+    basic = base64.b64encode(f"{user}:{pwd}".encode()).decode()
 
     s = requests.Session()
     s.mount("https://", _LegacyTLSAdapter())
@@ -42,7 +44,7 @@ def get_serasa_token(proxy=None):
         headers={
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "pt-BR,pt;q=0.9",
-            "Authorization": "Basic NDA5NDEzNDQ6TmVxQDE3NTA=",
+            "Authorization": f"Basic {basic}",
             "Content-Type": "application/json",
             "Origin": "https://empresas.serasaexperian.com.br",
             "Referer": "https://empresas.serasaexperian.com.br/",
@@ -71,4 +73,8 @@ def get_serasa_token(proxy=None):
 
 
 if __name__ == "__main__":
-    get_serasa_token()
+    import sys
+    if len(sys.argv) < 3:
+        print("Uso: python3 test_serasa_token.py <login> <senha>")
+        sys.exit(1)
+    get_serasa_token(sys.argv[1], sys.argv[2])

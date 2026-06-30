@@ -5,6 +5,7 @@ python-telegram-bot >= 20.x
 """
 
 import asyncio
+import base64
 import gzip as gzip_mod
 import hashlib
 import json
@@ -476,6 +477,7 @@ def _chk_checkonn(user, pwd, px_fn):
 
 def _chk_serasa(user, pwd, px_fn):
     try:
+        basic = base64.b64encode(f"{user}:{pwd}".encode()).decode()
         s = requests.Session()
         s.mount("https://", _LegacyTLSAdapter())
         r = s.post(
@@ -483,7 +485,7 @@ def _chk_serasa(user, pwd, px_fn):
             headers={
                 "Accept": "application/json, text/plain, */*",
                 "Accept-Language": "pt-BR,pt;q=0.9",
-                "Authorization": "Basic NDA5NDEzNDQ6TmVxQDE3NTA=",
+                "Authorization": f"Basic {basic}",
                 "Content-Type": "application/json",
                 "Origin": "https://empresas.serasaexperian.com.br",
                 "Referer": "https://empresas.serasaexperian.com.br/",
