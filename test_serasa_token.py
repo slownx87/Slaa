@@ -2,12 +2,33 @@
 """Teste isolado: pega o bearer (accessToken) do Serasa Empresas."""
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
+
+
+class _LegacyTLSAdapter(HTTPAdapter):
+    """OpenSSL 3.x usa SECLEVEL=2 por padrão e recusa handshake com
+    servidores que oferecem cifras mais antigas. Baixar pra SECLEVEL=1
+    resolve o SSLV3_ALERT_HANDSHAKE_FAILURE sem desabilitar verificação."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context(ciphers="DEFAULT@SECLEVEL=1")
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        ctx = create_urllib3_context(ciphers="DEFAULT@SECLEVEL=1")
+        kwargs["ssl_context"] = ctx
+        return super().proxy_manager_for(*args, **kwargs)
 
 
 def get_serasa_token(proxy=None):
     px = {"http": f"http://{proxy}", "https": f"http://{proxy}"} if proxy else None
 
-    r = requests.post(
+    s = requests.Session()
+    s.mount("https://", _LegacyTLSAdapter())
+
+    r = s.post(
         "https://sitenet.serasa.com.br/security/iam/v1/user-identities/login?clientId=5ecebf45aae366236fd0b584",
         headers={
             "Accept": "application/json, text/plain, */*",
