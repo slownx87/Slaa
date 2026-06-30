@@ -352,8 +352,10 @@ def check_serasa(user, pwd):
         json={'deviceId': '6a4442efb2b2e725cb1a4551', 'deviceVersion': 'V2'},
         proxies=_get_proxy(), timeout=15, verify=False,
     )
-    data  = r.json()
-    token = data.get('accessToken')
+    try:
+        token = r.json().get('accessToken')
+    except Exception:
+        token = None
     if token and token != 'null':
         return True, f"token:{str(token)[:20]}..."
     return False, ""

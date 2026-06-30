@@ -494,8 +494,10 @@ def _chk_serasa(user, pwd, px_fn):
             json={"deviceId": "6a4442efb2b2e725cb1a4551", "deviceVersion": "V2"},
             proxies=px_fn(), timeout=15, verify=False,
         )
-        data  = r.json()
-        token = data.get("accessToken")
+        try:
+            token = r.json().get("accessToken")
+        except Exception:
+            token = None
         if token and token != "null":
             return ("live", f"token:{str(token)[:20]}...")
         return ("die", "")
