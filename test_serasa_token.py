@@ -2,8 +2,11 @@
 """Teste isolado: pega o bearer (accessToken) do Serasa Empresas."""
 
 import requests
+import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.ssl_ import create_urllib3_context
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class _LegacyTLSAdapter(HTTPAdapter):
@@ -40,7 +43,7 @@ def get_serasa_token(proxy=None):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
         },
         json={"deviceId": "6a4442efb2b2e725cb1a4551", "deviceVersion": "V2"},
-        proxies=px, timeout=15,
+        proxies=px, timeout=15, verify=False,
     )
 
     print(f"Status: {r.status_code}")
