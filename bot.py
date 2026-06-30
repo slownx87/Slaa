@@ -225,7 +225,7 @@ def _chk_consultcenter(user, pwd, px_fn):
             },
             proxies=px, timeout=15,
         )
-        faturas = "Você possui faturas em aberto!" in portal.text
+        faturas = "faturas_abertoMessage" in portal.text
         return ("live", "faturas em aberto" if faturas else "sem faturas em aberto")
     except Exception as e:
         return ("erro", str(e)[:60])

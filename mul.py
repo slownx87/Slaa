@@ -174,7 +174,7 @@ def check_consultcenter(user, pwd):
         },
         proxies=px, timeout=15,
     )
-    faturas = "Você possui faturas em aberto!" in portal.text
+    faturas = "faturas_abertoMessage" in portal.text
     return True, "faturas em aberto" if faturas else "sem faturas em aberto"
 
 def check_credicorp(user, pwd):
