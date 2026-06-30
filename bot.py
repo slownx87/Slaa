@@ -628,11 +628,13 @@ def _kb_manage(target_uid, is_a):
 
     # Thread control
     current_threads = get_user_threads(target_uid)
-    thread_row = []
-    for n in [1, 2, 3, 5]:
-        icon = "🔵" if current_threads == n else "⚪"
-        thread_row.append(InlineKeyboardButton(f"{icon}{n}T", callback_data=f"thd:{target_uid}:{n}"))
-    rows.append(thread_row)
+    thread_opts = [1, 2, 3, 5, 8, 10, 15, 20]
+    for i in range(0, len(thread_opts), 4):
+        row = []
+        for n in thread_opts[i:i + 4]:
+            icon = "🔵" if current_threads == n else "⚪"
+            row.append(InlineKeyboardButton(f"{icon}{n}T", callback_data=f"thd:{target_uid}:{n}"))
+        rows.append(row)
 
     # Checker permissions
     perm_rows = _db("SELECT checker, enabled FROM permissions WHERE user_id=?", target_uid, fetch="all") or []
