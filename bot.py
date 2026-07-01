@@ -111,6 +111,14 @@ def db_init():
                 entry    TEXT,
                 saved_at TEXT    DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
+            CREATE TABLE IF NOT EXISTS public_checkers (
+                checker TEXT PRIMARY KEY,
+                enabled INTEGER DEFAULT 0
+            );
         """)
         # Safe migration for existing DBs without threads column
         cols = [r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()]
@@ -131,8 +139,45 @@ def ensure_user(uid, username, full_name):
     _db("UPDATE users SET username=?, full_name=? WHERE user_id=?",
         username or "", full_name or "", uid)
 
+def get_setting(key, default=None):
+    r = _db("SELECT value FROM settings WHERE key=?", key, fetch="one")
+    return r[0] if r else default
+
+def set_setting(key, value):
+    _db("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", key, str(value))
+
+def is_public_mode():
+    return get_setting("public_mode", "0") == "1"
+
+def set_public_mode(val: bool):
+    set_setting("public_mode", "1" if val else "0")
+
+def get_public_checkers():
+    rows = _db("SELECT checker FROM public_checkers WHERE enabled=1", fetch="all") or []
+    return [r[0] for r in rows]
+
+def toggle_public_checker(checker):
+    cur = _db("SELECT enabled FROM public_checkers WHERE checker=?", checker, fetch="one")
+    if cur is None:
+        _db("INSERT INTO public_checkers (checker, enabled) VALUES (?,1)", checker)
+        return True
+    new = 0 if cur[0] else 1
+    _db("UPDATE public_checkers SET enabled=? WHERE checker=?", new, checker)
+    return bool(new)
+
+def get_public_threads():
+    return int(get_setting("public_threads", "1"))
+
+def set_public_threads(n: int):
+    set_setting("public_threads", n)
+
 def is_auth(uid):
     if is_admin(uid): return True
+    if is_public_mode(): return True
+    r = _db("SELECT is_auth FROM users WHERE user_id=?", uid, fetch="one")
+    return bool(r and r[0])
+
+def is_individually_authed(uid):
     r = _db("SELECT is_auth FROM users WHERE user_id=?", uid, fetch="one")
     return bool(r and r[0])
 
@@ -142,8 +187,12 @@ def authorize_user(uid, val: bool):
 
 def get_user_checkers(uid):
     if is_admin(uid): return list(CHECKERS.keys())
-    rows = _db("SELECT checker FROM permissions WHERE user_id=? AND enabled=1", uid, fetch="all")
-    return [r[0] for r in rows] if rows else []
+    if is_individually_authed(uid):
+        rows = _db("SELECT checker FROM permissions WHERE user_id=? AND enabled=1", uid, fetch="all")
+        return [r[0] for r in rows] if rows else []
+    if is_public_mode():
+        return get_public_checkers()
+    return []
 
 def toggle_checker(uid, checker):
     cur = _db("SELECT enabled FROM permissions WHERE user_id=? AND checker=?", uid, checker, fetch="one")
@@ -182,8 +231,12 @@ def set_user_proxies(uid, text: str):
 
 def get_user_threads(uid):
     if is_admin(uid): return 5
-    r = _db("SELECT threads FROM users WHERE user_id=?", uid, fetch="one")
-    return r[0] if r and r[0] else 1
+    if is_individually_authed(uid):
+        r = _db("SELECT threads FROM users WHERE user_id=?", uid, fetch="one")
+        return r[0] if r and r[0] else 1
+    if is_public_mode():
+        return get_public_threads()
+    return 1
 
 def set_user_threads(uid, n: int):
     _db("UPDATE users SET threads=? WHERE user_id=?", n, uid)
@@ -597,7 +650,42 @@ def _kb_admin():
             InlineKeyboardButton("📦 CX2 Lives",     callback_data="adm:cx2"),
             InlineKeyboardButton("📊 Status",        callback_data="adm:status"),
         ],
+        [InlineKeyboardButton("🌍 Modo Público",     callback_data="adm:public")],
     ])
+
+def _kb_public():
+    rows = []
+    on = is_public_mode()
+    rows.append([InlineKeyboardButton(
+        "🟢 Ativado (todos usam)" if on else "🔴 Desativado (só autorizados)",
+        callback_data="pub:toggle",
+    )])
+
+    pub_checkers = get_public_checkers()
+    btns = [
+        InlineKeyboardButton(
+            f"{'✅' if k in pub_checkers else '➕'}  {name}",
+            callback_data=f"pub:chk:{k}",
+        )
+        for k, name in CHECKERS.items()
+    ]
+    for i in range(0, len(btns), 2):
+        row = [btns[i]]
+        if i + 1 < len(btns):
+            row.append(btns[i + 1])
+        rows.append(row)
+
+    current_threads = get_public_threads()
+    thread_opts = [1, 2, 3, 5, 8, 10, 15, 20]
+    for i in range(0, len(thread_opts), 4):
+        row = []
+        for n in thread_opts[i:i + 4]:
+            icon = "🔵" if current_threads == n else "⚪"
+            row.append(InlineKeyboardButton(f"{icon}{n}T", callback_data=f"pub:thd:{n}"))
+        rows.append(row)
+
+    rows.append([InlineKeyboardButton("🔙 Voltar", callback_data="adm:back")])
+    return InlineKeyboardMarkup(rows)
 
 def _kb_cx2(count):
     return InlineKeyboardMarkup([
@@ -749,13 +837,19 @@ async def cmd_perfil(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uname, fname, is_a, added_at, threads = row
     chks     = get_user_checkers(uid)
     chk_list = ", ".join(CHECKERS[k] for k in chks) if chks else "nenhum"
+    if is_a:
+        status_txt = "✅ Autorizado"
+    elif is_public_mode():
+        status_txt = "🌍 Público"
+    else:
+        status_txt = "❌ Bloqueado"
     await update.message.reply_text(
         f"👤 *Meu Perfil*\n"
         f"```\n"
         f"Nome     : {fname or uname or uid}\n"
         f"ID       : {uid}\n"
-        f"Status   : {'✅ Autorizado' if is_a else '❌ Bloqueado'}\n"
-        f"Threads  : {threads or 1}\n"
+        f"Status   : {status_txt}\n"
+        f"Threads  : {get_user_threads(uid)}\n"
         f"Proxies  : {px_count}\n"
         f"Checkers : {chk_list}\n"
         f"Desde    : {(added_at or '')[:10] or 'N/A'}\n"
@@ -994,6 +1088,37 @@ async def on_delim_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+# ── Public mode callback handler ────────────────────────────────────────────────
+async def on_public_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    if not is_admin(uid):
+        return
+
+    data = q.data
+
+    if data == "pub:toggle":
+        set_public_mode(not is_public_mode())
+    elif data.startswith("pub:chk:"):
+        checker = data.split(":", 2)[2]
+        toggle_public_checker(checker)
+    elif data.startswith("pub:thd:"):
+        n = int(data.split(":")[2])
+        set_public_threads(n)
+
+    status = "🟢 Ativado" if is_public_mode() else "🔴 Desativado"
+    await q.edit_message_text(
+        f"🌍 *Modo Público*\n`Status: {status}`\n\n"
+        f"Quando ativado, qualquer pessoa pode usar o bot sem o admin "
+        f"precisar autorizar uma por uma. Escolha abaixo quais checkers "
+        f"e quantas threads o público vai ter por padrão.\n\n"
+        f"_Usuários já autorizados individualmente continuam com as "
+        f"próprias permissões e threads, sem serem afetados._",
+        parse_mode="Markdown",
+        reply_markup=_kb_public(),
+    )
+
 # ── Admin callback handler ──────────────────────────────────────────────────────
 async def on_admin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q   = update.callback_query
@@ -1028,6 +1153,19 @@ async def on_admin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data == "adm:proxygen":
         await q.edit_message_text("🌐 Gerando proxies BR... aguarde ⏳")
         asyncio.create_task(_run_proxy_gen(q.message.chat_id, ctx.application))
+
+    elif data == "adm:public":
+        status = "🟢 Ativado" if is_public_mode() else "🔴 Desativado"
+        await q.edit_message_text(
+            f"🌍 *Modo Público*\n`Status: {status}`\n\n"
+            f"Quando ativado, qualquer pessoa pode usar o bot sem o admin "
+            f"precisar autorizar uma por uma. Escolha abaixo quais checkers "
+            f"e quantas threads o público vai ter por padrão.\n\n"
+            f"_Usuários já autorizados individualmente continuam com as "
+            f"próprias permissões e threads, sem serem afetados._",
+            parse_mode="Markdown",
+            reply_markup=_kb_public(),
+        )
 
     elif data == "adm:cx2":
         count = cx2_count()
@@ -1487,6 +1625,7 @@ def main():
     app.add_handler(CommandHandler("perfil",  cmd_perfil))
     app.add_handler(CallbackQueryHandler(on_proxy_cb,    pattern=r"^px:"))
     app.add_handler(CallbackQueryHandler(on_cx2_delim_cb, pattern=r"^cx2dl:"))
+    app.add_handler(CallbackQueryHandler(on_public_cb,    pattern=r"^pub:"))
     app.add_handler(CallbackQueryHandler(on_admin_cb,    pattern=r"^(adm:|usr:|auth:|perm:|thd:|delpx:)"))
 
     print("✅ Bot iniciado.")
