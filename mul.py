@@ -274,14 +274,28 @@ def check_sinesp(user, pwd):
         'senha':       pwd,
         'usuario':     usuario,
     }, separators=(',', ':')).encode('utf-8')
-    http = _ul3.HTTPSConnectionPool(
-        'seguranca.sinesp.gov.br', port=443,
-        cert_reqs='CERT_NONE', assert_hostname=False,
-        timeout=_ul3.Timeout(connect=15, read=30),
-    )
+    px = _get_proxy()
+    retries = _ul3.Retry(total=1, connect=1, read=1)
+    if px:
+        proxy_url = px.get('https') or px.get('http')
+        http = _ul3.ProxyManager(
+            proxy_url,
+            cert_reqs='CERT_NONE', assert_hostname=False,
+            timeout=_ul3.Timeout(connect=15, read=30),
+            retries=retries,
+        )
+        url = 'https://seguranca.sinesp.gov.br/sinesp-seguranca/api/sessao_autenticada/mobile'
+    else:
+        http = _ul3.HTTPSConnectionPool(
+            'seguranca.sinesp.gov.br', port=443,
+            cert_reqs='CERT_NONE', assert_hostname=False,
+            timeout=_ul3.Timeout(connect=15, read=30),
+            retries=retries,
+        )
+        url = '/sinesp-seguranca/api/sessao_autenticada/mobile'
     resp = http.urlopen(
         'POST',
-        '/sinesp-seguranca/api/sessao_autenticada/mobile',
+        url,
         body=body,
         headers={
             'host':           'seguranca.sinesp.gov.br',
