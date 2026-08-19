@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conectado</title>
+<link rel="stylesheet" href="/estilo.css">
+$(if refresh-timeout)<meta http-equiv="refresh" content="$(refresh-timeout)">$(endif)
+</head>
+<body>
+<div class="card">
+  <div class="ico"><svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg></div>
+  <h1>Conex&atilde;o liberada</h1>
+  <p>Voc&ecirc; j&aacute; est&aacute; navegando. Bom uso!</p>
+  <table>
+    <tr><td>Usu&aacute;rio</td><td class="v">$(username)</td></tr>
+    <tr><td>Endere&ccedil;o IP</td><td class="v">$(ip)</td></tr>
+    <tr><td>Aparelho</td><td class="v">$(mac)</td></tr>
+  </table>
+  <a class="btn" href="$(link-redirect)">Continuar navegando</a>
+  <a class="btn sec" href="$(link-status)">Ver status da conex&atilde;o</a>
+</div>
+<script type="text/javascript">
+window.setTimeout(function(){ window.location.href = "$(link-redirect)"; }, 3000);
+</script>
+</body>
+</html>

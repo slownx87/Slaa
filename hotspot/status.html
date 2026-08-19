@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status da conex&atilde;o</title>
+<link rel="stylesheet" href="/estilo.css">
+$(if refresh-timeout)<meta http-equiv="refresh" content="$(refresh-timeout)">$(endif)
+</head>
+<body>
+<div class="card">
+  <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 21l3.5-4.4a4.5 4.5 0 0 0-7 0L12 21zm6.4-8.1a10 10 0 0 0-12.8 0l-1.9-2.4a13 13 0 0 1 16.6 0l-1.9 2.4z"/></svg></div>
+  <h1>Voc&ecirc; est&aacute; conectado</h1>
+  <p>Rede $(server-name)</p>
+  <table>
+    <tr><td>Usu&aacute;rio</td><td class="v">$(username)</td></tr>
+    <tr><td>Endere&ccedil;o IP</td><td class="v">$(ip)</td></tr>
+    <tr><td>Aparelho</td><td class="v">$(mac)</td></tr>
+    <tr><td>Tempo conectado</td><td class="v">$(uptime)</td></tr>
+    <tr><td>Baixado</td><td class="v">$(bytes-in-nice)</td></tr>
+    <tr><td>Enviado</td><td class="v">$(bytes-out-nice)</td></tr>
+    $(if session-time-left)<tr><td>Tempo restante</td><td class="v">$(session-time-left)</td></tr>$(endif)
+  </table>
+  <a class="btn sec" href="$(link-logout)">Desconectar</a>
+</div>
+</body>
+</html>

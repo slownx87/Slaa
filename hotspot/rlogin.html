@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Redirecionando</title>
+</head>
+<body>
+<form name="redirect" action="$(link-login-only)" method="post">
+  <input type="hidden" name="dst" value="$(link-orig)">
+  <input type="hidden" name="username" value="$(mac)">
+  <input type="hidden" name="popup" value="false">
+</form>
+<script type="text/javascript">document.redirect.submit();</script>
+<noscript><p>Ative o JavaScript ou <a href="$(link-login)">clique aqui</a>.</p></noscript>
+</body>
+</html>

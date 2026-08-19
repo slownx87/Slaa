@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Desconectado</title>
+<link rel="stylesheet" href="/estilo.css">
+</head>
+<body>
+<div class="card">
+  <div class="ico wait"><svg viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.8 2.2-1.4 1.4A7 7 0 1 1 5 12a7 7 0 0 1 2.6-5.4L6.2 5.2a9 9 0 1 0 11.6 0z"/></svg></div>
+  <h1>Voc&ecirc; foi desconectado</h1>
+  <p>Sess&atilde;o encerrada com sucesso.</p>
+  <table>
+    <tr><td>Tempo conectado</td><td class="v">$(uptime)</td></tr>
+    <tr><td>Baixado</td><td class="v">$(bytes-in-nice)</td></tr>
+    <tr><td>Enviado</td><td class="v">$(bytes-out-nice)</td></tr>
+  </table>
+  <a class="btn" href="$(link-login)">Conectar novamente</a>
+</div>
+</body>
+</html>
