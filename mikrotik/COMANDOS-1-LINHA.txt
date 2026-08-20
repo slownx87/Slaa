@@ -1,0 +1,87 @@
+===============================================================================
+ VN SYSTEM - TODOS OS COMANDOS EM UMA LINHA CADA
+ Cole um de cada vez no terminal do WinBox. Nao ha nada para substituir.
+===============================================================================
+
+
+ 1) CONFERIR SE JA TEM HOTSPOT  (se vier vazio, rode /ip hotspot setup antes)
+-------------------------------------------------------------------------------
+/ip hotspot print
+
+
+ 2) O PERFIL, APONTANDO PARA A PASTA DOS ARQUIVOS
+-------------------------------------------------------------------------------
+/ip hotspot profile add name=perfil-vn html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d
+
+
+ 3) APLICAR O PERFIL NO SEU HOTSPOT  (o [find] pega qualquer nome)
+-------------------------------------------------------------------------------
+/ip hotspot set [find] profile=perfil-vn
+
+
+ 4) O PERFIL DE USUARIO
+-------------------------------------------------------------------------------
+/ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M idle-timeout=30m
+
+
+ 5) A CONTA QUE A PAGINA USA
+-------------------------------------------------------------------------------
+/ip hotspot user add name=visitante password=visitante profile=moradores comment="portal VN"
+
+
+ 6) O SCRIPT QUE GRAVA O TXT  (uma linha so, copie inteira)
+-------------------------------------------------------------------------------
+/system script add name=wifi-registrar policy=read,write,test source={:local arq "acessos-wifi.txt"; :local aparelho "-"; :do {:local lease [/ip dhcp-server lease find where mac-address=$"mac-address"]; :if ([:len $lease] > 0) do={:local hn [/ip dhcp-server lease get [:pick $lease 0] host-name]; :if ([:len $hn] > 0) do={:set aparelho $hn}}} on-error={:set aparelho "-"}; :set aparelho [:tostr $aparelho]; :local limpo ""; :for i from=0 to=([:len $aparelho] - 1) do={:local c [:pick $aparelho $i]; :if ($c != ";" and $c != "\n" and $c != "\r") do={:set limpo ($limpo . $c)}}; :local linha ([/system clock get date] . ";" . [/system clock get time] . ";" . $user . ";" . $address . ";" . $"mac-address" . ";" . $limpo); :if ([:len [/file find name=$arq]] = 0) do={/file add name=$arq contents=("data;hora;usuario;ip;mac;aparelho\r\n"); :delay 1s}; :if ([/file get [find name=$arq] size] > 500000) do={:log warning "wifi-registrar: arquivo cheio"} else={/file set [find name=$arq] contents=([/file get [find name=$arq] contents] . $linha . "\r\n")}}
+
+
+ 7) CHAMAR O SCRIPT A CADA LOGIN
+-------------------------------------------------------------------------------
+/ip hotspot user profile set [find name=moradores] on-login="/system script run wifi-registrar"
+
+
+ 8) LOG DO HOTSPOT EM ARQUIVO (opcional, alem do txt)
+-------------------------------------------------------------------------------
+/system logging action add name=txt-wifi target=disk disk-file-name=cadastros-wifi disk-lines-per-file=20000 disk-file-count=10 disk-stop-on-full=no
+
+/system logging add topics=hotspot,info action=txt-wifi
+
+
+ 9) DERRUBAR TODOS PARA TESTAR
+-------------------------------------------------------------------------------
+/ip hotspot active remove [find]
+
+
+ 10) LER O ARQUIVO SEM BAIXAR
+-------------------------------------------------------------------------------
+:put [/file get [find name="acessos-wifi.txt"] contents]
+
+
+===============================================================================
+ SE O COMANDO 6 DER ERRO DE SINTAXE
+===============================================================================
+ Use esta versao curta. Ela nao limpa ponto e virgula do nome do aparelho --
+ se algum aparelho tiver ; no nome, a coluna sai torta. Fora isso, faz o mesmo.
+
+/system script add name=wifi-registrar policy=read,write,test source={:local arq "acessos-wifi.txt"; :local ap "-"; :do {:set ap [/ip dhcp-server lease get [find where mac-address=$"mac-address"] host-name]} on-error={:set ap "-"}; :local linha ([/system clock get date] . ";" . [/system clock get time] . ";" . $user . ";" . $address . ";" . $"mac-address" . ";" . $ap); :if ([:len [/file find name=$arq]] = 0) do={/file add name=$arq contents=("data;hora;usuario;ip;mac;aparelho\r\n"); :delay 1s}; /file set [find name=$arq] contents=([/file get [find name=$arq] contents] . $linha . "\r\n")}
+
+
+===============================================================================
+ SE DER "already have such name"
+===============================================================================
+ O item ja existe. Use o set no lugar do add:
+
+/ip hotspot profile set [find name=perfil-vn] html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d
+
+/ip hotspot user profile set [find name=moradores] shared-users=500 rate-limit=10M/50M idle-timeout=30m
+
+/ip hotspot user set [find name=visitante] password=visitante profile=moradores
+
+/system script set [find name=wifi-registrar] source=... (mais facil: /system script remove [find name=wifi-registrar] e cole o 6 de novo)
+
+
+===============================================================================
+ CONFERIR NO FIM
+===============================================================================
+/ip hotspot print detail
+/ip hotspot user print
+/file print where name~"acessos-wifi"
