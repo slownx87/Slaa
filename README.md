@@ -24,6 +24,7 @@ então qualquer recurso externo simplesmente não carregaria.
 | `hotspot/error.html` | Tela de erro. |
 | `hotspot/rlogin.html`, `hotspot/redirect.html` | Páginas internas de redirecionamento do hotspot. |
 | `mikrotik/hotspot-existente.rsc` | **Use este se você já tem hotspot.** 3 comandos para apontar o portal. |
+| `mikrotik/00-DO-ZERO.txt` | **Comece aqui se o roteador está zerado**: reset, bridge, DHCP, NAT, firewall, Wi-Fi, hotspot e o txt. |
 | `mikrotik/hotspot-novo.rsc` | Use este se vai montar o hotspot do zero (IP, pool, DHCP, perfil). |
 | `mikrotik/aps-autorizados.rsc` | Autorizar os APs/roteadores por MAC — só os cadastrados entregam o Wi-Fi. |
 | `mikrotik/salvar-em-txt.rsc` | Guardar os acessos num `.txt` dentro do próprio roteador. |

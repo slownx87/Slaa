@@ -1,0 +1,241 @@
+# ===============================================================================
+ VN SYSTEM - MIKROTIK DO ZERO ATE O PORTAL DE LOGIN FUNCIONANDO
+===============================================================================
+
+ LEIA ESTAS 4 LINHAS ANTES DE COLAR QUALQUER COISA
+ -------------------------------------------------
+ 1. Isto APAGA a configuracao atual do roteador. Nao rode num equipamento em
+    producao sem backup.
+ 2. Voce VAI PERDER a conexao no meio (o IP do roteador muda). Por isso conecte
+    pelo WinBox usando o MAC, nao o IP -- aba "Neighbors", clique no MAC.
+ 3. Faca isso com o roteador do seu lado, com cabo. Se travar, so se resolve
+    presencialmente.
+ 4. Assume ether1 = internet (cabo do provedor) e o resto = rede interna.
+    Se no seu for diferente, veja a PARTE 2.
+
+
+===============================================================================
+ PARTE 0 - BACKUP E RESET
+===============================================================================
+
+ Backup do que existe hoje (baixe os dois arquivos em Files depois):
+
+/system backup save name=antes-do-zero
+/export file=config-antes-do-zero
+
+ Agora o reset. O roteador reinicia e volta SEM NADA -- sem IP, sem DHCP.
+ Depois dele, reconecte pelo WinBox clicando no MAC em "Neighbors".
+
+/system reset-configuration no-defaults=yes skip-backup=yes
+
+ (ele pergunta "Dangerous! Reset anyway? [y/N]" -- responda y)
+
+
+===============================================================================
+ PARTE 1 - IDENTIDADE E SENHA
+===============================================================================
+
+/system identity set name=VN-HOTSPOT
+
+ Defina a senha do admin. Troque SUA-SENHA-AQUI antes de colar:
+
+# /user set [find name=admin] password="SUA-SENHA-AQUI"
+
+
+===============================================================================
+ PARTE 2 - BRIDGE (junta as portas da rede interna)
+===============================================================================
+
+ Cria a bridge e joga nela todas as portas ethernet MENOS a ether1, mais o
+ Wi-Fi. Nao precisa saber quantas portas o seu modelo tem -- ele descobre.
+
+/interface bridge add name=bridge-vn comment="rede interna do hotspot"
+
+:foreach i in=[/interface ethernet find where name!="ether1"] do={:do {/interface bridge port add bridge=bridge-vn interface=[/interface ethernet get $i name]} on-error={}}
+
+ Wi-Fi -- roda os dois, um vai dar erro e tudo bem (depende da sua versao):
+
+:do {:foreach i in=[/interface wireless find] do={/interface bridge port add bridge=bridge-vn interface=[/interface wireless get $i name]}} on-error={:put "sem pacote wireless legado"}
+
+:do {:foreach i in=[/interface wifi find] do={/interface bridge port add bridge=bridge-vn interface=[/interface wifi get $i name]}} on-error={:put "sem pacote wifi/wifiwave2"}
+
+ Conferir quais portas entraram:
+
+/interface bridge port print
+
+ SE A SUA INTERNET NAO FOR A ether1: remova a porta certa da bridge com
+ /interface bridge port remove [find interface=SUAPORTA] e use o nome dela no
+ lugar de ether1 nas PARTES 3 e 4.
+
+
+===============================================================================
+ PARTE 3 - ENDERECOS E DHCP
+===============================================================================
+
+ Plano de IP:
+    10.10.0.1              o roteador
+    10.10.0.2  a  .49      equipamentos (camera, DVR, AP) -- sem login
+    10.10.0.50 a  .254     moradores e visitantes -- com login
+
+ AQUI VOCE PERDE A CONEXAO. Reconecte pelo MAC no WinBox.
+
+/ip address add address=10.10.0.1/24 interface=bridge-vn comment="gateway do hotspot"
+
+/ip pool add name=pool-vn ranges=10.10.0.50-10.10.0.254
+
+/ip dhcp-server add name=dhcp-vn interface=bridge-vn address-pool=pool-vn lease-time=2h disabled=no
+
+/ip dhcp-server network add address=10.10.0.0/24 gateway=10.10.0.1 dns-server=10.10.0.1 comment="rede do hotspot"
+
+
+===============================================================================
+ PARTE 4 - INTERNET (WAN), NAT E DNS
+===============================================================================
+
+ Pega IP do provedor automaticamente. Se o seu provedor for PPPoE ou IP fixo,
+ pule este e configure do jeito dele.
+
+/ip dhcp-client add interface=ether1 disabled=no comment="internet"
+
+/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="saida para a internet"
+
+/ip dns set servers=1.1.1.1,8.8.8.8 allow-remote-requests=yes
+
+ Conferir se pegou IP e se tem internet:
+
+/ip dhcp-client print
+/ping 1.1.1.1 count=4
+
+
+===============================================================================
+ PARTE 5 - FIREWALL BASICO (protege o roteador)
+===============================================================================
+
+/ip firewall filter add chain=input action=accept connection-state=established,related comment="ja conhecido"
+
+/ip firewall filter add chain=input action=accept protocol=icmp comment="ping"
+
+/ip firewall filter add chain=input action=accept in-interface=bridge-vn comment="rede interna"
+
+/ip firewall filter add chain=input action=drop in-interface=ether1 comment="bloqueia acesso vindo da internet"
+
+/ip firewall filter add chain=forward action=drop connection-state=invalid comment="pacote invalido"
+
+ IMPORTANTE: a regra de drop na ether1 fecha o acesso ao roteador pela
+ internet. Depois dela, so administra de dentro da rede.
+
+
+===============================================================================
+ PARTE 6 - WI-FI
+===============================================================================
+
+ A rede fica ABERTA de proposito: quem autentica e o portal, nao a senha do
+ Wi-Fi. Se puser senha aqui, o morador teria que digitar duas vezes.
+
+ Rode o bloco da SUA versao. Se der erro, e porque e a outra.
+
+ --- RouterOS 6 / pacote wireless legado ---
+:do {/interface wireless security-profiles set [find default=yes] mode=none; /interface wireless set [find] ssid="VN-System" mode=ap-bridge band=2ghz-b/g/n disabled=no} on-error={:put "nao e wireless legado"}
+
+ --- RouterOS 7 / pacote wifi (wifiwave2) ---
+:do {/interface wifi set [find] configuration.ssid="VN-System" configuration.mode=ap security.authentication-types="" disabled=no} on-error={:put "nao e wifi/wifiwave2"}
+
+ Conferir:
+
+/interface wireless print
+/interface wifi print
+
+
+===============================================================================
+ PARTE 7 - SUBIR OS ARQUIVOS DO PORTAL
+===============================================================================
+
+ PARE AQUI e faca isto antes de seguir:
+
+ WinBox > Files > arraste os 9 arquivos e deixe numa pasta chamada hotspot-vn
+
+ Confira:
+
+/file print where name~"hotspot-vn"
+
+ Tem que listar login.html, vn.css, md5.js, alogin.html, status.html,
+ logout.html, error.html, rlogin.html e redirect.html.
+
+
+===============================================================================
+ PARTE 8 - O HOTSPOT E O PORTAL  (substitui o /ip hotspot setup)
+===============================================================================
+
+/ip hotspot profile add name=perfil-vn hotspot-address=10.10.0.1 html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d
+
+/ip hotspot add name=hotspot-vn interface=bridge-vn address-pool=pool-vn profile=perfil-vn addresses-per-mac=2 idle-timeout=30m keepalive-timeout=5m disabled=no
+
+/ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M idle-timeout=30m
+
+/ip hotspot user add name=visitante password=visitante profile=moradores comment="conta usada pelo portal VN"
+
+
+===============================================================================
+ PARTE 9 - EQUIPAMENTOS SEM LOGIN
+===============================================================================
+
+ A faixa .2 ate .49 passa direto, sem ver o portal. Use ela para camera, DVR,
+ interfone, AP e impressora -- da IP fixo neles dentro dessa faixa.
+
+/ip hotspot ip-binding add address=10.10.0.2-10.10.0.49 type=bypassed comment="equipamentos - sem login"
+
+ O pool ja comeca no .50, entao nenhum celular cai na faixa liberada.
+
+
+===============================================================================
+ PARTE 10 - GRAVAR OS ACESSOS EM TXT
+===============================================================================
+
+ Cole a linha inteira:
+
+/system script add name=wifi-registrar policy=read,write,test source={:local arq "acessos-wifi.txt"; :local aparelho "-"; :do {:local lease [/ip dhcp-server lease find where mac-address=$"mac-address"]; :if ([:len $lease] > 0) do={:local hn [/ip dhcp-server lease get [:pick $lease 0] host-name]; :if ([:len $hn] > 0) do={:set aparelho $hn}}} on-error={:set aparelho "-"}; :set aparelho [:tostr $aparelho]; :local limpo ""; :for i from=0 to=([:len $aparelho] - 1) do={:local c [:pick $aparelho $i]; :if ($c != ";" and $c != "\n" and $c != "\r") do={:set limpo ($limpo . $c)}}; :local linha ([/system clock get date] . ";" . [/system clock get time] . ";" . $user . ";" . $address . ";" . $"mac-address" . ";" . $limpo); :if ([:len [/file find name=$arq]] = 0) do={/file add name=$arq contents=("data;hora;usuario;ip;mac;aparelho\r\n"); :delay 1s}; :if ([/file get [find name=$arq] size] > 500000) do={:log warning "wifi-registrar: arquivo cheio"} else={/file set [find name=$arq] contents=([/file get [find name=$arq] contents] . $linha . "\r\n")}}
+
+/ip hotspot user profile set [find name=moradores] on-login="/system script run wifi-registrar"
+
+/system logging action add name=txt-wifi target=disk disk-file-name=cadastros-wifi disk-lines-per-file=20000 disk-file-count=10 disk-stop-on-full=no
+
+/system logging add topics=hotspot,info action=txt-wifi
+
+
+===============================================================================
+ PARTE 11 - RELOGIO  (senao a data no txt vem errada)
+===============================================================================
+
+/system ntp client set enabled=yes servers=200.160.7.186,a.st1.ntp.br
+
+/system clock set time-zone-name=America/Sao_Paulo
+
+/system clock print
+
+
+===============================================================================
+ PARTE 12 - TESTAR
+===============================================================================
+
+/ip hotspot print
+/ip hotspot user print
+/ip address print
+/ping 1.1.1.1 count=4
+
+ Conecte um celular na rede VN-System. Deve abrir a tela pedindo nome, bloco,
+ apartamento e e-mail. Depois de conectar, leia o arquivo:
+
+:put [/file get [find name="acessos-wifi.txt"] contents]
+
+ Se a tela nao abrir: esqueca a rede no celular e conecte de novo.
+
+
+===============================================================================
+ GUARDE ISTO
+===============================================================================
+ Terminando e dando certo, salve o estado bom:
+
+/system backup save name=funcionando
+/export file=config-funcionando
+
+ Baixe os dois em Files. Se um dia bagunçar, e so restaurar.
