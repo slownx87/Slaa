@@ -1,0 +1,160 @@
+===============================================================================
+ VN SYSTEM - COMANDOS COMPLETOS
+ Cole do jeito que esta. Nao ha nada para substituir.
+===============================================================================
+
+
+-------------------------------------------------------------------------------
+ ANTES: suba os 9 arquivos
+-------------------------------------------------------------------------------
+ WinBox > Files > arraste a pasta e renomeie para:   hotspot-vn
+
+ Confira que subiu tudo:
+
+/file print where name~"hotspot-vn"
+
+
+-------------------------------------------------------------------------------
+ PASSO 1 - Voce ja tem hotspot?
+-------------------------------------------------------------------------------
+
+/ip hotspot print
+
+ APARECEU alguma linha  -> va para o PASSO 2.
+ VEIO VAZIO             -> va para o PASSO 1B primeiro.
+
+
+-------------------------------------------------------------------------------
+ PASSO 1B - So se o print veio vazio (nao tem hotspot ainda)
+-------------------------------------------------------------------------------
+
+/ip hotspot setup
+
+ Ele vai perguntar, uma coisa de cada vez. Respostas tipicas:
+
+   hotspot interface      -> a bridge ou a interface do Wi-Fi (ex: bridge)
+   local address          -> deixe o que ele sugerir, e ENTER
+   masquerade network     -> yes
+   address pool           -> ENTER (aceita o sugerido)
+   select certificate     -> none
+   ip address of smtp     -> ENTER (deixa 0.0.0.0)
+   dns servers            -> 1.1.1.1,8.8.8.8
+   dns name               -> deixe em branco e ENTER
+   name of local user     -> admin      (nao importa, vamos criar o nosso)
+   password               -> ENTER
+
+ Depois volte e rode o PASSO 2.
+
+
+-------------------------------------------------------------------------------
+ PASSO 2 - Os comandos (cole os 4, um de cada vez)
+-------------------------------------------------------------------------------
+
+/ip hotspot profile add name=perfil-vn html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d
+
+/ip hotspot set [find] profile=perfil-vn
+
+/ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M idle-timeout=30m
+
+/ip hotspot user add name=visitante password=visitante profile=moradores comment="portal VN"
+
+
+ O  [find]  do segundo comando pega o seu hotspot seja qual for o nome dele.
+ Por isso nao importa se voce nao tem hsprof1.
+
+ SE DER "already have such name" em algum, o item ja existe. Use o set:
+
+/ip hotspot profile set [find name=perfil-vn] html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d
+/ip hotspot user profile set [find name=moradores] shared-users=500 rate-limit=10M/50M idle-timeout=30m
+/ip hotspot user set [find name=visitante] password=visitante profile=moradores
+
+
+-------------------------------------------------------------------------------
+ PASSO 3 - Conferir se pegou
+-------------------------------------------------------------------------------
+
+/ip hotspot print detail
+/ip hotspot profile print detail where name=perfil-vn
+
+ Tem que aparecer  html-directory=hotspot-vn  e o hotspot usando perfil-vn.
+
+
+-------------------------------------------------------------------------------
+ PASSO 4 - Guardar os acessos em .txt (cole tudo)
+-------------------------------------------------------------------------------
+
+/system script add name=wifi-registrar policy=read,write,test source={
+    :local arq "acessos-wifi.txt"
+    :local data [/system clock get date]
+    :local hora [/system clock get time]
+    :local aparelho "-"
+    :do {
+        :local lease [/ip dhcp-server lease find where mac-address=$"mac-address"]
+        :if ([:len $lease] > 0) do={
+            :local hn [/ip dhcp-server lease get [:pick $lease 0] host-name]
+            :if ([:len $hn] > 0) do={ :set aparelho $hn }
+        }
+    } on-error={ :set aparelho "-" }
+    :set aparelho [:tostr $aparelho]
+    :local limpo ""
+    :for i from=0 to=([:len $aparelho] - 1) do={
+        :local c [:pick $aparelho $i]
+        :if ($c != ";" and $c != "\n" and $c != "\r") do={ :set limpo ($limpo . $c) }
+    }
+    :set aparelho $limpo
+    :local linha ($data . ";" . $hora . ";" . $user . ";" . $address . ";" . $"mac-address" . ";" . $aparelho)
+    :if ([:len [/file find name=$arq]] = 0) do={
+        /file add name=$arq contents=("data;hora;usuario;ip;mac;aparelho\r\n")
+        :delay 1s
+    }
+    :local atual [/file get [find name=$arq] size]
+    :if ($atual > 500000) do={
+        :log warning "wifi-registrar: acessos-wifi.txt cheio, renomeie o arquivo"
+    } else={
+        :local conteudo [/file get [find name=$arq] contents]
+        /file set [find name=$arq] contents=($conteudo . $linha . "\r\n")
+    }
+}
+
+/ip hotspot user profile set [find name=moradores] on-login="/system script run wifi-registrar"
+
+/system logging action add name=txt-wifi target=disk disk-file-name=cadastros-wifi disk-lines-per-file=20000 disk-file-count=10 disk-stop-on-full=no
+
+/system logging add topics=hotspot,info action=txt-wifi
+
+
+-------------------------------------------------------------------------------
+ PASSO 5 - Testar
+-------------------------------------------------------------------------------
+
+/ip hotspot active remove [find]
+
+ Agora conecte um celular. Deve abrir a tela pedindo nome, bloco, apartamento
+ e e-mail. Depois de conectar, veja o arquivo:
+
+/file print where name~"acessos-wifi"
+
+ Para ler sem baixar:
+
+:put [/file get [find name="acessos-wifi.txt"] contents]
+
+
+===============================================================================
+ SE DER PROBLEMA
+===============================================================================
+
+ "invalid username or password"
+     A conta visitante nao foi criada, ou a senha nao bate com o login.html.
+     Confira:   /ip hotspot user print
+
+ Pagina abre sem cor nenhuma
+     Faltou o vn.css ou o md5.js. Tem que ser os 9 arquivos na hotspot-vn.
+
+ Aparece $(link-login-only) escrito na tela
+     O html-directory nao esta apontando certo. Refaca o PASSO 2.
+
+ A tela nem abre no celular
+     Esqueca a rede no celular e conecte de novo. O portal cativo guarda cache.
+
+ So um celular conecta por vez
+     /ip hotspot user profile set [find name=moradores] shared-users=500
