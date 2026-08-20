@@ -3,21 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#050814">
-<title>VN System &mdash; Erro</title>
+<meta name="theme-color" content="#123F73">
+<title>Orbit &mdash; Erro</title>
 <link rel="stylesheet" href="vn.css">
 </head>
-<body class="login-page">
-<div class="login-box" style="text-align:center">
-  <div class="vn-brand">
-    <img class="brand-logo" src="logo.png" alt="VN System"
-         onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
-    <div class="vn-wordmark"><b>VN</b><span>SYSTEM</span></div>
+<body>
+<div class="login-page"><div class="login-box centro">
+  <div class="marca">
+    <img src="logo.png" alt="Orbit Sao Caetano"
+         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+    <div class="anel" style="display:none">
+      <div class="anel-nome">orb<span class="i">&#305;</span>t</div>
+      <div class="anel-linha"></div>
+      <div class="anel-sub">S&Atilde;O CAETANO</div>
+    </div>
   </div>
-  <div class="vn-ico bad"><svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2v-2zm0-8h2v6h-2V7zm1-5a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/></svg></div>
+  <div class="ico bad"><svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2v-2zm0-8h2v6h-2V7zm1-5a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/></svg></div>
   <h1>N&atilde;o foi poss&iacute;vel conectar</h1>
-  <div class="alert alert-error" style="text-align:left">$(error)</div>
-  <a class="btn btn-primary btn-block" href="$(link-login)">Tentar novamente</a>
-</div>
+  <p class="sub">Tente novamente. Se persistir, procure a administra&ccedil;&atilde;o.</p>
+  <a class="btn btn-primary" href="$(link-login)" style="margin-top:6px;text-decoration:none">Tentar novamente</a>
+</div></div>
 </body>
 </html>

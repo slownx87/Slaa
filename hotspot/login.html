@@ -4,21 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="format-detection" content="telephone=no">
-<meta name="theme-color" content="#050814">
-<title>VN System &mdash; Acesso Wi-Fi</title>
+<meta name="theme-color" content="#123F73">
+<title>Orbit S&atilde;o Caetano &mdash; Wi-Fi</title>
 <link rel="stylesheet" href="vn.css">
 </head>
-<body class="login-page">
-
+<body>
+<div class="login-page">
 <div class="login-box">
 
-  <div class="vn-brand">
-    <img id="logo" class="brand-logo" src="logo.png" alt="VN System"
-         onerror="this.style.display='none';document.getElementById('wordmark').style.display='block';">
-    <div class="vn-wordmark" id="wordmark">
-      <b>VN</b>
-      <span>SYSTEM</span>
-      <small>MANUTEN&Ccedil;&Otilde;ES ESPECIALIZADAS</small>
+  <div class="marca">
+    <img id="logo" src="logo.png" alt="Orbit S&atilde;o Caetano"
+         onerror="this.style.display='none';document.getElementById('anel').style.display='flex';">
+    <div class="anel" id="anel" style="display:none">
+      <div class="anel-nome">orb<span class="i">&#305;</span>t</div>
+      <div class="anel-linha"></div>
+      <div class="anel-sub">S&Atilde;O CAETANO</div>
     </div>
   </div>
 
@@ -58,14 +58,14 @@
     </div>
 
     <div class="field full" id="f_fone">
-      <label for="fone">Celular <span style="font-weight:400;color:var(--muted)">(opcional)</span></label>
+      <label for="fone">Celular <span class="op">(opcional)</span></label>
       <input type="tel" id="fone" name="fone" placeholder="(00) 00000-0000"
              inputmode="numeric" maxlength="15" autocomplete="tel">
       <p class="hint">Telefone incompleto.</p>
     </div>
 
     <div class="field full">
-      <label class="check-lgpd" id="f_aceite" for="aceite">
+      <label class="aceite" id="f_aceite" for="aceite">
         <input type="checkbox" id="aceite">
         <span>Confirmo que os dados s&atilde;o verdadeiros e autorizo o registro do meu acesso
         (data, hora, IP e MAC do aparelho), conforme o Marco Civil da Internet e a LGPD.</span>
@@ -74,18 +74,19 @@
     </div>
 
     <div class="field full">
-      <button type="submit" class="btn btn-primary btn-block" id="btn">
+      <button type="submit" class="btn btn-primary" id="btn">
         <span class="spin"></span><span id="btxt">Conectar</span>
       </button>
     </div>
 
   </form>
 
-  <p class="login-foot" id="rodape">
-    <b>Rede gerenciada por VN System</b><br>
+  <p class="rodape" id="rodape">
+    <b>ORBIT S&Atilde;O CAETANO</b><br>
     Uso restrito a moradores e visitantes autorizados
   </p>
 
+</div>
 </div>
 
 <!-- Formulario real do Hotspot do MikroTik -->
@@ -103,54 +104,33 @@
    ========================================================================= */
 var CONFIG = {
 
-  /* Aceita HTML e entidades (&atilde; = a com til, &ccedil; = c cedilha) */
+  /* Aceita HTML e entidades (&atilde; = a com til) */
   titulo:   "Acesso &agrave; rede Wi-Fi",
   subtitulo:"Identifique-se para liberar a conex&atilde;o.",
-  rodape:   "<b>Rede gerenciada por VN System</b><br>Uso restrito a moradores e visitantes autorizados",
+  rodape:   "<b>ORBIT S&Atilde;O CAETANO</b><br>Uso restrito a moradores e visitantes autorizados",
 
   /* Blocos que aparecem no seletor */
   blocos: ["A", "B", "C", "D", "E", "F"],
 
-  /* De qual AP/bloco veio o acesso.
-     A chave e o nome do servidor hotspot (o que aparece em /ip hotspot print);
-     o valor e o local fisico. So faz sentido se voce tiver um hotspot por AP
-     ou por VLAN -- veja mikrotik/aps-autorizados.rsc, CENARIO 3.
-     Deixe {} se voce tem um hotspot so.                                      */
-  locais: {
-    /* "hs-blocoA": "Bloco A - terreo", */
-    /* "hs-blocoB": "Bloco B - terreo", */
-  },
-
-  /* Avisar quando o bloco declarado nao bate com o AP em que a pessoa esta?
-     Nao bloqueia o acesso -- so registra a divergencia no cadastro.     */
-  conferirBloco: true,
-
-  /* Campos extras -- coloque false para esconder */
+  /* Campos extras -- false esconde */
   pedirEmail: true,
   pedirCelular: true,
 
-  /* MODO DE LOGIN
-     "compartilhado" -> todos entram com a mesma conta do hotspot
-                        (crie em /ip hotspot user). Funciona sem servidor.
-     "email"         -> envia o e-mail como usuario. Exige RADIUS /
-                        User Manager, ou usuarios pre-cadastrados por e-mail.  */
+  /* Conta do hotspot que a pagina usa por baixo dos panos.
+     Tem que bater com /ip hotspot user                                      */
   modo: "compartilhado",
-
   usuario: "visitante",
   senha:   "visitante",
   senhaEmail: "",
 
-  /* Para onde mandar o cadastro. "" = nao envia nada para fora.
-     Na Hostinger fica assim:
-       webhook: "https://seudominio.com.br/wifi/receber.php"
-     O dominio precisa estar liberado no walled garden ANTES do login:
-       /ip hotspot walled-garden ip add dst-host=seudominio.com.br action=accept */
+  /* Webhook opcional. "" = nao envia nada para fora. */
   webhook: "",
-
-  /* Mesmo valor da constante TOKEN do config.php. "" = sem token. */
   token: "",
+  webhookTimeout: 3500,
 
-  webhookTimeout: 3500
+  /* De qual AP veio o acesso (so com um hotspot por AP). {} = um hotspot so */
+  locais: {},
+  conferirBloco: true
 };
 /* ===================== fim da configuracao =============================== */
 
@@ -165,8 +145,7 @@ var HOTSPOT = {
   destino:       '$(link-orig)'
 };
 
-/* Fora do hotspot (abrindo o arquivo direto no navegador) as variaveis nao sao
-   substituidas e chegam como texto literal -- limpamos para poder testar. */
+/* Fora do hotspot as variaveis chegam como texto literal -- limpamos. */
 (function limpaVars(){
   var k;
   for (k in HOTSPOT){
@@ -176,7 +155,6 @@ var HOTSPOT = {
 
 function el(id){ return document.getElementById(id); }
 
-/* Local fisico do AP em que a pessoa esta, a partir do servidor hotspot. */
 function localDoAp(){
   var srv = HOTSPOT.servidor || "";
   if (CONFIG.locais && CONFIG.locais[srv]) return CONFIG.locais[srv];
@@ -200,7 +178,6 @@ function emailValido(e){
   e = (e || "").trim();
   if (e.length < 6 || e.length > 100) return false;
   if (e.indexOf(" ") !== -1) return false;
-  /* um @, algo antes, dominio com ponto e pelo menos 2 letras no fim */
   return /^[^@\s]+@[^@\s.]+(\.[^@\s.]+)*\.[A-Za-z]{2,}$/.test(e);
 }
 
@@ -229,7 +206,6 @@ function avisa(msg){
 
 var CAMPOS = ["nome", "bloco", "ap", "email", "fone", "aceite"];
 
-/* Valida um campo isolado e atualiza o destaque em tela. */
 function checa(id){
   var v, ok;
   if (id === "nome")  return marca("f_nome",  nomeValido(el("nome").value));
@@ -253,7 +229,6 @@ function checa(id){
   return true;
 }
 
-/* Depois da primeira tentativa, revalida enquanto a pessoa corrige. */
 var tentou = false;
 
 function revalida(){
@@ -270,7 +245,6 @@ function revalida(){
   if (CONFIG.titulo)    el("ttl").innerHTML = CONFIG.titulo;
   if (CONFIG.subtitulo) el("sub").innerHTML = CONFIG.subtitulo;
   if (CONFIG.rodape)    el("rodape").innerHTML = CONFIG.rodape;
-  if (HOTSPOT.servidor) el("sub").innerHTML = CONFIG.subtitulo + "<br>Rede " + HOTSPOT.servidor;
 
   var sel = el("bloco"), i, o, c;
   o = document.createElement("option");
@@ -284,11 +258,11 @@ function revalida(){
   }
 
   if (!CONFIG.pedirEmail)   el("f_email").style.display = "none";
-  if (!CONFIG.pedirCelular) el("f_fone").style.display = "none";
+  if (!CONFIG.pedirCelular) el("f_fone").style.display  = "none";
 
   el("email").onchange = function(){ this.value = this.value.trim().toLowerCase(); };
-  el("fone").onkeyup = function(){ this.value = mascaraFone(this.value); };
-  el("ap").onkeyup   = function(){ this.value = this.value.replace(/[^0-9A-Za-z]/g, "").toUpperCase(); };
+  el("fone").onkeyup   = function(){ this.value = mascaraFone(this.value); };
+  el("ap").onkeyup     = function(){ this.value = this.value.replace(/[^0-9A-Za-z]/g, "").toUpperCase(); };
 
   for (i = 0; i < CAMPOS.length; i++){
     c = el(CAMPOS[i]);
@@ -298,12 +272,22 @@ function revalida(){
     }
   }
 
-  /* erro devolvido pelo proprio hotspot */
-  if (HOTSPOT.erro && HOTSPOT.erro.length > 0) avisa(HOTSPOT.erro);
-
-  /* pre-preenche com o ultimo cadastro feito neste aparelho */
+  /* Erro do hotspot: so mostra se a pessoa ACABOU de enviar o formulario.
+     Chegando na tela pela primeira vez, ou vindo de um login automatico por
+     MAC que falhou, nao ha nada que ela possa fazer -- entao nao assusta.   */
+  var veioDeEnvio = false;
   try {
-    var s = window.localStorage.getItem("vn_wifi_cadastro");
+    veioDeEnvio = window.sessionStorage.getItem("orbit_enviou") === "1";
+    window.sessionStorage.removeItem("orbit_enviou");
+  } catch (e) {}
+
+  if (HOTSPOT.erro && HOTSPOT.erro.length > 0 && veioDeEnvio){
+    avisa("N&atilde;o foi poss&iacute;vel conectar. Confira os dados e tente novamente.");
+  }
+
+  /* pre-preenche com o ultimo cadastro deste aparelho */
+  try {
+    var s = window.localStorage.getItem("orbit_cadastro");
     if (s){
       var d = JSON.parse(s);
       if (d.nome)  el("nome").value  = d.nome;
@@ -348,7 +332,6 @@ function enviar(){
     token: CONFIG.token || ""
   };
 
-  /* Marca quando o bloco informado nao bate com o AP em que a pessoa esta. */
   dados.confere = "";
   if (CONFIG.conferirBloco && dados.local && dados.bloco){
     var alvo = dados.local.toUpperCase();
@@ -361,20 +344,21 @@ function enviar(){
   try {
     var guardar = JSON.parse(JSON.stringify(dados));
     delete guardar.token;
-    window.localStorage.setItem("vn_wifi_cadastro", JSON.stringify(guardar));
+    window.localStorage.setItem("orbit_cadastro", JSON.stringify(guardar));
   } catch (e) {}
+
+  /* marca que o proximo carregamento veio de um envio de verdade */
+  try { window.sessionStorage.setItem("orbit_enviou", "1"); } catch (e) {}
 
   enviando = true;
   el("btn").disabled = true;
-  el("btn").className = "btn btn-primary btn-block is-loading";
+  el("btn").className = "btn btn-primary is-loading";
   el("btxt").innerHTML = "Conectando...";
 
   registrar(dados, conectar);
   return false;
 }
 
-/* Envia o cadastro ao webhook (se configurado) e segue de qualquer jeito --
-   falha de registro nunca deve impedir o acesso do morador. */
 function registrar(dados, pronto){
   if (!CONFIG.webhook){ pronto(); return; }
 
@@ -400,7 +384,6 @@ function registrar(dados, pronto){
   } catch (e) { uma(); }
 }
 
-/* Login no hotspot: HTTP-CHAP quando disponivel, senao PAP. */
 function conectar(){
   var f = document.forms.sendin;
   var usuario, senha;

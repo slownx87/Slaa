@@ -2,15 +2,13 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Redirecionando</title>
+<title>Orbit S&atilde;o Caetano</title>
+<meta http-equiv="refresh" content="0; url=$(link-login-only)?dst=$(link-orig-esc)">
 </head>
 <body>
-<form name="redirect" action="$(link-login-only)" method="post">
-  <input type="hidden" name="dst" value="$(link-orig)">
-  <input type="hidden" name="username" value="$(mac)">
-  <input type="hidden" name="popup" value="false">
-</form>
-<script type="text/javascript">document.redirect.submit();</script>
-<noscript><p>Ative o JavaScript ou <a href="$(link-login)">clique aqui</a>.</p></noscript>
+<script type="text/javascript">
+window.location.href = "$(link-login-only)?dst=$(link-orig-esc)";
+</script>
+<noscript><p><a href="$(link-login)">Toque aqui para continuar</a></p></noscript>
 </body>
 </html>

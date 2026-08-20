@@ -1,8 +1,8 @@
-# Portal Wi-Fi VN System — MikroTik Hotspot
+# Portal Wi-Fi Orbit São Caetano — MikroTik Hotspot
 
 Página de login para o Hotspot do MikroTik em que a pessoa precisa informar
 **nome completo, bloco e apartamento** (e e-mail, se você quiser) antes de a
-internet ser liberada. Visual no tema escuro da VN System.
+internet ser liberada. Visual claro, na identidade da Orbit São Caetano.
 
 Feita para rodar dentro do roteador: **não usa nenhum arquivo externo** (sem CDN,
 sem fonte do Google, sem framework). Antes do login o aparelho não tem internet,
@@ -16,8 +16,8 @@ então qualquer recurso externo simplesmente não carregaria.
 |---|---|
 | `hotspot/login.html` | A página de cadastro/login. **É aqui que você configura tudo.** |
 | `hotspot/md5.js` | MD5 usado pelo login em modo HTTP-CHAP (a senha não trafega em texto puro). |
-| `hotspot/vn.css` | Design system VN System + os estilos do portal. |
-| `hotspot/logo.png` | **Você precisa subir este arquivo.** É a sua logo. Sem ela a página mostra um wordmark "VN SYSTEM" desenhado em CSS. |
+| `hotspot/vn.css` | Estilos do portal, na identidade Orbit. |
+| `hotspot/logo.png` | **Você precisa subir este arquivo.** É a sua logo. Sem ela a página desenha a marca Orbit em CSS — círculo, wordmark e "SÃO CAETANO". |
 | `hotspot/alogin.html` | Tela de "conectado com sucesso". |
 | `hotspot/status.html` | Status da conexão (consumo, tempo, botão desconectar). |
 | `hotspot/logout.html` | Tela de "desconectado". |
