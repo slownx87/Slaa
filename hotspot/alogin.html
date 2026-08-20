@@ -3,22 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Conectado</title>
-<link rel="stylesheet" href="/estilo.css">
-$(if refresh-timeout)<meta http-equiv="refresh" content="$(refresh-timeout)">$(endif)
+<meta name="theme-color" content="#050814">
+<title>VN System &mdash; Conectado</title>
+<link rel="stylesheet" href="/vn.css">
 </head>
-<body>
-<div class="card">
-  <div class="ico"><svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg></div>
+<body class="login-page">
+<div class="login-box" style="text-align:center">
+  <div class="vn-brand">
+    <img class="brand-logo" src="/logo.png" alt="VN System"
+         onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+    <div class="vn-wordmark"><b>VN</b><span>SYSTEM</span></div>
+  </div>
+  <div class="vn-ico ok"><svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg></div>
   <h1>Conex&atilde;o liberada</h1>
-  <p>Voc&ecirc; j&aacute; est&aacute; navegando. Bom uso!</p>
-  <table>
-    <tr><td>Usu&aacute;rio</td><td class="v">$(username)</td></tr>
-    <tr><td>Endere&ccedil;o IP</td><td class="v">$(ip)</td></tr>
-    <tr><td>Aparelho</td><td class="v">$(mac)</td></tr>
-  </table>
-  <a class="btn" href="$(link-redirect)">Continuar navegando</a>
-  <a class="btn sec" href="$(link-status)">Ver status da conex&atilde;o</a>
+  <p class="sub">Voc&ecirc; j&aacute; est&aacute; navegando. Bom uso!</p>
+  <div class="detail-grid">
+    <div class="detail-item"><small>Usu&aacute;rio</small><b>$(username)</b></div>
+    <div class="detail-item"><small>Endere&ccedil;o IP</small><b>$(ip)</b></div>
+  </div>
+  <a class="btn btn-primary btn-block" href="$(link-redirect)">Continuar navegando</a>
+  <a class="btn btn-ghost btn-block" href="$(link-status)">Ver status da conex&atilde;o</a>
 </div>
 <script type="text/javascript">
 window.setTimeout(function(){ window.location.href = "$(link-redirect)"; }, 3000);

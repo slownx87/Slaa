@@ -3,15 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Erro</title>
-<link rel="stylesheet" href="/estilo.css">
+<meta name="theme-color" content="#050814">
+<title>VN System &mdash; Erro</title>
+<link rel="stylesheet" href="/vn.css">
 </head>
-<body>
-<div class="card">
-  <div class="ico err"><svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2v-2zm0-8h2v6h-2V7zm1-5a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/></svg></div>
+<body class="login-page">
+<div class="login-box" style="text-align:center">
+  <div class="vn-brand">
+    <img class="brand-logo" src="/logo.png" alt="VN System"
+         onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+    <div class="vn-wordmark"><b>VN</b><span>SYSTEM</span></div>
+  </div>
+  <div class="vn-ico bad"><svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2v-2zm0-8h2v6h-2V7zm1-5a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/></svg></div>
   <h1>N&atilde;o foi poss&iacute;vel conectar</h1>
-  <p>$(error)</p>
-  <a class="btn" href="$(link-login)">Tentar novamente</a>
+  <div class="alert alert-error" style="text-align:left">$(error)</div>
+  <a class="btn btn-primary btn-block" href="$(link-login)">Tentar novamente</a>
 </div>
 </body>
 </html>

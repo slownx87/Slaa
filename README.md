@@ -1,7 +1,8 @@
-# Portal Wi-Fi com identificação — MikroTik Hotspot
+# Portal Wi-Fi VN System — MikroTik Hotspot
 
 Página de login para o Hotspot do MikroTik em que a pessoa precisa informar
-**nome completo, CPF, bloco e apartamento** antes de a internet ser liberada.
+**nome completo, bloco e apartamento** (e CPF, se você quiser) antes de a
+internet ser liberada. Visual no tema escuro da VN System.
 
 Feita para rodar dentro do roteador: **não usa nenhum arquivo externo** (sem CDN,
 sem fonte do Google, sem framework). Antes do login o aparelho não tem internet,
@@ -15,12 +16,13 @@ então qualquer recurso externo simplesmente não carregaria.
 |---|---|
 | `hotspot/login.html` | A página de cadastro/login. **É aqui que você configura tudo.** |
 | `hotspot/md5.js` | MD5 usado pelo login em modo HTTP-CHAP (a senha não trafega em texto puro). |
+| `hotspot/vn.css` | Design system VN System + os estilos do portal. |
+| `hotspot/logo.png` | **Você precisa subir este arquivo.** É a sua logo. Sem ela a página mostra um wordmark "VN SYSTEM" desenhado em CSS. |
 | `hotspot/alogin.html` | Tela de "conectado com sucesso". |
 | `hotspot/status.html` | Status da conexão (consumo, tempo, botão desconectar). |
 | `hotspot/logout.html` | Tela de "desconectado". |
 | `hotspot/error.html` | Tela de erro. |
 | `hotspot/rlogin.html`, `hotspot/redirect.html` | Páginas internas de redirecionamento do hotspot. |
-| `hotspot/estilo.css` | Estilo comum das telas simples. |
 | `mikrotik/setup-hotspot.rsc` | Comandos do RouterOS para criar o hotspot do zero. |
 | `webhook/google-apps-script.js` | Opcional: grava cada cadastro numa planilha do Google. |
 
@@ -30,8 +32,8 @@ então qualquer recurso externo simplesmente não carregaria.
 
 1. A pessoa conecta no Wi-Fi e o MikroTik intercepta o primeiro acesso.
 2. Aparece a `login.html` pedindo nome, CPF, bloco e apartamento.
-3. O JavaScript valida os dados **no aparelho** (inclusive os dígitos
-   verificadores do CPF — CPF inventado é recusado).
+3. O JavaScript valida os dados **no aparelho** (se o CPF estiver ligado, os
+   dígitos verificadores são conferidos — CPF inventado é recusado).
 4. Os dados são gravados no navegador (`localStorage`) e, se você configurar um
    webhook, enviados para a sua planilha/servidor junto com MAC, IP e data/hora.
 5. Só então a página envia o login de verdade para o hotspot, usando uma conta
@@ -50,11 +52,14 @@ Abra `hotspot/login.html` e edite **apenas** o bloco `var CONFIG = { ... }`:
 
 ```js
 var CONFIG = {
-  titulo: "Acesso a rede Wi-Fi",
-  rodape: "Rede protegida - uso restrito a moradores e visitantes autorizados",
+  titulo:   "Acesso &agrave; rede Wi-Fi",   // aceita HTML e entidades
+  subtitulo:"Identifique-se para liberar a conex&atilde;o.",
+  rodape:   "<b>Rede gerenciada por VN System</b><br>...",
 
   blocos: ["A", "B", "C", "D", "E", "F"],   // os blocos do seu condomínio
-  pedirCelular: true,                        // false esconde o campo
+
+  pedirCpf: true,                            // false esconde o campo de CPF
+  pedirCelular: true,                        // false esconde o campo de celular
 
   modo: "compartilhado",                     // "compartilhado" ou "cpf"
   usuario: "visitante",                      // precisa existir em /ip hotspot user
@@ -66,6 +71,9 @@ var CONFIG = {
   webhookTimeout: 3500
 };
 ```
+
+Para pedir **só nome, bloco e apartamento**, deixe `pedirCpf: false` e
+`pedirCelular: false` — os campos somem e param de ser validados.
 
 **`modo: "compartilhado"`** (padrão) — todo mundo entra com a mesma conta do
 hotspot. Simples, funciona sem servidor nenhum. É o recomendado.
@@ -83,7 +91,16 @@ final não acontece).
 
 ## 4. Instalar no MikroTik
 
-### 4.1 Suba os arquivos
+### 4.1 Coloque sua logo
+
+Salve a logo da VN System como **`logo.png`** dentro da pasta `hotspot/` antes
+de subir. Fundo transparente, altura de uns 160px, largura livre — a página
+redimensiona para 74px de altura.
+
+Se o arquivo não existir, a página não quebra: ela cai automaticamente para um
+wordmark "VN SYSTEM" desenhado em CSS, com o mesmo degradê azul da marca.
+
+### 4.2 Suba os arquivos
 
 Coloque **todo o conteúdo da pasta `hotspot/`** dentro de uma pasta no roteador.
 Use um nome próprio, por exemplo `hotspot-slaa` — assim uma atualização do
@@ -111,7 +128,7 @@ scp -r hotspot/* admin@192.168.88.1:hotspot-slaa/
 /tool fetch url="https://seu-servidor/login.html" dst-path=hotspot-slaa/login.html
 ```
 
-### 4.2 Configure o hotspot
+### 4.3 Configure o hotspot
 
 Se ainda **não** tem hotspot, o caminho rápido é o assistente:
 ```
@@ -131,7 +148,7 @@ Se quiser montar tudo do zero, use `mikrotik/setup-hotspot.rsc` como referência
 Confira que `usuario`/`senha` do `CONFIG` são **exatamente** os mesmos do
 `/ip hotspot user`, senão o login sempre falha.
 
-### 4.3 Se for usar o webhook
+### 4.4 Se for usar o webhook
 
 O domínio precisa estar liberado **antes** do login:
 ```
@@ -143,7 +160,7 @@ Instruções de como publicar a planilha estão em `webhook/google-apps-script.j
 Se você deixar `webhook: ""`, nada é enviado para fora — os cadastros ficam só
 no aparelho da pessoa e o registro de acesso fica no log do roteador.
 
-### 4.4 Guardar os logs de acesso
+### 4.5 Guardar os logs de acesso
 
 O Marco Civil pede a guarda dos registros de conexão por 1 ano. Para gravar em
 disco no próprio roteador:
@@ -274,7 +291,8 @@ continuam lá. Depois conecte um celular e teste o cadastro de ponta a ponta.
 | Sintoma | Causa provável |
 |---|---|
 | "invalid username or password" | `CONFIG.usuario`/`CONFIG.senha` não batem com `/ip hotspot user`, ou o perfil está no modo `cpf` sem RADIUS. |
-| A página abre sem estilo / sem validação | Faltou subir `md5.js` ou `estilo.css` na mesma pasta. |
+| A página abre sem estilo / sem validação | Faltou subir `vn.css` ou `md5.js` na mesma pasta. |
+| Aparece o wordmark em vez da logo | Falta o `logo.png` na pasta do hotspot. |
 | Aparece `$(link-login-only)` na tela | Os arquivos estão na pasta errada — o `html-directory` do perfil não aponta para eles. |
 | Cadastro não chega na planilha | Domínio do webhook não está no walled garden. |
 | Só um aparelho conecta por vez | `shared-users` do perfil do usuário está baixo. Aumente. |
@@ -293,5 +311,5 @@ Na prática isso significa:
   faz isso, mas vale ter um aviso no quadro do condomínio.
 - CPF não é obrigatório por lei para liberar Wi-Fi. O que o Marco Civil exige é
   a guarda dos **registros de conexão** (IP, data e hora). Se quiser reduzir
-  risco, dá para pedir só nome + bloco + apartamento: basta apagar o campo de
-  CPF do formulário.
+  risco, dá para pedir só nome + bloco + apartamento: basta deixar
+  `pedirCpf: false` no `CONFIG`.
