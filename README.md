@@ -26,6 +26,7 @@ então qualquer recurso externo simplesmente não carregaria.
 | `mikrotik/hotspot-existente.rsc` | **Use este se você já tem hotspot.** 3 comandos para apontar o portal. |
 | `mikrotik/hotspot-novo.rsc` | Use este se vai montar o hotspot do zero (IP, pool, DHCP, perfil). |
 | `mikrotik/aps-autorizados.rsc` | Autorizar os APs/roteadores por MAC — só os cadastrados entregam o Wi-Fi. |
+| `mikrotik/salvar-em-txt.rsc` | Guardar os acessos num `.txt` dentro do próprio roteador. |
 | `mikrotik/equipamentos-sem-login.rsc` | Câmeras, DVR, interfone, APs e afins passando direto, sem ver o portal. |
 | `coletor/servidor.js` | Recebe os cadastros **no seu computador** e grava em CSV/JSONL. Sem nuvem. |
 | `coletor/iniciar-windows.bat` | Duplo clique para ligar o coletor no Windows. |
