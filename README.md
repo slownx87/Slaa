@@ -26,6 +26,7 @@ então qualquer recurso externo simplesmente não carregaria.
 | `mikrotik/hotspot-existente.rsc` | **Use este se você já tem hotspot.** 3 comandos para apontar o portal. |
 | `mikrotik/hotspot-novo.rsc` | Use este se vai montar o hotspot do zero (IP, pool, DHCP, perfil). |
 | `mikrotik/aps-autorizados.rsc` | Autorizar os APs/roteadores por MAC — só os cadastrados entregam o Wi-Fi. |
+| `mikrotik/equipamentos-sem-login.rsc` | Câmeras, DVR, interfone, APs e afins passando direto, sem ver o portal. |
 | `webhook/google-apps-script.js` | Opcional: grava cada cadastro numa planilha do Google. |
 
 ---
@@ -186,7 +187,54 @@ Para volume maior, o certo é mandar para um syslog externo:
 /system logging add topics=hotspot,info action=syslog
 ```
 
-### 4.6 Autorizar os APs por MAC
+### 4.6 Equipamentos que não devem fazer login
+
+Câmera, DVR, interfone, elevador, portão, impressora, TV box e os próprios APs
+não têm como preencher um formulário. Eles precisam de **bypass** do hotspot —
+o arquivo é `mikrotik/equipamentos-sem-login.rsc`.
+
+**O jeito certo é separar as redes.** Equipamento numa VLAN/interface própria,
+sem hotspot nenhum configurado nela. Não existe o que burlar, e ninguém
+consegue se passar por equipamento para fugir do cadastro.
+
+**Se não der para separar**, libera por MAC na mesma rede:
+```
+/ip hotspot ip-binding
+add mac-address=AA:BB:CC:00:00:10 type=bypassed comment="DVR portaria"
+add mac-address=AA:BB:CC:00:00:11 type=bypassed comment="Camera hall"
+```
+
+No WinBox dá para fazer sem digitar MAC: `IP → Hotspot → aba Hosts`, clique no
+equipamento que está preso no login → botão **Make Binding** → Type:
+`bypassed`. Pronto.
+
+**Para muitos equipamentos**, é mais fácil reservar uma faixa de IP e liberar a
+faixa inteira de uma vez:
+
+| Faixa | Uso |
+|---|---|
+| `10.10.0.1` | o próprio MikroTik |
+| `10.10.0.2` – `.49` | equipamentos (bypass, sem login) |
+| `10.10.0.50` – `.254` | moradores e visitantes (com login) |
+
+```
+/ip hotspot ip-binding add address=10.10.0.2-10.10.0.49 type=bypassed comment="equipamentos"
+/ip pool set [find name=pool-hotspot] ranges=10.10.0.50-10.10.0.254
+```
+
+> O segundo comando não é opcional. Se o DHCP continuar entregando IPs dentro
+> da faixa liberada, um morador pode pegar um `10.10.0.30` e navegar sem
+> cadastro nenhum. Encolher o pool é o que fecha essa brecha.
+
+Depois dê IP fixo a cada aparelho (`IP → DHCP Server → Leases → Make Static`)
+para ele sempre cair dentro da faixa liberada.
+
+Dois cuidados: `bypassed` significa internet liberada **sem login, sem limite
+de banda e sem registro de quem usou** — só coloque na lista equipamento que
+você controla. E MAC se clona; se a câmera não precisa de internet (quase nunca
+precisa), bloqueie a saída dela para a WAN e deixe só a rede interna.
+
+### 4.7 Autorizar os APs por MAC
 
 Se você quer que **só os roteadores cadastrados** entreguem o Wi-Fi com o
 portal, o arquivo é `mikrotik/aps-autorizados.rsc`.
