@@ -1,0 +1,70 @@
+===============================================================================
+ VN SYSTEM - CORRECAO PARA ROUTEROS 6
+===============================================================================
+
+ O ERRO
+ ------
+ "expected end of command (line 1 column 2246)"
+
+ A coluna 2246 e o  servers=  do NTP. Esse parametro so existe no RouterOS 7.
+ No 6 os campos se chamam  primary-ntp  e  secondary-ntp.
+
+ Confirme sua versao:
+
+/system resource print
+
+
+ O QUE JA FUNCIONOU
+ ------------------
+ Tudo que vinha ANTES do NTP rodou normalmente. Ou seja, ja estao criados:
+ o perfil, o hotspot, o perfil de usuario, a conta visitante, o bypass dos
+ equipamentos, o script antigo e o log em arquivo.
+ Nao precisa refazer nada disso.
+
+
+ O SEGUNDO PROBLEMA (este nao aparece agora, aparece no primeiro login)
+ ---------------------------------------------------------------------
+ O script que grava o txt usa  /file add , que TAMBEM nao existe no ROS 6.
+ E mesmo contornando, o  /file set contents  do ROS 6 tem teto de uns 4 KB --
+ daria umas 60 linhas e o arquivo travaria.
+
+ Solucao: em vez de escrever o arquivo na mao, o script agora manda a linha
+ para o LOG, e o log ja vai para arquivo com rotacao automatica. Sem limite de
+ tamanho, e funciona igual no 6 e no 7.
+
+
+===============================================================================
+ A CORRECAO  (uma linha, cole inteira)
+===============================================================================
+
+:do {/system ntp client set enabled=yes servers=200.160.7.186,a.st1.ntp.br} on-error={/system ntp client set enabled=yes primary-ntp=200.160.7.186 secondary-ntp=200.189.40.8}; /system clock set time-zone-name=America/Sao_Paulo; :do {/system script remove [find name=wifi-registrar]} on-error={}; /system script add name=wifi-registrar policy=read,write,test source={:local ap "-"; :do {:local l [/ip dhcp-server lease find where mac-address=$"mac-address"]; :if ([:len $l] > 0) do={:local h [/ip dhcp-server lease get [:pick $l 0] host-name]; :if ([:len $h] > 0) do={:set ap $h}}} on-error={}; :log info ("WIFI;" . $user . ";" . $address . ";" . $"mac-address" . ";" . [:tostr $ap])}; /ip hotspot user profile set [find name=moradores] on-login="/system script run wifi-registrar"; /system logging add topics=script,info action=txt-wifi; :put "corrigido"
+
+
+===============================================================================
+ COMO FICA O REGISTRO
+===============================================================================
+ O arquivo agora e  cadastros-wifi.0.txt  em Files, e cada acesso vira:
+
+   WIFI;visitante;192.168.88.55;AA:BB:CC:11:22:33;iPhone-de-Maria
+
+ com data e hora na frente, colocadas pelo proprio log.
+
+ Ver so os acessos, sem baixar nada:
+
+/log print where message~"WIFI;"
+
+ Baixar: Files > cadastros-wifi.0.txt > arraste para o computador.
+
+
+===============================================================================
+ TESTAR
+===============================================================================
+/ip hotspot active remove [find]
+
+ Conecte um celular, faca o cadastro, e confira:
+
+/log print where message~"WIFI;"
+
+ Se aparecer a linha, acabou. Salve o estado bom:
+
+/system backup save name=funcionando
