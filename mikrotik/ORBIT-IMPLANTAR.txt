@@ -1,54 +1,46 @@
 ===============================================================================
  ORBIT SAO CAETANO - IMPLANTACAO DO PORTAL WI-FI
- Roteador Orbite-WIFI  |  RouterOS 6.48.6  |  APs cabeados
+ Roteador Orbite-WIFI | RouterOS 6.48.6 | APs cabeados, tudo na mesma rede
 ===============================================================================
 
- O QUE EU LI NO SEU BACKUP
- -------------------------
-   RouterOS          6.48.6
-   Identidade        Orbite-WIFI
-   LAN               192.168.88.0/24, roteador em 192.168.88.1
-   Pool              default-dhcp, equipamentos espalhados de .19 ate .254
-   Bridge            bridge
-   Portas            ether2, ether3, ether4, lan-2, lan-3, lan-4, pwr-line1
-   WAN               wan-1-Vivo e wan-2-Vivo (duas saidas)
-   Listas            LAN e WAN existem
-   VPN               sstp-out1-VN-SYSTEM, l2tp-out2, ppp secrets, redes 10.x
-   NAT               "defconf: masquerade", "masq. vpn traffic" e varios dstnat
-   HOTSPOT           NENHUM (hotspot/main e hotspot/user vazios)
+ O CENARIO REAL
+ --------------
+   RouterOS 6.48.6, identidade Orbite-WIFI
+   LAN 192.168.88.0/24, roteador em 192.168.88.1, pool default-dhcp
+   Duas WANs (wan-1-Vivo, wan-2-Vivo), VPNs SSTP/L2TP, dstnat em uso
+   Nenhum hotspot configurado
+   O Wi-Fi dos moradores vem de APs ligados por CABO
+   Cameras, DVR, computadores e APs dividem as MESMAS portas
 
- E O QUE VOCE ME CONTOU DEPOIS
- -----------------------------
-   O Wi-Fi dos moradores NAO sai do wlan1. Sai de APs ligados por CABO neste
-   roteador. Entao o portal tem que estar na PORTA onde esses APs estao.
+ Como nao ha separacao fisica, nao da para usar a porta como criterio. O
+ portal entra na bridge inteira e o que NAO deve pedir cadastro sai por uma
+ lista de MAC.
 
-
- COMO O PORTAL VAI ENTRAR
+ A REGRA QUE VAMOS ADOTAR
  ------------------------
-   Bridge nova       bridge-portal, so com as portas dos APs dos moradores
-   Rede              172.16.30.0/24  (nao colide com nada que voce ja usa:
-                     192.168.88, 192.168.15, 10.0.x, 10.1.x, 10.10.x, 10.49.x)
-   Quem cai no portal    quem conectar no Wi-Fi desses APs
-   Quem NAO cai          as demais portas de cabo, o wlan1, as VPNs, as
-                         cameras, o DVR e tudo que ja existe hoje
+     Tem IP fixo (lease estatico)  ->  passa direto, sem login
+     Nao tem                       ->  cai no portal
+
+ E facil de explicar, facil de manter e nao depende de adivinhar nada. Todo
+ equipamento novo do predio: faz o lease estatico e ele ja fica liberado.
 
 
- !!! O PONTO QUE DECIDE SE ISSO FUNCIONA !!!
- -------------------------------------------
- Cada AP precisa estar em MODO ACCESS POINT / BRIDGE, e NAO roteando:
+ !!! DUAS COISAS QUE VOCE PRECISA ACEITAR ANTES !!!
+ --------------------------------------------------
+ 1. NAO HA ISOLAMENTO. Todo mundo fica na mesma rede 192.168.88.0/24, entao um
+    morador logado no portal enxerga as cameras, o DVR e os computadores como
+    enxerga hoje. O trafego entre eles nem passa pelo roteador -- e o switch
+    que entrega -- entao nao existe regra de firewall que resolva.
+    Mitigacao possivel agora: senha forte em camera, DVR e NAS.
+    Solucao de verdade: separar em VLAN depois, quando der.
 
-     DHCP do AP ......... DESLIGADO
-     Cabo saindo dele ... de uma porta LAN, nunca da porta WAN/Internet
-     NAT do AP .......... desligado (modo AP, repetidor, ou bridge)
-
- Se um AP estiver roteando e fazendo NAT, o MikroTik enxerga so o MAC dele.
- Resultado: a rede inteira atras daquele AP compartilha UM login -- a primeira
- pessoa que se cadastrar libera todas as outras, e o limite de 5 Mb/s vira
- 5 Mb/s para o predio todo.
-
- COMO CONFERIR, depois de tudo pronto: um celular conectado no AP tem que
- pegar IP 172.16.30.x. Se pegar 192.168.0.x, 192.168.1.x ou 10.0.0.x, aquele
- AP esta roteando e precisa ser corrigido ANTES de valer alguma coisa.
+ 2. CADA AP PRECISA ESTAR EM MODO AP / BRIDGE:
+        DHCP do AP ......... DESLIGADO
+        cabo saindo dele ... de porta LAN, nunca da WAN
+        NAT ................ desligado
+    Se um AP estiver roteando, o roteador ve so o MAC dele: o predio inteiro
+    atras daquele AP compartilha UM login e UM limite de 5 Mb/s.
+    Como conferir: celular no Wi-Fi tem que pegar IP 192.168.88.x.
 
 
 ===============================================================================
@@ -58,136 +50,83 @@
 /system backup save name=antes-portal
 /export file=antes-portal
 
- Baixe os dois em Files. O PASSO 10 desfaz tudo, mas backup e backup.
+ Baixe os dois em Files. O PASSO 9 desfaz tudo, mas backup e backup.
 
 
 ===============================================================================
- PASSO 1 - DESCOBRIR EM QUE PORTAS ESTAO OS APs
+ PASSO 1 - VER TUDO QUE ESTA NA REDE
 ===============================================================================
 
- Vizinhos que se anunciam (a coluna INTERFACE e o que interessa):
+ Ligue tudo antes: cameras, DVR, APs, computadores, impressora, interfone.
 
-/ip neighbor print
+/ip dhcp-server lease print
 
- Tudo que a bridge ja viu, com a porta de cada MAC:
-
-/interface bridge host print where !local
-
- Anote as portas dos APs dos moradores. Exemplo: ether3 e ether4.
-
- ATENCAO: so entram aqui as portas que tem SOMENTE APs de morador. Se numa
- porta houver tambem camera, DVR ou computador da administracao, eles vao
- passar a cair no portal tambem. Nesse caso, mude o cabeamento primeiro ou
- libere esses equipamentos pelo MAC (PASSO 9).
+ Voce vai ver ADDRESS, MAC-ADDRESS e HOST-NAME. O host-name entrega o que e
+ cada um: "DVR", "CAM-GARAGEM", "HP-Printer" de um lado; "iPhone-de-Maria",
+ "Galaxy-S21" do outro.
 
 
 ===============================================================================
- PASSO 2 - CRIAR A REDE DO PORTAL E MOVER AS PORTAS
+ PASSO 2 - MARCAR O QUE NAO PODE PEDIR CADASTRO
 ===============================================================================
 
- TROQUE a lista de portas da primeira linha pelas suas. O resto e automatico.
- Aqui o exemplo usa ether3 e ether4.
+ Transforme em IP FIXO tudo que e equipamento do predio -- inclusive os
+ proprios APs, senao voce perde a gerencia deles.
 
- Cole a linha inteira:
+ Pelo WinBox, sem digitar nada:
+     IP > DHCP Server > aba Leases > clique no aparelho > botao Make Static
+     Repita para cada equipamento. Aproveite e escreva no Comment o que e.
 
-:local portas {"ether3";"ether4"}; /interface bridge add name=bridge-portal comment="portal orbit"; :foreach p in=$portas do={:do {/interface bridge port remove [find interface=$p]} on-error={:put ("nao estava em bridge: " . $p)}; :do {/interface bridge port add bridge=bridge-portal interface=$p; :put ("movida: " . $p)} on-error={:put ("FALHOU: " . $p)}}; /interface bridge port print
+ Por comando, um a um:
 
- No fim ele lista as portas. Confira que as suas estao em bridge-portal e que
- as outras continuam na bridge original.
+/ip dhcp-server lease make-static [find address=192.168.88.104]
+/ip dhcp-server lease set [find address=192.168.88.104] comment="DVR portaria"
 
+ NAO transforme em fixo os celulares dos moradores. Eles e que devem cair no
+ portal.
 
-===============================================================================
- PASSO 3 - ENDERECO, POOL E DHCP DO PORTAL
-===============================================================================
+ Conferir o que ficou marcado:
 
-/ip address add address=172.16.30.1/24 interface=bridge-portal comment="portal orbit"
-
-/ip pool add name=pool-portal ranges=172.16.30.20-172.16.30.254
-
-/ip dhcp-server add name=dhcp-portal interface=bridge-portal address-pool=pool-portal lease-time=1h disabled=no
-
-/ip dhcp-server network add address=172.16.30.0/24 gateway=172.16.30.1 dns-server=172.16.30.1 comment="portal orbit"
-
- O pool comeca no .20 de proposito: de .2 a .19 ficam reservados para os
- proprios APs, que serao liberados no PASSO 4.
+/ip dhcp-server lease print where !dynamic
 
 
 ===============================================================================
- PASSO 4 - OS APs PRECISAM PASSAR SEM LOGIN
+ PASSO 3 - LIBERAR TUDO QUE TEM IP FIXO
 ===============================================================================
 
- O AP em si nao tem como preencher formulario. Sem isso voce perde o acesso de
- gerencia a ele.
+ Uma linha so. Ela varre os leases estaticos e cria o bypass de cada um:
 
- Pegue o MAC de cada AP:
+:foreach l in=[/ip dhcp-server lease find where !dynamic] do={:local m [:tostr [/ip dhcp-server lease get $l mac-address]]; :local c ""; :do {:set c [:tostr [/ip dhcp-server lease get $l comment]]} on-error={:set c ""}; :do {/ip hotspot ip-binding add mac-address=$m type=bypassed comment=("equipamento " . $c); :put ("liberado  " . $m . "  " . $c)} on-error={:put ("ja tinha   " . $m)}}; /ip hotspot ip-binding print
 
-/ip neighbor print
+ Rode ela de novo sempre que marcar um equipamento novo como fixo. Ela pula os
+ que ja estao na lista.
 
- E libere um por um, trocando o MAC:
+ Para liberar um MAC avulso, sem lease:
 
-:local m "AA:BB:CC:00:00:01"; /ip hotspot ip-binding add mac-address=$m type=bypassed comment="AP morador"; :put ("LIBERADO: " . $m)
-
- Se preferir, de IP fixo a cada AP dentro da faixa reservada:
-
-/ip dhcp-server lease add mac-address=AA:BB:CC:00:00:01 address=172.16.30.2 server=dhcp-portal comment="AP bloco A"
-
- AVISO: os APs vao trocar de endereco. Se voce os administrava em
- 192.168.88.x, a partir de agora eles respondem em 172.16.30.x.
+:local m "AA:BB:CC:00:00:01"; /ip hotspot ip-binding add mac-address=$m type=bypassed comment="equipamento"; :do {/ip hotspot active remove [find mac-address=$m]} on-error={}; :put ("LIBERADO: " . $m)
 
 
 ===============================================================================
- PASSO 5 - SAIDA PARA A INTERNET E DNS
+ PASSO 4 - O HOTSPOT
 ===============================================================================
 
-/ip firewall nat add chain=srcnat src-address=172.16.30.0/24 action=masquerade comment="portal orbit: saida"
+ Usa a bridge e o pool que ja existem. Nao cria rede nova, nao mexe em IP.
 
-/ip dns set allow-remote-requests=yes
+ login-by SEM cookie de proposito: com cookie o aparelho reconecta sozinho e o
+ limite de 10 minutos nunca acontece.
 
- (nao troca os seus servidores DNS, so garante que o roteador atende a rede)
+:local br [/interface bridge get [:pick [/interface bridge find] 0] name]; :local pl [/ip dhcp-server get [:pick [/ip dhcp-server find] 0] address-pool]; :put ("bridge=" . $br . "   pool=" . $pl); /ip hotspot profile add name=perfil-orbit hotspot-address=192.168.88.1 html-directory=hotspot login-by=http-chap,http-pap; /ip hotspot add name=hotspot-orbit interface=$br address-pool=$pl profile=perfil-orbit addresses-per-mac=2 idle-timeout=5m keepalive-timeout=2m disabled=no; :put "hotspot criado"
 
+ Ele imprime a bridge e o pool que encontrou -- confira se sao os seus.
 
-===============================================================================
- PASSO 6 - ISOLAMENTO  (a parte mais importante)
-===============================================================================
-
- Morador nao pode enxergar a rede administrativa, cameras, DVR nem as VPNs:
-
-/ip firewall filter add chain=forward src-address=172.16.30.0/24 dst-address=192.168.88.0/24 action=drop comment="portal: nao acessa a LAN" place-before=0
-
-/ip firewall filter add chain=forward src-address=172.16.30.0/24 dst-address=10.0.0.0/8 action=drop comment="portal: nao acessa as VPNs" place-before=1
-
-/ip firewall filter add chain=forward src-address=172.16.30.0/24 dst-address=192.168.15.0/24 action=drop comment="portal: nao acessa os modems" place-before=2
-
-/ip firewall filter add chain=input in-interface=bridge-portal protocol=tcp dst-port=21,22,23,8291,8728,8729 action=drop comment="portal: sem acesso de gerencia" place-before=0
-
- E o roteador precisa aceitar DHCP, DNS e HTTP vindos da rede do portal:
-
-/interface list member add list=LAN interface=bridge-portal
-
- Confira a ordem (as do portal tem que estar no topo):
-
-/ip firewall filter print where comment~"portal"
-
-
-===============================================================================
- PASSO 7 - O HOTSPOT
-===============================================================================
-
- login-by SEM cookie, de proposito: com cookie o aparelho reconecta sozinho e
- o limite de 10 minutos nunca acontece.
-
-/ip hotspot profile add name=perfil-orbit hotspot-address=172.16.30.1 html-directory=hotspot login-by=http-chap,http-pap
-
-/ip hotspot add name=hotspot-orbit interface=bridge-portal address-pool=pool-portal profile=perfil-orbit addresses-per-mac=2 idle-timeout=5m keepalive-timeout=2m disabled=no
-
- AGORA a pasta  hotspot  aparece em Files, criada pelo proprio RouterOS.
- E por isso que este passo vem ANTES de baixar as paginas.
+ AGORA a pasta  hotspot  aparece em Files, criada pelo proprio RouterOS. E por
+ isso que este passo vem ANTES de baixar as paginas.
 
 /file print where name~"hotspot/"
 
 
 ===============================================================================
- PASSO 8 - AS PAGINAS DA ORBIT
+ PASSO 5 - AS PAGINAS DA ORBIT
 ===============================================================================
 
  O roteador baixa sozinho, sem WinBox e sem FTP:
@@ -206,7 +145,7 @@
 
 
 ===============================================================================
- PASSO 9 - CONTA, LIMITES E REGISTRO
+ PASSO 6 - CONTA E LIMITES
 ===============================================================================
 
  5 Mb/s por aparelho, 10 minutos de sessao:
@@ -218,8 +157,12 @@
  Esses dois valores tem que bater com o CONFIG do login.html:
      usuario: "visitante",   senha: "visitante",
 
- Registro em arquivo (nome da acao sem hifen -- o ROS 6 so aceita letras e
- numeros):
+
+===============================================================================
+ PASSO 7 - REGISTRO DOS ACESSOS
+===============================================================================
+
+ Nome da acao sem hifen -- o ROS 6 so aceita letras e numeros:
 
 /system logging action add name=logportal target=disk disk-file-name=portal disk-lines-per-file=20000 disk-file-count=10
 
@@ -246,30 +189,35 @@
 
 
 ===============================================================================
- PASSO 10 - TESTAR
+ PASSO 8 - TESTAR
 ===============================================================================
 
-/ip hotspot print
-/ip hotspot user print
-/interface bridge port print
-/ip address print
+ Derrube todas as sessoes para comecar limpo:
 
- No celular, conectado no Wi-Fi de um dos APs:
+/ip hotspot active remove [find]
 
-   1. o IP tem que ser 172.16.30.x
-      -> se for outro, aquele AP esta roteando. Corrija o AP, nao o roteador.
-   2. tem que abrir a tela clara da Orbit
-   3. depois de entrar:
+ 1. CELULAR DE MORADOR, no Wi-Fi de um AP
+        tem que abrir a tela clara da Orbit pedindo os dados
+        se pegar IP fora de 192.168.88.x, aquele AP esta roteando
+
+ 2. UM EQUIPAMENTO DA LISTA (camera, DVR, computador)
+        tem que continuar funcionando sem ver portal nenhum
+        se pedir cadastro, o MAC dele nao entrou no PASSO 3
+
+ 3. DEPOIS DE UM MORADOR ENTRAR
 
 /ip hotspot active print
 
- A coluna SESSION-TIME-LEFT tem que estar contando a partir de 10 minutos.
- Vazia = o limite nao pegou.
+    A coluna SESSION-TIME-LEFT tem que estar contando a partir de 10 minutos.
+    Vazia = o limite nao pegou.
 
 /log print where message~"ORBIT;"
 
- E confirme que NADA mudou para os outros: computador nas portas antigas,
- cameras, DVR e VPNs continuam funcionando sem ver portal nenhum.
+    Tem que aparecer a linha do acesso.
+
+ 4. CONFIRME QUE NADA QUEBROU
+        as VPNs continuam conectadas:   /interface print where running
+        as portas encaminhadas seguem:  /ip firewall nat print
 
  Deu certo? Salve:
 
@@ -277,14 +225,34 @@
 
 
 ===============================================================================
- PASSO 11 - DESFAZER TUDO
+ PASSO 9 - DESFAZER TUDO
 ===============================================================================
 
- TROQUE a lista de portas da primeira linha pelas mesmas que voce moveu.
- Ela devolve as portas para a bridge original e apaga so o que este roteiro
- criou.
+ Remove so o que este roteiro cria. Nao encosta na sua configuracao original,
+ e nao desfaz os leases estaticos que voce marcou (esses sao uteis de todo
+ jeito).
 
-:local portas {"ether3";"ether4"}; :local br [/interface bridge get [:pick [/interface bridge find where name!="bridge-portal"] 0] name]; :do {/ip hotspot remove [find name=hotspot-orbit]} on-error={}; :do {/ip hotspot user remove [find name=visitante]} on-error={}; :do {/ip hotspot user profile remove [find name=convidados]} on-error={}; :do {/ip hotspot profile remove [find name=perfil-orbit]} on-error={}; :do {/ip hotspot ip-binding remove [find comment~"AP morador"]} on-error={}; :do {/system script remove [find name=orbit-registrar]} on-error={}; :do {/system logging remove [find where action="logportal"]} on-error={}; :do {/system logging action remove [find name=logportal]} on-error={}; :do {/ip firewall filter remove [find comment~"portal"]} on-error={}; :do {/ip firewall nat remove [find comment~"portal orbit"]} on-error={}; :do {/interface list member remove [find interface=bridge-portal]} on-error={}; :do {/ip dhcp-server network remove [find address="172.16.30.0/24"]} on-error={}; :do {/ip dhcp-server remove [find name=dhcp-portal]} on-error={}; :do {/ip pool remove [find name=pool-portal]} on-error={}; :do {/ip address remove [find interface=bridge-portal]} on-error={}; :foreach p in=$portas do={:do {/interface bridge port remove [find interface=$p]} on-error={}; :do {/interface bridge port add bridge=$br interface=$p} on-error={}}; :do {/interface bridge remove [find name=bridge-portal]} on-error={}; :put ("DESFEITO - portas devolvidas para " . $br)
+:do {/ip hotspot remove [find name=hotspot-orbit]} on-error={}; :do {/ip hotspot user remove [find name=visitante]} on-error={}; :do {/ip hotspot user profile remove [find name=convidados]} on-error={}; :do {/ip hotspot profile remove [find name=perfil-orbit]} on-error={}; :do {/ip hotspot ip-binding remove [find comment~"equipamento"]} on-error={}; :do {/system script remove [find name=orbit-registrar]} on-error={}; :do {/system logging remove [find where action="logportal"]} on-error={}; :do {/system logging action remove [find name=logportal]} on-error={}; :put "DESFEITO"
+
+
+===============================================================================
+ MANUTENCAO NO DIA A DIA
+===============================================================================
+
+ EQUIPAMENTO NOVO NO PREDIO
+     1. IP > DHCP Server > Leases > Make Static + Comment
+     2. rode de novo a linha do PASSO 3
+
+ MORADOR RECLAMANDO QUE PEDE CADASTRO TODA HORA
+     E o esperado: 10 minutos por sessao, sem cookie. Para afrouxar:
+     /ip hotspot user profile set [find name=convidados] session-timeout=1h
+
+ VER QUEM ESTA CONECTADO AGORA
+     /ip hotspot active print
+     ou WinBox: IP > Hotspot > aba Active
+
+ TIRAR UM APARELHO DA LISTA DE LIBERADOS
+     /ip hotspot ip-binding remove [find mac-address=AA:BB:CC:00:00:01]
 
 
 ===============================================================================
@@ -294,6 +262,5 @@
    as VPNs (sstp-out1-VN-SYSTEM, l2tp-out2, ppp secrets)
    as regras dstnat de portas encaminhadas
    o proxy web
+   os enderecos IP, a bridge, as portas e o pool que ja existem
    o wlan1 e o Wi-Fi Wifi-ADM-Orbit
-   a rede 192.168.88.0/24, os leases e os IPs fixos que ja existem
-   as portas de cabo que voce NAO listar no PASSO 2
