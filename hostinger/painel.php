@@ -77,9 +77,9 @@ $onde = [];
 $par  = [];
 
 if ($busca !== '') {
-    $onde[] = '(nome LIKE :q OR cpf LIKE :qd OR ap LIKE :q2 OR mac LIKE :q3)';
+    $onde[] = '(nome LIKE :q OR email LIKE :qe OR ap LIKE :q2 OR mac LIKE :q3)';
     $par[':q']  = '%' . $busca . '%';
-    $par[':qd'] = '%' . preg_replace('/\D+/', '', $busca) . '%';
+    $par[':qe'] = '%' . $busca . '%';
     $par[':q2'] = '%' . $busca . '%';
     $par[':q3'] = '%' . $busca . '%';
 }
@@ -105,11 +105,11 @@ if (isset($_GET['csv'])) {
 
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF");   // BOM: acentos certos no Excel
-    fputcsv($out, ['Data/hora','Nome completo','CPF','Bloco','Apartamento','Celular',
+    fputcsv($out, ['Data/hora','Nome completo','E-mail','Bloco','Apartamento','Celular',
                    'AP / Local','Confere?','MAC','IP','Servidor','Roteador'], ';');
     while ($r = $st->fetch()) {
         fputcsv($out, array_map($seguro, [
-            $r['criado_em'], $r['nome'], cpfFmt($r['cpf']), $r['bloco'], $r['ap'],
+            $r['criado_em'], $r['nome'], $r['email'], $r['bloco'], $r['ap'],
             foneFmt($r['fone']), $r['local_ap'], $r['confere'] ?: 'ok',
             $r['mac'], $r['ip'], $r['servidor'], $r['roteador'],
         ]), ';');
@@ -133,7 +133,7 @@ $linhas = $st->fetchAll();
 
 $hoje = (int)db()->query("SELECT COUNT(*) FROM cadastros WHERE DATE(criado_em) = CURDATE()")->fetchColumn();
 $geral = (int)db()->query("SELECT COUNT(*) FROM cadastros")->fetchColumn();
-$pess  = (int)db()->query("SELECT COUNT(DISTINCT COALESCE(cpf, mac)) FROM cadastros")->fetchColumn();
+$pess  = (int)db()->query("SELECT COUNT(DISTINCT COALESCE(email, mac)) FROM cadastros")->fetchColumn();
 $div   = (int)db()->query("SELECT COUNT(*) FROM cadastros WHERE confere IS NOT NULL AND confere <> ''")->fetchColumn();
 
 $blocos = db()->query("SELECT DISTINCT bloco FROM cadastros ORDER BY bloco")->fetchAll(PDO::FETCH_COLUMN);
@@ -178,7 +178,7 @@ function link_com(array $novo): string {
   </div>
 
   <form class="filters" method="get">
-    <input type="text" name="q" value="<?= h($busca) ?>" placeholder="Nome, CPF, apartamento ou MAC">
+    <input type="text" name="q" value="<?= h($busca) ?>" placeholder="Nome, e-mail, apartamento ou MAC">
     <select name="bloco">
       <option value="">Todos os blocos</option>
       <?php foreach ($blocos as $b): ?>
@@ -196,7 +196,7 @@ function link_com(array $novo): string {
       <table>
         <thead>
           <tr>
-            <th>Data/hora</th><th>Nome</th><th>CPF</th><th>Bloco / Ap</th>
+            <th>Data/hora</th><th>Nome</th><th>E-mail</th><th>Bloco / Ap</th>
             <th>Celular</th><th>AP / Local</th><th>Aparelho</th><th></th>
           </tr>
         </thead>
@@ -208,7 +208,7 @@ function link_com(array $novo): string {
           <tr>
             <td data-label="Data/hora"><?= h(date('d/m/Y H:i', strtotime($r['criado_em']))) ?></td>
             <td data-label="Nome"><?= h($r['nome']) ?></td>
-            <td data-label="CPF"><?= h(cpfFmt($r['cpf'])) ?></td>
+            <td data-label="E-mail"><?= h($r['email']) ?></td>
             <td data-label="Bloco / Ap"><b><?= h($r['bloco']) ?></b> &middot; <?= h($r['ap']) ?></td>
             <td data-label="Celular"><?= h(foneFmt($r['fone'])) ?></td>
             <td data-label="AP / Local">

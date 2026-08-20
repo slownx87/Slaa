@@ -49,11 +49,12 @@
       <p class="hint">Informe o apartamento.</p>
     </div>
 
-    <div class="field full" id="f_cpf">
-      <label for="cpf">CPF</label>
-      <input type="tel" id="cpf" name="cpf" placeholder="000.000.000-00"
-             inputmode="numeric" maxlength="14" autocomplete="off">
-      <p class="hint">CPF inv&aacute;lido. Confira os n&uacute;meros.</p>
+    <div class="field full" id="f_email">
+      <label for="email">E-mail</label>
+      <input type="email" id="email" name="email" placeholder="voce@exemplo.com"
+             inputmode="email" maxlength="100" autocomplete="email"
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+      <p class="hint">E-mail inv&aacute;lido. Confira o endere&ccedil;o.</p>
     </div>
 
     <div class="field full" id="f_fone">
@@ -125,19 +126,19 @@ var CONFIG = {
   conferirBloco: true,
 
   /* Campos extras -- coloque false para esconder */
-  pedirCpf: true,
+  pedirEmail: true,
   pedirCelular: true,
 
   /* MODO DE LOGIN
      "compartilhado" -> todos entram com a mesma conta do hotspot
                         (crie em /ip hotspot user). Funciona sem servidor.
-     "cpf"           -> envia o CPF (so digitos) como usuario. Exige RADIUS /
-                        User Manager, ou usuarios pre-cadastrados por CPF.     */
+     "email"         -> envia o e-mail como usuario. Exige RADIUS /
+                        User Manager, ou usuarios pre-cadastrados por e-mail.  */
   modo: "compartilhado",
 
   usuario: "visitante",
   senha:   "visitante",
-  senhaCpf: "",
+  senhaEmail: "",
 
   /* Para onde mandar o cadastro. "" = nao envia nada para fora.
      Na Hostinger fica assim:
@@ -185,14 +186,6 @@ function localDoAp(){
 /* ---------- mascaras ---------- */
 function soDigitos(v){ return (v || "").replace(/\D+/g, ""); }
 
-function mascaraCpf(v){
-  v = soDigitos(v).slice(0, 11);
-  if (v.length > 9) return v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, "$1.$2.$3-$4");
-  if (v.length > 6) return v.replace(/(\d{3})(\d{3})(\d{1,3})/, "$1.$2.$3");
-  if (v.length > 3) return v.replace(/(\d{3})(\d{1,3})/, "$1.$2");
-  return v;
-}
-
 function mascaraFone(v){
   v = soDigitos(v).slice(0, 11);
   if (v.length > 10) return v.replace(/(\d{2})(\d{5})(\d{1,4})/, "($1) $2-$3");
@@ -203,20 +196,12 @@ function mascaraFone(v){
 }
 
 /* ---------- validacoes ---------- */
-function cpfValido(cpf){
-  cpf = soDigitos(cpf);
-  if (cpf.length !== 11) return false;
-  if (/^(\d)\1{10}$/.test(cpf)) return false;
-  var i, soma = 0, resto;
-  for (i = 1; i <= 9; i++) soma += parseInt(cpf.substring(i - 1, i), 10) * (11 - i);
-  resto = (soma * 10) % 11;
-  if (resto === 10 || resto === 11) resto = 0;
-  if (resto !== parseInt(cpf.substring(9, 10), 10)) return false;
-  soma = 0;
-  for (i = 1; i <= 10; i++) soma += parseInt(cpf.substring(i - 1, i), 10) * (12 - i);
-  resto = (soma * 10) % 11;
-  if (resto === 10 || resto === 11) resto = 0;
-  return resto === parseInt(cpf.substring(10, 11), 10);
+function emailValido(e){
+  e = (e || "").trim();
+  if (e.length < 6 || e.length > 100) return false;
+  if (e.indexOf(" ") !== -1) return false;
+  /* um @, algo antes, dominio com ponto e pelo menos 2 letras no fim */
+  return /^[^@\s]+@[^@\s.]+(\.[^@\s.]+)*\.[A-Za-z]{2,}$/.test(e);
 }
 
 function nomeValido(n){
@@ -242,7 +227,7 @@ function avisa(msg){
   try { a.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
 }
 
-var CAMPOS = ["nome", "bloco", "ap", "cpf", "fone", "aceite"];
+var CAMPOS = ["nome", "bloco", "ap", "email", "fone", "aceite"];
 
 /* Valida um campo isolado e atualiza o destaque em tela. */
 function checa(id){
@@ -250,9 +235,9 @@ function checa(id){
   if (id === "nome")  return marca("f_nome",  nomeValido(el("nome").value));
   if (id === "bloco") return marca("f_bloco", el("bloco").value !== "");
   if (id === "ap")    return marca("f_ap",    el("ap").value.trim().length > 0);
-  if (id === "cpf"){
-    if (!CONFIG.pedirCpf) return true;
-    return marca("f_cpf", cpfValido(el("cpf").value));
+  if (id === "email"){
+    if (!CONFIG.pedirEmail) return true;
+    return marca("f_email", emailValido(el("email").value));
   }
   if (id === "fone"){
     if (!CONFIG.pedirCelular) return true;
@@ -298,11 +283,10 @@ function revalida(){
     sel.appendChild(o);
   }
 
-  if (!CONFIG.pedirCpf)     el("f_cpf").style.display  = "none";
+  if (!CONFIG.pedirEmail)   el("f_email").style.display = "none";
   if (!CONFIG.pedirCelular) el("f_fone").style.display = "none";
 
-  el("cpf").onkeyup  = function(){ this.value = mascaraCpf(this.value); };
-  el("cpf").onchange = function(){ this.value = mascaraCpf(this.value); };
+  el("email").onchange = function(){ this.value = this.value.trim().toLowerCase(); };
   el("fone").onkeyup = function(){ this.value = mascaraFone(this.value); };
   el("ap").onkeyup   = function(){ this.value = this.value.replace(/[^0-9A-Za-z]/g, "").toUpperCase(); };
 
@@ -325,7 +309,7 @@ function revalida(){
       if (d.nome)  el("nome").value  = d.nome;
       if (d.bloco) el("bloco").value = d.bloco;
       if (d.ap)    el("ap").value    = d.ap;
-      if (d.cpf)   el("cpf").value   = mascaraCpf(d.cpf);
+      if (d.email) el("email").value = d.email;
       if (d.fone)  el("fone").value  = mascaraFone(d.fone);
     }
   } catch (e) {}
@@ -353,7 +337,7 @@ function enviar(){
     nome:  el("nome").value.trim().replace(/\s+/g, " "),
     bloco: el("bloco").value,
     ap:    el("ap").value.trim(),
-    cpf:   CONFIG.pedirCpf ? soDigitos(el("cpf").value) : "",
+    email: CONFIG.pedirEmail ? el("email").value.trim().toLowerCase() : "",
     fone:  CONFIG.pedirCelular ? soDigitos(el("fone").value) : "",
     mac:   HOTSPOT.mac,
     ip:    HOTSPOT.ip,
@@ -421,9 +405,9 @@ function conectar(){
   var f = document.forms.sendin;
   var usuario, senha;
 
-  if (CONFIG.modo === "cpf"){
-    usuario = soDigitos(el("cpf").value);
-    senha   = CONFIG.senhaCpf || "";
+  if (CONFIG.modo === "email"){
+    usuario = el("email").value.trim().toLowerCase();
+    senha   = CONFIG.senhaEmail || "";
   } else {
     usuario = CONFIG.usuario;
     senha   = CONFIG.senha;

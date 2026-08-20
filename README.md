@@ -1,7 +1,7 @@
 # Portal Wi-Fi VN System — MikroTik Hotspot
 
 Página de login para o Hotspot do MikroTik em que a pessoa precisa informar
-**nome completo, bloco e apartamento** (e CPF, se você quiser) antes de a
+**nome completo, bloco e apartamento** (e e-mail, se você quiser) antes de a
 internet ser liberada. Visual no tema escuro da VN System.
 
 Feita para rodar dentro do roteador: **não usa nenhum arquivo externo** (sem CDN,
@@ -37,9 +37,9 @@ então qualquer recurso externo simplesmente não carregaria.
 ## 2. Como funciona o fluxo
 
 1. A pessoa conecta no Wi-Fi e o MikroTik intercepta o primeiro acesso.
-2. Aparece a `login.html` pedindo nome, CPF, bloco e apartamento.
-3. O JavaScript valida os dados **no aparelho** (se o CPF estiver ligado, os
-   dígitos verificadores são conferidos — CPF inventado é recusado).
+2. Aparece a `login.html` pedindo nome, e-mail, bloco e apartamento.
+3. O JavaScript valida os dados **no aparelho** (se o e-mail estiver ligado,
+   o formato é conferido).
 4. Os dados são gravados no navegador (`localStorage`) e, se você configurar um
    webhook, enviados para a sua planilha/servidor junto com MAC, IP e data/hora.
 5. Só então a página envia o login de verdade para o hotspot, usando uma conta
@@ -47,7 +47,7 @@ então qualquer recurso externo simplesmente não carregaria.
 
 > **Importante entender:** o cadastro identifica *quem* está usando; a
 > autenticação do hotspot em si continua sendo feita por uma conta do RouterOS.
-> Sem RADIUS/User Manager o roteador não tem como criar uma conta por CPF
+> Sem RADIUS/User Manager o roteador não tem como criar uma conta por e-mail
 > sozinho — por isso o modo padrão é a conta compartilhada.
 
 ---
@@ -64,7 +64,7 @@ var CONFIG = {
 
   blocos: ["A", "B", "C", "D", "E", "F"],   // os blocos do seu condomínio
 
-  pedirCpf: true,                            // false esconde o campo de CPF
+  pedirEmail: true,                          // false esconde o campo de e-mail
   pedirCelular: true,                        // false esconde o campo de celular
 
   modo: "compartilhado",                     // "compartilhado" ou "cpf"
@@ -78,15 +78,15 @@ var CONFIG = {
 };
 ```
 
-Para pedir **só nome, bloco e apartamento**, deixe `pedirCpf: false` e
+Para pedir **só nome, bloco e apartamento**, deixe `pedirEmail: false` e
 `pedirCelular: false` — os campos somem e param de ser validados.
 
 **`modo: "compartilhado"`** (padrão) — todo mundo entra com a mesma conta do
 hotspot. Simples, funciona sem servidor nenhum. É o recomendado.
 
-**`modo: "cpf"`** — envia o CPF (só os dígitos) como nome de usuário. Só use se
+**`modo: "cpf"`** — envia o e-mail (só os dígitos) como nome de usuário. Só use se
 você tiver **RADIUS / User Manager** aceitando qualquer usuário, ou se cadastrar
-os moradores por CPF manualmente. Sem isso, o login vai falhar com
+os moradores por e-mail manualmente. Sem isso, o login vai falhar com
 "invalid username or password".
 
 Para testar o visual, é só abrir `hotspot/login.html` no navegador do computador
@@ -228,7 +228,7 @@ Pronto. Cada cadastro aparece na hora no painel e no terminal.
 > Google como segunda via.
 
 Os arquivos ficam soltos na pasta, sem senha. Se o computador é compartilhado,
-guarde a pasta num diretório com acesso restrito — são nome, CPF e endereço de
+guarde a pasta num diretório com acesso restrito — são nome, e-mail e endereço de
 morador.
 
 ### 4.5 Guardar os logs de acesso
@@ -283,11 +283,11 @@ login. Para HTTPS tem que ser o walled garden **de IP**:
 > é o `walled-garden ip`, que resolve o domínio e libera no nível de IP.
 
 **Pronto.** O painel fica em `https://seudominio.com.br/wifi/painel.php` — tem
-busca por nome/CPF/apartamento/MAC, filtro por bloco e período, os contadores
+busca por nome/e-mail/apartamento/MAC, filtro por bloco e período, os contadores
 do dia, exportação para CSV e botão de excluir (direito de exclusão da LGPD).
 
 O que foi verificado: o endpoint recusa `GET`, recusa token errado, revalida
-nome e CPF no servidor (o navegador pode ser burlado), usa *prepared
+nome e e-mail no servidor (o navegador pode ser burlado), usa *prepared
 statements* — uma tentativa de `DROP TABLE` no campo nome foi gravada como
 texto e a tabela continuou lá — e o painel escapa a saída, então um
 `<script>` no nome aparece como texto, sem executar.
@@ -299,7 +299,7 @@ Três coisas para saber:
   para autenticar. Quem quiser fraudar um cadastro consegue.
 - **Ative o HTTPS** no hPanel (o certificado é gratuito). O `.htaccess` já
   força o redirecionamento.
-- **Você passa a guardar CPF num servidor.** Backup do banco, senha forte no
+- **Você passa a guardar e-mail num servidor.** Backup do banco, senha forte no
   painel e apagar o que não precisa mais deixaram de ser opcionais.
 
 ### 4.7 Equipamentos que não devem fazer login
@@ -513,14 +513,14 @@ continuam lá. Depois conecte um celular e teste o cadastro de ponta a ponta.
 
 ## 8. Sobre os dados coletados
 
-Você passa a tratar dados pessoais (nome e CPF são dados pessoais pela LGPD).
+Você passa a tratar dados pessoais (nome e e-mail são dados pessoais pela LGPD).
 Na prática isso significa:
 
 - Colete só o necessário e guarde apenas o tempo necessário.
 - Restrinja quem tem acesso à planilha/servidor com os cadastros.
 - Deixe claro para o morador o que é coletado — o texto de aceite da página já
   faz isso, mas vale ter um aviso no quadro do condomínio.
-- CPF não é obrigatório por lei para liberar Wi-Fi. O que o Marco Civil exige é
+- e-mail não é obrigatório por lei para liberar Wi-Fi. O que o Marco Civil exige é
   a guarda dos **registros de conexão** (IP, data e hora). Se quiser reduzir
   risco, dá para pedir só nome + bloco + apartamento: basta deixar
-  `pedirCpf: false` no `CONFIG`.
+  `pedirEmail: false` no `CONFIG`.

@@ -27,7 +27,7 @@ var TOKEN  = "";        // opcional: exija ?token=xxx no POST. "" = sem token
 var COLUNAS = [
   ["data",     "Data/hora"],
   ["nome",     "Nome completo"],
-  ["cpf",      "CPF"],
+  ["email",    "E-mail"],
   ["bloco",    "Bloco"],
   ["ap",       "Apartamento"],
   ["fone",     "Celular"],
@@ -41,7 +41,7 @@ var COLUNAS = [
 
 /* ---------------- formatacao ---------------- */
 
-function fmtCpf(v){
+function String(v){
   v = String(v || "").replace(/\D+/g, "");
   if (v.length !== 11) return v;
   return v.slice(0, 3) + "." + v.slice(3, 6) + "." + v.slice(6, 9) + "-" + v.slice(9);
@@ -64,7 +64,7 @@ function fmtData(v){
 
 function valor(d, chave){
   if (chave === "data") return fmtData(d.data);
-  if (chave === "cpf")  return fmtCpf(d.cpf);
+  if (chave === "email") return String(d.email || "");
   if (chave === "fone") return fmtFone(d.fone);
   if (chave === "confere") return d.confere ? d.confere : "ok";
   return String(d[chave] === undefined || d[chave] === null ? "" : d[chave]);
@@ -117,7 +117,7 @@ function painel(){
   }).length;
 
   var chaves = {};
-  todos.forEach(function(d){ if (d.cpf || d.nome) chaves[d.cpf || d.nome] = 1; });
+  todos.forEach(function(d){ if (d.email || d.nome) chaves[d.email || d.nome] = 1; });
   var pessoas = Object.keys(chaves).length;
 
   var linhas = todos.slice(0, 300).map(function(d){
@@ -169,7 +169,7 @@ function painel(){
     "<div class=dash-card><span>Hoje</span><strong>" + deHoje + "</strong></div>" +
     "<div class=dash-card><span>Pessoas diferentes</span><strong>" + pessoas + "</strong></div>" +
     "</div>" +
-    '<div class=bar><input id=q placeholder="Filtrar por nome, CPF, bloco, apartamento...">' +
+    '<div class=bar><input id=q placeholder="Filtrar por nome, e-mail, bloco, apartamento...">' +
     '<a class=btn href="/cadastros.csv">Baixar CSV</a></div>' +
     '<div class=table-card><div class=table-responsive><table><thead><tr>' +
     COLUNAS.map(function(c){ return "<th>" + escapaHtml(c[1]) + "</th>"; }).join("") +

@@ -51,25 +51,11 @@ function h(?string $s): string {
     return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-/** Valida CPF pelos digitos verificadores. */
-function cpfValido(string $cpf): bool {
-    $cpf = preg_replace('/\D+/', '', $cpf);
-    if (strlen($cpf) !== 11) return false;
-    if (preg_match('/^(\d)\1{10}$/', $cpf)) return false;
-    for ($t = 9; $t < 11; $t++) {
-        $soma = 0;
-        for ($i = 0; $i < $t; $i++) $soma += (int)$cpf[$i] * (($t + 1) - $i);
-        $d = ((10 * $soma) % 11) % 10;
-        if ((int)$cpf[$t] !== $d) return false;
-    }
-    return true;
-}
-
-/** Formata CPF para exibicao. */
-function cpfFmt(?string $cpf): string {
-    $cpf = preg_replace('/\D+/', '', (string)$cpf);
-    if (strlen($cpf) !== 11) return $cpf;
-    return substr($cpf,0,3).'.'.substr($cpf,3,3).'.'.substr($cpf,6,3).'-'.substr($cpf,9);
+/** Valida e-mail. */
+function emailValido(string $e): bool {
+    $e = trim($e);
+    if ($e === '' || strlen($e) > 100) return false;
+    return filter_var($e, FILTER_VALIDATE_EMAIL) !== false;
 }
 
 /** Formata celular para exibicao. */

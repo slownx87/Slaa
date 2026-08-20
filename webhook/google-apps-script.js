@@ -19,7 +19,7 @@ function doPost(e) {
 
   if (aba.getLastRow() === 0) {
     aba.appendRow([
-      'Data/hora', 'Nome completo', 'CPF', 'Bloco', 'Apartamento',
+      'Data/hora', 'Nome completo', 'E-mail', 'Bloco', 'Apartamento',
       'Celular', 'AP / Local', 'Confere?', 'MAC', 'IP', 'Servidor', 'Roteador'
     ]);
     aba.setFrozenRows(1);
@@ -31,7 +31,7 @@ function doPost(e) {
   aba.appendRow([
     new Date(),
     d.nome  || '',
-    formatarCpf(d.cpf),
+    d.email || '',
     d.bloco || '',
     d.ap    || '',
     d.fone  || '',
@@ -48,11 +48,6 @@ function doPost(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function formatarCpf(cpf) {
-  cpf = String(cpf || '').replace(/\D+/g, '');
-  if (cpf.length !== 11) return cpf;
-  return cpf.slice(0, 3) + '.' + cpf.slice(3, 6) + '.' + cpf.slice(6, 9) + '-' + cpf.slice(9);
-}
 
 function doGet() {
   return ContentService.createTextOutput('Webhook do Wi-Fi ativo.');

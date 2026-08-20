@@ -59,14 +59,14 @@ function dig($v, int $max): string {
 $nome  = txt($d['nome']  ?? '', 120);
 $bloco = txt($d['bloco'] ?? '', 20);
 $ap    = txt($d['ap']    ?? '', 10);
-$cpf   = dig($d['cpf']   ?? '', 11);
+$email = mb_strtolower(txt($d['email'] ?? '', 100), 'UTF-8');
 $fone  = dig($d['fone']  ?? '', 11);
 
 $erros = [];
 if (mb_strlen($nome) < 5 || substr_count($nome, ' ') < 1) $erros[] = 'nome';
 if ($bloco === '') $erros[] = 'bloco';
 if ($ap    === '') $erros[] = 'apartamento';
-if ($cpf !== '' && !cpfValido($cpf)) $erros[] = 'cpf';
+if ($email !== '' && !emailValido($email)) $erros[] = 'email';
 if ($fone !== '' && !in_array(strlen($fone), [10, 11], true)) $erros[] = 'celular';
 
 if ($erros) {
@@ -78,15 +78,15 @@ if ($erros) {
 /* --- Grava --------------------------------------------------------------- */
 try {
     $sql = 'INSERT INTO cadastros
-            (criado_em, nome, cpf, bloco, ap, fone, local_ap, confere,
+            (criado_em, nome, email, bloco, ap, fone, local_ap, confere,
              mac, ip, servidor, roteador, origem_ip)
-            VALUES (:criado, :nome, :cpf, :bloco, :ap, :fone, :local, :confere,
+            VALUES (:criado, :nome, :email, :bloco, :ap, :fone, :local, :confere,
                     :mac, :ip, :servidor, :roteador, :origem)';
 
     db()->prepare($sql)->execute([
         ':criado'   => date('Y-m-d H:i:s'),
         ':nome'     => $nome,
-        ':cpf'      => $cpf !== '' ? $cpf : null,
+        ':email'    => $email !== '' ? $email : null,
         ':bloco'    => $bloco,
         ':ap'       => $ap,
         ':fone'     => $fone !== '' ? $fone : null,

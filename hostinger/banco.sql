@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS cadastros (
   id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
   criado_em  DATETIME     NOT NULL,
   nome       VARCHAR(120) NOT NULL,
-  cpf        VARCHAR(11)      NULL,
+  email      VARCHAR(100)     NULL,
   bloco      VARCHAR(20)  NOT NULL,
   ap         VARCHAR(10)  NOT NULL,
   fone       VARCHAR(11)      NULL,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS cadastros (
   origem_ip  VARCHAR(45)      NULL,
   PRIMARY KEY (id),
   KEY idx_criado (criado_em),
-  KEY idx_cpf (cpf),
+  KEY idx_email (email),
   KEY idx_bloco (bloco, ap),
   KEY idx_mac (mac)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

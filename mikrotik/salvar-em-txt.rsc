@@ -4,14 +4,14 @@
 #  LEIA ANTES
 #  ----------
 #  O hotspot do MikroTik so SERVE arquivos estaticos. Ele nao roda codigo do
-#  lado do servidor, entao NAO existe como a pagina mandar o nome e o CPF para
+#  lado do servidor, entao NAO existe como a pagina mandar o nome e o e-mail para
 #  dentro do roteador e ele gravar num arquivo. Nao e limitacao da pagina, e do
 #  RouterOS: nao ha para onde postar.
 #
 #  O que o roteador consegue guardar sozinho e o que ELE ja sabe:
 #      data, hora, usuario, IP e MAC de cada conexao.
 #  Isso e exatamente o que o Marco Civil exige (registro de conexao). O nome e
-#  o CPF sao a sua camada de identificacao, e para grava-los e preciso algo
+#  o e-mail sao a sua camada de identificacao, e para grava-los e preciso algo
 #  fora do roteador -- planilha do Google (de graca), site, ou um container.
 #
 #  Este arquivo entrega as duas formas de .txt que o roteador faz sozinho.
@@ -34,6 +34,9 @@ add topics=hotspot,info action=txt-wifi
 #  Cada login vira uma linha assim:
 #    hotspot,info,account 10.10.0.55 (AA:BB:CC:11:22:33): logged in
 #
+#  ATENCAO: esta forma NAO tem o nome do aparelho -- o log do hotspot nao
+#  carrega esse dado. Para ter o nome do aparelho, use a FORMA 2.
+#
 #  Ver sem baixar o arquivo:
 #    /log print where topics~"hotspot"
 #  Baixar: Files > cadastros-wifi.0.txt > arrastar para o computador.
@@ -44,6 +47,10 @@ add topics=hotspot,info action=txt-wifi
 # =============================================================================
 #  Escreve so o que interessa, separado por ponto e virgula, pronto para abrir
 #  no Excel. Roda a cada login, pelo on-login do perfil de usuario.
+#  Inclui o NOME DO APARELHO, puxado do DHCP.
+#
+#      data;hora;usuario;ip;mac;aparelho
+#      2026-08-20;19:32:10;visitante;10.10.0.55;AA:BB:CC:11:22:33;iPhone-de-Maria
 #
 #  CUIDADO COM O TAMANHO: o RouterOS reescreve o arquivo inteiro a cada linha
 #  nova. Passando de umas poucas milhares de linhas isso fica lento e pode
@@ -56,11 +63,34 @@ add name=wifi-registrar policy=read,write,test source={
     :local arq "acessos-wifi.txt"
     :local data [/system clock get date]
     :local hora [/system clock get time]
-    :local linha ($data . ";" . $hora . ";" . $user . ";" . $address . ";" . $"mac-address")
+
+    # --- nome do aparelho ---------------------------------------------------
+    # Vem do DHCP: e o nome que o proprio celular anuncia ao pedir IP
+    # ("iPhone-de-Maria", "Galaxy-S21", "notebook-joao"...). A pagina nao tem
+    # como saber isso -- o navegador nao expoe. Quem sabe e o roteador.
+    :local aparelho "-"
+    :do {
+        :local lease [/ip dhcp-server lease find where mac-address=$"mac-address"]
+        :if ([:len $lease] > 0) do={
+            :local hn [/ip dhcp-server lease get [:pick $lease 0] host-name]
+            :if ([:len $hn] > 0) do={ :set aparelho $hn }
+        }
+    } on-error={ :set aparelho "-" }
+
+    # tira ; e quebras de linha, senao bagunca as colunas do arquivo
+    :set aparelho [:tostr $aparelho]
+    :local limpo ""
+    :for i from=0 to=([:len $aparelho] - 1) do={
+        :local c [:pick $aparelho $i]
+        :if ($c != ";" and $c != "\n" and $c != "\r") do={ :set limpo ($limpo . $c) }
+    }
+    :set aparelho $limpo
+
+    :local linha ($data . ";" . $hora . ";" . $user . ";" . $address . ";" . $"mac-address" . ";" . $aparelho)
 
     # cria o arquivo na primeira vez
     :if ([:len [/file find name=$arq]] = 0) do={
-        /file add name=$arq contents=("data;hora;usuario;ip;mac\r\n")
+        /file add name=$arq contents=("data;hora;usuario;ip;mac;aparelho\r\n")
         :delay 1s
     }
 
@@ -106,7 +136,8 @@ set [find name="moradores"] on-login="/system script run wifi-registrar"
 # =============================================================================
 #  RESUMINDO
 # =============================================================================
-#  No .txt do roteador voce tera:  data, hora, usuario, IP e MAC.
-#  Para ter tambem NOME, CPF, BLOCO e APARTAMENTO num arquivo, o cadastro
+#  No .txt do roteador voce tera:  data, hora, usuario, IP, MAC e o nome do
+#  aparelho (este ultimo so na FORMA 2).
+#  Para ter tambem NOME, E-MAIL, BLOCO e APARTAMENTO num arquivo, o cadastro
 #  precisa sair do roteador. A opcao gratuita e a planilha do Google --
 #  webhook/google-apps-script.js no repositorio.
