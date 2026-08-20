@@ -110,6 +110,20 @@ var CONFIG = {
   /* Blocos que aparecem no seletor */
   blocos: ["A", "B", "C", "D", "E", "F"],
 
+  /* De qual AP/bloco veio o acesso.
+     A chave e o nome do servidor hotspot (o que aparece em /ip hotspot print);
+     o valor e o local fisico. So faz sentido se voce tiver um hotspot por AP
+     ou por VLAN -- veja mikrotik/aps-autorizados.rsc, CENARIO 3.
+     Deixe {} se voce tem um hotspot so.                                      */
+  locais: {
+    /* "hs-blocoA": "Bloco A - terreo", */
+    /* "hs-blocoB": "Bloco B - terreo", */
+  },
+
+  /* Avisar quando o bloco declarado nao bate com o AP em que a pessoa esta?
+     Nao bloqueia o acesso -- so registra a divergencia no cadastro.     */
+  conferirBloco: true,
+
   /* Campos extras -- coloque false para esconder */
   pedirCpf: true,
   pedirCelular: true,
@@ -155,6 +169,13 @@ var HOTSPOT = {
 })();
 
 function el(id){ return document.getElementById(id); }
+
+/* Local fisico do AP em que a pessoa esta, a partir do servidor hotspot. */
+function localDoAp(){
+  var srv = HOTSPOT.servidor || "";
+  if (CONFIG.locais && CONFIG.locais[srv]) return CONFIG.locais[srv];
+  return srv;
+}
 
 /* ---------- mascaras ---------- */
 function soDigitos(v){ return (v || "").replace(/\D+/g, ""); }
@@ -333,8 +354,19 @@ function enviar(){
     ip:    HOTSPOT.ip,
     servidor: HOTSPOT.servidor,
     roteador: HOTSPOT.identidade,
+    local: localDoAp(),
     data:  new Date().toISOString()
   };
+
+  /* Marca quando o bloco informado nao bate com o AP em que a pessoa esta. */
+  dados.confere = "";
+  if (CONFIG.conferirBloco && dados.local && dados.bloco){
+    var alvo = dados.local.toUpperCase();
+    var bl   = ("BLOCO " + dados.bloco).toUpperCase();
+    if (alvo.indexOf(bl) === -1 && alvo.indexOf("BLOCO") !== -1){
+      dados.confere = "divergente: declarou " + bl + ", conectado em " + dados.local;
+    }
+  }
 
   try { window.localStorage.setItem("vn_wifi_cadastro", JSON.stringify(dados)); } catch (e) {}
 

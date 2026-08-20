@@ -20,7 +20,7 @@ function doPost(e) {
   if (aba.getLastRow() === 0) {
     aba.appendRow([
       'Data/hora', 'Nome completo', 'CPF', 'Bloco', 'Apartamento',
-      'Celular', 'MAC', 'IP', 'Servidor', 'Roteador'
+      'Celular', 'AP / Local', 'Confere?', 'MAC', 'IP', 'Servidor', 'Roteador'
     ]);
     aba.setFrozenRows(1);
   }
@@ -35,6 +35,8 @@ function doPost(e) {
     d.bloco || '',
     d.ap    || '',
     d.fone  || '',
+    d.local || '',
+    d.confere || 'ok',
     d.mac   || '',
     d.ip    || '',
     d.servidor || '',

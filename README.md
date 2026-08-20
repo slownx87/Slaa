@@ -25,6 +25,7 @@ então qualquer recurso externo simplesmente não carregaria.
 | `hotspot/rlogin.html`, `hotspot/redirect.html` | Páginas internas de redirecionamento do hotspot. |
 | `mikrotik/hotspot-existente.rsc` | **Use este se você já tem hotspot.** 3 comandos para apontar o portal. |
 | `mikrotik/hotspot-novo.rsc` | Use este se vai montar o hotspot do zero (IP, pool, DHCP, perfil). |
+| `mikrotik/aps-autorizados.rsc` | Autorizar os APs/roteadores por MAC — só os cadastrados entregam o Wi-Fi. |
 | `webhook/google-apps-script.js` | Opcional: grava cada cadastro numa planilha do Google. |
 
 ---
@@ -184,6 +185,42 @@ Para volume maior, o certo é mandar para um syslog externo:
 /system logging action add name=syslog target=remote remote=192.168.88.50 remote-port=514
 /system logging add topics=hotspot,info action=syslog
 ```
+
+### 4.6 Autorizar os APs por MAC
+
+Se você quer que **só os roteadores cadastrados** entreguem o Wi-Fi com o
+portal, o arquivo é `mikrotik/aps-autorizados.rsc`.
+
+Antes de aplicar, entenda a limitação: **o hotspot não enxerga o MAC do AP.**
+Um AP em modo bridge repassa os quadros do celular sem trocar o MAC de origem,
+então o MikroTik só vê o MAC do celular. Não existe "filtro de AP" dentro do
+hotspot — o bloqueio precisa acontecer uma camada antes, e o método depende de
+como os seus APs estão ligados:
+
+| Sua rede | Como autorizar |
+|---|---|
+| APs MikroTik com CAPsMAN | Regra de provisionamento por `radio-mac`. AP fora da lista conecta mas não recebe configuração, então não emite SSID nenhum. É o whitelist de verdade. |
+| APs de outra marca em portas do MikroTik | Não dá para autorizar o AP em si, mas dá para bloquear **roteador estranho plugado na rede** (ele faz NAT, então o tráfego sai com o MAC dele e com o TTL decrementado). |
+| Um hotspot/VLAN por AP | AP sem VLAN e sem hotspot configurado simplesmente não tem login. De quebra, o portal passa a saber de qual bloco veio o acesso. |
+
+Para descobrir o MAC de cada AP:
+```
+/ip neighbor print
+/interface bridge host print where !local
+```
+
+Se você for pelo caminho de um hotspot por AP, preencha o `CONFIG.locais` do
+`login.html` para o cadastro registrar o local:
+```js
+locais: {
+  "hs-blocoA": "Bloco A - térreo",
+  "hs-blocoB": "Bloco B - térreo"
+},
+conferirBloco: true
+```
+Com isso o cadastro grava de qual AP a pessoa conectou e marca quando o bloco
+declarado não bate com o AP — útil para achar quem informa bloco errado. **Não
+bloqueia o acesso**, só registra a divergência na coluna `Confere?`.
 
 ---
 
