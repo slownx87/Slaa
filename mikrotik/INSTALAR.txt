@@ -1,0 +1,82 @@
+===============================================================================
+ VN SYSTEM - INSTALACAO EM UMA LINHA
+ RouterOS 6 e 7 | roteador com configuracao de fabrica | arquivos ja subidos
+===============================================================================
+
+ PASSO 1 - Confira que os arquivos estao la
+-------------------------------------------------------------------------------
+/file print where name~"hotspot-vn"
+
+ Tem que listar 9 arquivos. Se nao listar, suba a pasta hotspot-vn antes.
+
+
+ PASSO 2 - Cole a linha inteira
+-------------------------------------------------------------------------------
+
+:do {/ip hotspot remove [find name=hotspot-vn]} on-error={}; :do {/ip hotspot user remove [find name=visitante]} on-error={}; :do {/ip hotspot user profile remove [find name=moradores]} on-error={}; :do {/ip hotspot profile remove [find name=perfil-vn]} on-error={}; :do {/ip hotspot ip-binding remove [find comment~"equipamentos"]} on-error={}; :do {/system script remove [find name=wifi-registrar]} on-error={}; :do {/system logging remove [find where action="txt-wifi"]} on-error={}; :do {/system logging action remove [find name=txt-wifi]} on-error={}; :local br [/interface bridge get [:pick [/interface bridge find] 0] name]; :local pl [/ip dhcp-server get [:pick [/ip dhcp-server find] 0] address-pool]; :local ipr [/ip address get [:pick [/ip address find where interface=$br] 0] address]; :local gw [:pick $ipr 0 [:find $ipr "/"]]; :put ("bridge=" . $br . "  pool=" . $pl . "  gateway=" . $gw); /ip hotspot profile add name=perfil-vn hotspot-address=$gw html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d; /ip hotspot add name=hotspot-vn interface=$br address-pool=$pl profile=perfil-vn addresses-per-mac=2 idle-timeout=30m disabled=no; /ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M idle-timeout=30m; /ip hotspot user add name=visitante password=visitante profile=moradores comment="portal VN"; /system script add name=wifi-registrar policy=read,write,test source={:local ap "-"; :do {:local l [/ip dhcp-server lease find where mac-address=$"mac-address"]; :if ([:len $l] > 0) do={:local h [/ip dhcp-server lease get [:pick $l 0] host-name]; :if ([:len $h] > 0) do={:set ap $h}}} on-error={}; :log info ("WIFI;" . $user . ";" . $address . ";" . $"mac-address" . ";" . [:tostr $ap])}; /ip hotspot user profile set [find name=moradores] on-login="/system script run wifi-registrar"; /system logging action add name=txt-wifi target=disk disk-file-name=cadastros-wifi disk-lines-per-file=20000 disk-file-count=10; /system logging add topics=hotspot,info action=txt-wifi; /system logging add topics=script,info action=txt-wifi; :do {/system ntp client set enabled=yes primary-ntp=200.160.7.186 secondary-ntp=200.189.40.8} on-error={:do {/system ntp client set enabled=yes servers=200.160.7.186,a.st1.ntp.br} on-error={}}; :do {/system clock set time-zone-name=America/Sao_Paulo} on-error={}; :do {/ip pool set [find name=$pl] ranges=192.168.88.50-192.168.88.254; /ip hotspot ip-binding add address=192.168.88.2-192.168.88.49 type=bypassed comment="equipamentos - sem login"} on-error={:put "AVISO: nao consegui reservar a faixa dos equipamentos, veja o passo 4 do arquivo"}; :put "PRONTO - conecte um celular e teste"
+
+
+ PASSO 3 - Teste
+-------------------------------------------------------------------------------
+/ip hotspot active remove [find]
+
+ Conecte um celular. Deve abrir a tela pedindo nome, bloco, apartamento e
+ e-mail. Se ja estava conectado, esqueca a rede e conecte de novo.
+
+ Depois do cadastro:
+
+/log print where message~"WIFI;"
+
+ Tem que aparecer uma linha assim:
+
+   WIFI;visitante;192.168.88.55;AA:BB:CC:11:22:33;iPhone-de-Maria
+
+ Deu certo? Salve:
+
+/system backup save name=funcionando
+
+
+ PASSO 4 - So se aparecer o AVISO sobre a faixa dos equipamentos
+-------------------------------------------------------------------------------
+ Significa que o seu RouterOS nao aceitou liberar a faixa de uma vez. Libere
+ cada equipamento pelo MAC, que funciona em qualquer versao:
+
+/ip hotspot ip-binding add mac-address=AA:BB:CC:00:00:10 type=bypassed comment="DVR"
+
+ Ou pelo WinBox, sem digitar MAC nenhum:
+ IP > Hotspot > aba Hosts > clique no equipamento > Make Binding > bypassed
+
+
+===============================================================================
+ O QUE A LINHA FAZ, NA ORDEM
+===============================================================================
+ 1. Apaga o que tentativas anteriores criaram (nao mexe na config de fabrica)
+ 2. Descobre sozinha o nome da bridge, do pool e o IP do roteador
+ 3. Cria o perfil apontando para a pasta hotspot-vn e sobe o hotspot
+ 4. Cria o perfil "moradores" e a conta "visitante"
+ 5. Instala o script de registro e liga ele no login
+ 6. Manda o log para arquivo com rotacao
+ 7. Acerta relogio e fuso (senao a data do registro vem errada)
+ 8. Reserva a faixa .2 a .49 para equipamentos sem login
+
+ Pode colar de novo quantas vezes quiser: ela limpa antes de criar.
+
+
+===============================================================================
+ POR QUE NAO GRAVA NUM .txt PROPRIO
+===============================================================================
+ O RouterOS 6 nao tem /file add, e o /file set contents dele trava perto de
+ 4 KB -- umas 60 linhas e o arquivo parava de crescer.
+
+ Entao o registro vai pelo log, e o log ja vai para arquivo com rotacao
+ automatica: sem limite de tamanho e igual no 6 e no 7. O arquivo e o
+ cadastros-wifi.0.txt, em Files.
+
+
+===============================================================================
+ LEMBRETE
+===============================================================================
+ Nome, e-mail, bloco e apartamento NAO entram no registro. O hotspot so serve
+ arquivos estaticos, nao ha para onde a pagina postar esses campos dentro do
+ roteador. O que fica gravado e: data, hora, usuario, IP, MAC e o nome do
+ aparelho.
