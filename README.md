@@ -244,7 +244,64 @@ Para volume maior, o certo é mandar para um syslog externo:
 /system logging add topics=hotspot,info action=syslog
 ```
 
-### 4.6 Equipamentos que não devem fazer login
+### 4.6 Hospedar na Hostinger
+
+A Hostinger é PHP + MySQL, então o coletor em Node (`coletor/`) não roda lá.
+Use a pasta **`hostinger/`** — mesma função, escrita em PHP.
+
+**1. Crie o banco.** hPanel → *Bancos de dados MySQL* → crie banco e usuário.
+Anote os três nomes (eles vêm com prefixo, tipo `u123456789_wifi`).
+
+**2. Crie a tabela.** hPanel → *phpMyAdmin* → aba **SQL** → cole o conteúdo de
+`hostinger/banco.sql` → Executar.
+
+**3. Configure.** Abra `hostinger/config.php` e preencha `DB_*`. Depois gere
+seus próprios segredos:
+```
+php -r "echo bin2hex(random_bytes(16));"                    # o TOKEN
+php -r "echo password_hash('suasenha', PASSWORD_DEFAULT);"  # o PAINEL_HASH
+```
+A senha padrão do painel é `trocar123`. **Troque.**
+
+**4. Suba os arquivos.** Gerenciador de arquivos do hPanel → dentro de
+`public_html`, crie a pasta `wifi` e mande a pasta `hostinger/` inteira para lá
+(incluindo o `.htaccess` e a sua `logo.png`).
+
+**5. Ligue o portal no site.** No `hotspot/login.html`:
+```js
+webhook: "https://seudominio.com.br/wifi/receber.php",
+token:   "o-mesmo-token-do-config.php",
+```
+
+**6. Libere no walled garden.** Sem isso o celular não alcança o site antes do
+login. Para HTTPS tem que ser o walled garden **de IP**:
+```
+/ip hotspot walled-garden ip add dst-host=seudominio.com.br action=accept
+```
+> O `/ip hotspot walled-garden` (sem o `ip`) só funciona para HTTP. Para HTTPS
+> é o `walled-garden ip`, que resolve o domínio e libera no nível de IP.
+
+**Pronto.** O painel fica em `https://seudominio.com.br/wifi/painel.php` — tem
+busca por nome/CPF/apartamento/MAC, filtro por bloco e período, os contadores
+do dia, exportação para CSV e botão de excluir (direito de exclusão da LGPD).
+
+O que foi verificado: o endpoint recusa `GET`, recusa token errado, revalida
+nome e CPF no servidor (o navegador pode ser burlado), usa *prepared
+statements* — uma tentativa de `DROP TABLE` no campo nome foi gravada como
+texto e a tabela continuou lá — e o painel escapa a saída, então um
+`<script>` no nome aparece como texto, sem executar.
+
+Três coisas para saber:
+
+- **O token não é segredo forte.** Quem está na rede Wi-Fi consegue lê-lo no
+  código-fonte da página. Ele serve para barrar bot que varre a internet, não
+  para autenticar. Quem quiser fraudar um cadastro consegue.
+- **Ative o HTTPS** no hPanel (o certificado é gratuito). O `.htaccess` já
+  força o redirecionamento.
+- **Você passa a guardar CPF num servidor.** Backup do banco, senha forte no
+  painel e apagar o que não precisa mais deixaram de ser opcionais.
+
+### 4.7 Equipamentos que não devem fazer login
 
 Câmera, DVR, interfone, elevador, portão, impressora, TV box e os próprios APs
 não têm como preencher um formulário. Eles precisam de **bypass** do hotspot —
@@ -291,7 +348,7 @@ de banda e sem registro de quem usou** — só coloque na lista equipamento que
 você controla. E MAC se clona; se a câmera não precisa de internet (quase nunca
 precisa), bloqueie a saída dela para a WAN e deixe só a rede interna.
 
-### 4.7 Autorizar os APs por MAC
+### 4.8 Autorizar os APs por MAC
 
 Se você quer que **só os roteadores cadastrados** entreguem o Wi-Fi com o
 portal, o arquivo é `mikrotik/aps-autorizados.rsc`.

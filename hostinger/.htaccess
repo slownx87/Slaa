@@ -1,0 +1,16 @@
+# VN System - portal Wi-Fi
+
+# Nao deixa baixar o SQL, o log de erros nem backups
+<FilesMatch "\.(sql|log|bak|old|ini)$">
+    Require all denied
+</FilesMatch>
+
+# Sem listagem de diretorio
+Options -Indexes
+
+# Forca HTTPS (a Hostinger ja da certificado gratis; ative no hPanel antes)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTPS} off
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>

@@ -139,11 +139,16 @@ var CONFIG = {
   senha:   "visitante",
   senhaCpf: "",
 
-  /* Webhook opcional (Google Apps Script, n8n, API propria).
-     "" = nao envia nada para fora.
-     O dominio precisa estar no walled garden:
-     /ip hotspot walled-garden add dst-host=script.google.com               */
+  /* Para onde mandar o cadastro. "" = nao envia nada para fora.
+     Na Hostinger fica assim:
+       webhook: "https://seudominio.com.br/wifi/receber.php"
+     O dominio precisa estar liberado no walled garden ANTES do login:
+       /ip hotspot walled-garden ip add dst-host=seudominio.com.br action=accept */
   webhook: "",
+
+  /* Mesmo valor da constante TOKEN do config.php. "" = sem token. */
+  token: "",
+
   webhookTimeout: 3500
 };
 /* ===================== fim da configuracao =============================== */
@@ -355,7 +360,8 @@ function enviar(){
     servidor: HOTSPOT.servidor,
     roteador: HOTSPOT.identidade,
     local: localDoAp(),
-    data:  new Date().toISOString()
+    data:  new Date().toISOString(),
+    token: CONFIG.token || ""
   };
 
   /* Marca quando o bloco informado nao bate com o AP em que a pessoa esta. */
@@ -368,7 +374,11 @@ function enviar(){
     }
   }
 
-  try { window.localStorage.setItem("vn_wifi_cadastro", JSON.stringify(dados)); } catch (e) {}
+  try {
+    var guardar = JSON.parse(JSON.stringify(dados));
+    delete guardar.token;
+    window.localStorage.setItem("vn_wifi_cadastro", JSON.stringify(guardar));
+  } catch (e) {}
 
   enviando = true;
   el("btn").disabled = true;
