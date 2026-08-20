@@ -1,0 +1,86 @@
+===============================================================================
+ VN SYSTEM - ROTEADOR COM CONFIGURACAO DE FABRICA
+===============================================================================
+
+ Use este arquivo se o roteador esta como veio da caixa (ou depois de um reset
+ comum, sem o no-defaults). A fabrica ja deixa pronto:
+
+     bridge com as portas    IP 192.168.88.1      DHCP entregando IP
+     NAT para a internet     DNS                  firewall basico
+
+ Ou seja: NAO e para criar bridge-vn, nem endereco, nem DHCP. Isso ja existe.
+ So falta por o hotspot em cima. E o que a linha do PASSO 2 faz.
+
+ BOA NOTICIA: seu IP nao muda, entao voce nao perde a conexao no meio.
+
+
+===============================================================================
+ PASSO 1 - Subir os arquivos  (manual)
+===============================================================================
+
+ WinBox > Files > arraste os 9 arquivos para uma pasta chamada  hotspot-vn
+
+ Confira antes de seguir:
+
+/file print where name~"hotspot-vn"
+
+
+===============================================================================
+ PASSO 2 - A LINHA  (copie inteira e cole de uma vez)
+===============================================================================
+
+:local br [/interface bridge get [:pick [/interface bridge find] 0] name]; :local pl [/ip dhcp-server get [:pick [/ip dhcp-server find] 0] address-pool]; :put ("bridge encontrada: " . $br . "   pool: " . $pl); /ip pool set [find name=$pl] ranges=192.168.88.50-192.168.88.254; /ip hotspot profile add name=perfil-vn hotspot-address=192.168.88.1 html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d; /ip hotspot add name=hotspot-vn interface=$br address-pool=$pl profile=perfil-vn addresses-per-mac=2 idle-timeout=30m disabled=no; /ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M idle-timeout=30m; /ip hotspot user add name=visitante password=visitante profile=moradores comment="portal VN"; /ip hotspot ip-binding add address=192.168.88.2-192.168.88.49 type=bypassed comment="equipamentos - sem login"; /system script add name=wifi-registrar policy=read,write,test source={:local arq "acessos-wifi.txt"; :local aparelho "-"; :do {:local lease [/ip dhcp-server lease find where mac-address=$"mac-address"]; :if ([:len $lease] > 0) do={:local hn [/ip dhcp-server lease get [:pick $lease 0] host-name]; :if ([:len $hn] > 0) do={:set aparelho $hn}}} on-error={:set aparelho "-"}; :set aparelho [:tostr $aparelho]; :local limpo ""; :for i from=0 to=([:len $aparelho] - 1) do={:local c [:pick $aparelho $i]; :if ($c != ";" and $c != "\n" and $c != "\r") do={:set limpo ($limpo . $c)}}; :local linha ([/system clock get date] . ";" . [/system clock get time] . ";" . $user . ";" . $address . ";" . $"mac-address" . ";" . $limpo); :if ([:len [/file find name=$arq]] = 0) do={/file add name=$arq contents=("data;hora;usuario;ip;mac;aparelho\r\n"); :delay 1s}; :if ([/file get [find name=$arq] size] > 500000) do={:log warning "wifi-registrar: arquivo cheio"} else={/file set [find name=$arq] contents=([/file get [find name=$arq] contents] . $linha . "\r\n")}}; /ip hotspot user profile set [find name=moradores] on-login="/system script run wifi-registrar"; /system logging action add name=txt-wifi target=disk disk-file-name=cadastros-wifi disk-lines-per-file=20000 disk-file-count=10 disk-stop-on-full=no; /system logging add topics=hotspot,info action=txt-wifi; /system ntp client set enabled=yes servers=200.160.7.186,a.st1.ntp.br; /system clock set time-zone-name=America/Sao_Paulo; :put "PRONTO. Conecte um celular e teste."
+
+
+ Ela descobre sozinha o nome da bridge e do pool -- por isso nao importa como
+ se chamam no seu. A primeira coisa que ela imprime e o que encontrou:
+
+     bridge encontrada: bridge   pool: default-dhcp
+
+ E encolhe o pool para comecar no .50, deixando .2 a .49 para os equipamentos
+ passarem sem login. Sem isso um celular poderia pegar um IP da faixa liberada
+ e navegar sem cadastro.
+
+
+===============================================================================
+ PASSO 3 - Testar
+===============================================================================
+
+/ip hotspot print
+/ip hotspot user print
+
+ Conecte um celular. Deve abrir a tela pedindo nome, bloco, apartamento e
+ e-mail. Se ja estava conectado, esqueca a rede e conecte de novo.
+
+ Depois do cadastro, leia o arquivo:
+
+:put [/file get [find name="acessos-wifi.txt"] contents]
+
+ Deu certo? Salve:
+
+/system backup save name=funcionando
+
+
+===============================================================================
+ SE PARAR NO MEIO COM ERRO
+===============================================================================
+ Cole esta para desfazer, e depois a de cima de novo.
+ Ela nao mexe na configuracao de fabrica, so no que este projeto cria.
+
+:do {/ip hotspot remove [find name=hotspot-vn]} on-error={}; :do {/ip hotspot user remove [find name=visitante]} on-error={}; :do {/ip hotspot user profile remove [find name=moradores]} on-error={}; :do {/ip hotspot profile remove [find name=perfil-vn]} on-error={}; :do {/ip hotspot ip-binding remove [find comment~"equipamentos"]} on-error={}; :do {/system script remove [find name=wifi-registrar]} on-error={}; :do {/system logging remove [find where action="txt-wifi"]} on-error={}; :do {/system logging action remove [find name=txt-wifi]} on-error={}
+
+
+===============================================================================
+ O ERRO QUE VOCE VIU
+===============================================================================
+ "input does not match any value of interface"
+
+ Voce mandou usar a bridge-vn, que nao existe no seu roteador. Na configuracao
+ de fabrica a bridge ja vem criada e se chama apenas "bridge". Para ver o nome
+ da sua:
+
+/interface bridge print
+
+ O arquivo 00-DO-ZERO.txt so serve depois de um reset com no-defaults=yes, que
+ apaga tudo e ai sim voce monta a bridge do zero. Com a fabrica no lugar, use
+ este arquivo aqui.
