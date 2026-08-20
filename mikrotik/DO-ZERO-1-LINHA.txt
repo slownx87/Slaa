@@ -1,0 +1,89 @@
+===============================================================================
+ VN SYSTEM - DO ZERO, EM UMA LINHA
+===============================================================================
+
+ O QUE NAO CABE NA LINHA (e manual mesmo, nao tem jeito):
+   1. o reset, porque ele pergunta y/N e reinicia
+   2. subir os 9 arquivos, porque e arrastar no WinBox
+   3. a senha do admin, porque so voce sabe qual e
+
+ CONECTE PELO MAC. WinBox > aba Neighbors > clique no MAC, nao no IP.
+ No meio da linha o IP do roteador vira 10.10.0.1. Quem entrou por IP cai
+ fora e nao ve o resto; quem entrou por MAC continua vendo.
+
+ Faca com o roteador do seu lado, com cabo.
+
+
+===============================================================================
+ PASSO 1 - Backup e reset  (manual)
+===============================================================================
+
+/system backup save name=antes-do-zero
+
+ Baixe o arquivo em Files. Depois:
+
+/system reset-configuration no-defaults=yes skip-backup=yes
+
+ Responda y. O roteador reinicia sem nada. Reconecte pelo MAC.
+
+ O  no-defaults=yes  e obrigatorio. Sem ele o roteador volta com bridge, DHCP
+ e NAT ja configurados, e a linha do PASSO 3 vai bater de frente com eles.
+
+
+===============================================================================
+ PASSO 2 - Subir os arquivos  (manual)
+===============================================================================
+
+ WinBox > Files > arraste os 9 arquivos para uma pasta chamada  hotspot-vn
+
+
+===============================================================================
+ PASSO 3 - A LINHA  (copie inteira e cole de uma vez)
+===============================================================================
+
+/system identity set name=VN-HOTSPOT; /interface bridge add name=bridge-vn; :foreach i in=[/interface ethernet find where name!="ether1"] do={:do {/interface bridge port add bridge=bridge-vn interface=[/interface ethernet get $i name]} on-error={}}; :do {:foreach i in=[/interface wireless find] do={/interface bridge port add bridge=bridge-vn interface=[/interface wireless get $i name]}} on-error={}; :do {:foreach i in=[/interface wifi find] do={/interface bridge port add bridge=bridge-vn interface=[/interface wifi get $i name]}} on-error={}; :do {/interface wireless security-profiles set [find default=yes] mode=none; /interface wireless set [find] ssid="VN-System" mode=ap-bridge disabled=no} on-error={}; :do {/interface wifi set [find] configuration.ssid="VN-System" configuration.mode=ap security.authentication-types="" disabled=no} on-error={}; /ip address add address=10.10.0.1/24 interface=bridge-vn; /ip pool add name=pool-vn ranges=10.10.0.50-10.10.0.254; /ip dhcp-server add name=dhcp-vn interface=bridge-vn address-pool=pool-vn lease-time=2h disabled=no; /ip dhcp-server network add address=10.10.0.0/24 gateway=10.10.0.1 dns-server=10.10.0.1; /ip dhcp-client add interface=ether1 disabled=no; /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade; /ip dns set servers=1.1.1.1,8.8.8.8 allow-remote-requests=yes; /ip firewall filter add chain=input action=accept connection-state=established,related; /ip firewall filter add chain=input action=accept protocol=icmp; /ip firewall filter add chain=input action=accept in-interface=bridge-vn; /ip firewall filter add chain=input action=drop in-interface=ether1; /ip hotspot profile add name=perfil-vn hotspot-address=10.10.0.1 html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d; /ip hotspot add name=hotspot-vn interface=bridge-vn address-pool=pool-vn profile=perfil-vn addresses-per-mac=2 idle-timeout=30m disabled=no; /ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M idle-timeout=30m; /ip hotspot user add name=visitante password=visitante profile=moradores comment="portal VN"; /ip hotspot ip-binding add address=10.10.0.2-10.10.0.49 type=bypassed comment="equipamentos - sem login"; /system script add name=wifi-registrar policy=read,write,test source={:local arq "acessos-wifi.txt"; :local aparelho "-"; :do {:local lease [/ip dhcp-server lease find where mac-address=$"mac-address"]; :if ([:len $lease] > 0) do={:local hn [/ip dhcp-server lease get [:pick $lease 0] host-name]; :if ([:len $hn] > 0) do={:set aparelho $hn}}} on-error={:set aparelho "-"}; :set aparelho [:tostr $aparelho]; :local limpo ""; :for i from=0 to=([:len $aparelho] - 1) do={:local c [:pick $aparelho $i]; :if ($c != ";" and $c != "\n" and $c != "\r") do={:set limpo ($limpo . $c)}}; :local linha ([/system clock get date] . ";" . [/system clock get time] . ";" . $user . ";" . $address . ";" . $"mac-address" . ";" . $limpo); :if ([:len [/file find name=$arq]] = 0) do={/file add name=$arq contents=("data;hora;usuario;ip;mac;aparelho\r\n"); :delay 1s}; :if ([/file get [find name=$arq] size] > 500000) do={:log warning "wifi-registrar: arquivo cheio"} else={/file set [find name=$arq] contents=([/file get [find name=$arq] contents] . $linha . "\r\n")}}; /ip hotspot user profile set [find name=moradores] on-login="/system script run wifi-registrar"; /system logging action add name=txt-wifi target=disk disk-file-name=cadastros-wifi disk-lines-per-file=20000 disk-file-count=10 disk-stop-on-full=no; /system logging add topics=hotspot,info action=txt-wifi; /system ntp client set enabled=yes servers=200.160.7.186,a.st1.ntp.br; /system clock set time-zone-name=America/Sao_Paulo
+
+
+ Assume ether1 = cabo da internet e o resto = rede interna.
+ As portas da bridge ele descobre sozinho, nao importa quantas o seu tem.
+ Os dois tipos de Wi-Fi sao tentados; o que nao for o seu e ignorado.
+
+
+===============================================================================
+ PASSO 4 - Senha do admin  (troque antes de colar)
+===============================================================================
+
+/user set [find name=admin] password="SUA-SENHA-AQUI"
+
+
+===============================================================================
+ PASSO 5 - Testar
+===============================================================================
+
+/ip address print
+/ping 1.1.1.1 count=4
+/ip hotspot print
+
+ Conecte um celular na rede VN-System. Depois de fazer o cadastro:
+
+:put [/file get [find name="acessos-wifi.txt"] contents]
+
+ Deu certo? Salve o estado bom:
+
+/system backup save name=funcionando
+
+
+===============================================================================
+ SE A LINHA PARAR NO MEIO COM ERRO
+===============================================================================
+ Cole esta para desfazer tudo que ela cria, e depois cole a de cima de novo.
+ So mexe no que este projeto cria.
+
+:do {/ip hotspot remove [find name=hotspot-vn]} on-error={}; :do {/ip hotspot user remove [find name=visitante]} on-error={}; :do {/ip hotspot user profile remove [find name=moradores]} on-error={}; :do {/ip hotspot profile remove [find name=perfil-vn]} on-error={}; :do {/ip hotspot ip-binding remove [find comment~"equipamentos"]} on-error={}; :do {/system script remove [find name=wifi-registrar]} on-error={}; :do {/system logging remove [find where action="txt-wifi"]} on-error={}; :do {/system logging action remove [find name=txt-wifi]} on-error={}; :do {/ip dhcp-server network remove [find address="10.10.0.0/24"]} on-error={}; :do {/ip dhcp-server remove [find name=dhcp-vn]} on-error={}; :do {/ip pool remove [find name=pool-vn]} on-error={}; :do {/ip address remove [find interface=bridge-vn]} on-error={}; :do {/interface bridge port remove [find bridge=bridge-vn]} on-error={}; :do {/interface bridge remove [find name=bridge-vn]} on-error={}
+
+
+===============================================================================
+ SE SUA INTERNET NAO FOR A ether1
+===============================================================================
+ Troque ether1 pelo nome certo nos tres lugares em que ele aparece na linha:
+ no :foreach da bridge, no /ip dhcp-client e nas duas regras com ether1.
