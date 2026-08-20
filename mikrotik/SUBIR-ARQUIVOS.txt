@@ -1,0 +1,121 @@
+===============================================================================
+ VN SYSTEM - TROCAR AS PAGINAS DA MIKROTIK PELAS SUAS
+===============================================================================
+
+ POR QUE NAO DA POR COMANDO
+ --------------------------
+ No RouterOS 6 o /file set so aceita  contents . Nao existe renomear nem mover
+ arquivo pela linha de comando -- por isso qualquer tentativa de mandar o
+ arquivo para dentro da pasta  hotspot  responde:
+
+     expected end of command
+
+ A pasta  hotspot  o proprio RouterOS cria quando voce cria o servidor hotspot,
+ e ela ja vem com as paginas padrao da MikroTik. O que voce faz e SUBSTITUIR
+ essas paginas pelas suas, e isso e por FTP.
+
+
+===============================================================================
+ CONFIRA QUE O FTP ESTA LIGADO
+===============================================================================
+
+/ip service print
+
+ A linha  ftp  tem que estar sem "X" (sem disabled). Se estiver desligada:
+
+/ip service enable ftp
+
+
+===============================================================================
+ JEITO 1 - WINDOWS, SEM INSTALAR NADA
+===============================================================================
+
+ 1. Abra o Explorador de Arquivos (a pasta amarela da barra de tarefas)
+ 2. Na barra de endereco digite:      ftp://192.168.88.1
+ 3. Usuario  admin  e a sua senha
+ 4. Duplo clique na pasta   hotspot
+ 5. Arraste os 9 arquivos para dentro, confirmando substituir
+
+ Se o Windows reclamar de "pasta FTP somente leitura", use o JEITO 2.
+
+
+===============================================================================
+ JEITO 2 - FILEZILLA  (mais confiavel)
+===============================================================================
+
+ Baixe em filezilla-project.org, e conecte com:
+
+     Host      192.168.88.1
+     Usuario   admin
+     Senha     a sua
+     Porta     21
+
+ No painel da direita entre na pasta  hotspot  e arraste os 9 arquivos.
+
+
+===============================================================================
+ JEITO 3 - WINBOX
+===============================================================================
+
+ Files > arraste os arquivos SOLTANDO EM CIMA DA LINHA  hotspot , nao no
+ espaco vazio da janela. Soltar no vazio joga tudo na raiz, e da raiz nao da
+ para mover no ROS 6.
+
+
+===============================================================================
+ CONFERIR SE TROCOU MESMO
+===============================================================================
+
+/file print where name~"hotspot/"
+
+ Compare os tamanhos. Fica facil saber quem e quem:
+
+     ARQUIVO           MIKROTIK      O SEU
+     login.html          4423 B     ~15 KiB
+     md5.js              7.0 KiB     5.6 KiB
+     alogin.html         1094 B      1349 B
+     error.html           640 B       962 B
+     logout.html         1459 B      1169 B
+     redirect.html        330 B       267 B
+     rlogin.html          877 B       521 B
+     status.html         2855 B      1657 B
+     vn.css            nao existe    14 KiB
+
+ O  vn.css  e o mais facil de checar: se ele aparecer na lista, subiu.
+ Se  login.html  continuar com 4423 B, nao substituiu.
+
+ NAO APAGUE: errors.txt, favicon.ico e as pastas css, img e xml.
+ Elas sao da MikroTik e nao atrapalham em nada.
+
+
+===============================================================================
+ TESTAR
+===============================================================================
+
+/ip hotspot active remove [find]
+
+ No celular: ESQUECA A REDE e conecte de novo. So reconectar nao adianta --
+ o portal cativo do Android e do iPhone guarda a tela antiga em cache.
+
+ Tem que aparecer a tela escura com a marca VN System pedindo nome, bloco,
+ apartamento e e-mail. Se aparecer a tela branca pedindo usuario e senha,
+ ainda e a da MikroTik: volte e confira os tamanhos.
+
+
+===============================================================================
+ SE A SUA TELA APARECER MAS O LOGIN FALHAR
+===============================================================================
+
+ Ai ja e outra etapa: falta a conta que a pagina usa por baixo dos panos.
+
+/ip hotspot user print
+
+ Tem que existir  visitante . Se nao existir:
+
+/ip hotspot user profile add name=moradores shared-users=500
+
+/ip hotspot user add name=visitante password=visitante profile=moradores
+
+ E aceite senha em texto tambem, caso o md5.js nao tenha subido:
+
+/ip hotspot profile set [find] login-by=cookie,http-chap,http-pap
