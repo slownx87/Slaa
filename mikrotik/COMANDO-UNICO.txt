@@ -1,0 +1,54 @@
+===============================================================================
+ VN SYSTEM - TUDO NUM COMANDO SO
+===============================================================================
+
+ ANTES: os 9 arquivos ja tem que estar em Files, numa pasta chamada hotspot-vn
+ e voce ja tem que ter um hotspot criado. Confira as duas coisas:
+
+/file print where name~"hotspot-vn"
+/ip hotspot print
+
+ Se o /ip hotspot print vier VAZIO, rode antes:   /ip hotspot setup
+
+
+===============================================================================
+ O COMANDO  (copie a linha inteira e cole de uma vez)
+===============================================================================
+
+/ip hotspot profile add name=perfil-vn html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d; /ip hotspot set [find] profile=perfil-vn; /ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M idle-timeout=30m; /ip hotspot user add name=visitante password=visitante profile=moradores comment="portal VN"; /system script add name=wifi-registrar policy=read,write,test source={:local arq "acessos-wifi.txt"; :local aparelho "-"; :do {:local lease [/ip dhcp-server lease find where mac-address=$"mac-address"]; :if ([:len $lease] > 0) do={:local hn [/ip dhcp-server lease get [:pick $lease 0] host-name]; :if ([:len $hn] > 0) do={:set aparelho $hn}}} on-error={:set aparelho "-"}; :set aparelho [:tostr $aparelho]; :local limpo ""; :for i from=0 to=([:len $aparelho] - 1) do={:local c [:pick $aparelho $i]; :if ($c != ";" and $c != "\n" and $c != "\r") do={:set limpo ($limpo . $c)}}; :local linha ([/system clock get date] . ";" . [/system clock get time] . ";" . $user . ";" . $address . ";" . $"mac-address" . ";" . $limpo); :if ([:len [/file find name=$arq]] = 0) do={/file add name=$arq contents=("data;hora;usuario;ip;mac;aparelho\r\n"); :delay 1s}; :if ([/file get [find name=$arq] size] > 500000) do={:log warning "wifi-registrar: arquivo cheio"} else={/file set [find name=$arq] contents=([/file get [find name=$arq] contents] . $linha . "\r\n")}}; /ip hotspot user profile set [find name=moradores] on-login="/system script run wifi-registrar"; /system logging action add name=txt-wifi target=disk disk-file-name=cadastros-wifi disk-lines-per-file=20000 disk-file-count=10 disk-stop-on-full=no; /system logging add topics=hotspot,info action=txt-wifi; /ip hotspot active remove [find]
+
+
+ Ele faz, nesta ordem: cria o perfil apontando para a pasta hotspot-vn,
+ aplica no seu hotspot, cria o perfil de usuario e a conta visitante, instala
+ o script que grava o txt, liga o script no login, liga o log em arquivo e
+ derruba quem estiver conectado para ja aparecer a tela nova.
+
+
+===============================================================================
+ SE DER "already have such name"
+===============================================================================
+ Parte ja existe de uma tentativa anterior. Cole a linha abaixo para limpar
+ tudo que este projeto cria, e depois cole o comando de cima de novo.
+ Ela nao mexe em mais nada do seu roteador.
+
+:do {/ip hotspot set [find] profile=default} on-error={}; :do {/ip hotspot user remove [find name=visitante]} on-error={}; :do {/ip hotspot user profile remove [find name=moradores]} on-error={}; :do {/ip hotspot profile remove [find name=perfil-vn]} on-error={}; :do {/system script remove [find name=wifi-registrar]} on-error={}; :do {/system logging remove [find where action="txt-wifi"]} on-error={}; :do {/system logging action remove [find name=txt-wifi]} on-error={}
+
+
+===============================================================================
+ CONFERIR DEPOIS
+===============================================================================
+/ip hotspot print detail
+/ip hotspot user print
+/system script print
+
+ Conecte um celular, faca o cadastro, e leia o arquivo:
+
+:put [/file get [find name="acessos-wifi.txt"] contents]
+
+
+===============================================================================
+ OBSERVACAO
+===============================================================================
+ Comando unico e pratico, mas se algo falhar no meio o resto nao roda e fica
+ dificil saber onde parou. Se der problema, use o COMANDOS-1-LINHA.txt, que
+ separa tudo e mostra exatamente qual passo falhou.
