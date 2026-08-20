@@ -27,7 +27,9 @@ então qualquer recurso externo simplesmente não carregaria.
 | `mikrotik/hotspot-novo.rsc` | Use este se vai montar o hotspot do zero (IP, pool, DHCP, perfil). |
 | `mikrotik/aps-autorizados.rsc` | Autorizar os APs/roteadores por MAC — só os cadastrados entregam o Wi-Fi. |
 | `mikrotik/equipamentos-sem-login.rsc` | Câmeras, DVR, interfone, APs e afins passando direto, sem ver o portal. |
-| `webhook/google-apps-script.js` | Opcional: grava cada cadastro numa planilha do Google. |
+| `coletor/servidor.js` | Recebe os cadastros **no seu computador** e grava em CSV/JSONL. Sem nuvem. |
+| `coletor/iniciar-windows.bat` | Duplo clique para ligar o coletor no Windows. |
+| `webhook/google-apps-script.js` | Alternativa: grava cada cadastro numa planilha do Google. |
 
 ---
 
@@ -172,6 +174,61 @@ Instruções de como publicar a planilha estão em `webhook/google-apps-script.j
 
 Se você deixar `webhook: ""`, nada é enviado para fora — os cadastros ficam só
 no aparelho da pessoa e o registro de acesso fica no log do roteador.
+
+### 4.4b Salvar os cadastros no seu computador
+
+Se você não quer os dados dos moradores numa planilha do Google, o coletor em
+`coletor/` roda na sua máquina e recebe os cadastros direto do portal. Não usa
+nuvem, não usa biblioteca nenhuma — só o Node.js.
+
+**1. Instale o Node.js** ([nodejs.org](https://nodejs.org), versão LTS).
+
+**2. Ligue o coletor.** No Windows, duplo clique em `iniciar-windows.bat`. No
+Linux/Mac, `./iniciar-linux-mac.sh`. Ou, em qualquer sistema:
+```
+node servidor.js
+```
+Ele abre o painel em `http://localhost:3000` e grava dois arquivos ao lado do
+`servidor.js`:
+
+| Arquivo | Para quê |
+|---|---|
+| `cadastros.csv` | Abre no Excel com dois cliques (já vem com BOM e separador `;`). |
+| `cadastros.jsonl` | Um cadastro por linha, para reprocessar depois. |
+
+**3. Descubra o IP do seu computador na rede** (`ipconfig` no Windows,
+`ip a` no Linux). Precisa ser um IP fixo — se mudar, o portal para de gravar.
+Reserve no MikroTik:
+```
+/ip dhcp-server lease add mac-address=<MAC-do-PC> address=10.10.0.50 server=dhcp-hotspot comment="PC do coletor"
+```
+
+**4. Libere o acesso ao coletor antes do login.** Sem isso o navegador do
+morador não alcança o seu PC, porque ele ainda não passou pelo hotspot:
+```
+/ip hotspot walled-garden ip add dst-address=10.10.0.50 action=accept comment="coletor VN"
+```
+
+**5. Aponte o portal para ele**, no `CONFIG` do `login.html`:
+```js
+webhook: "http://10.10.0.50:3000/",
+```
+
+Pronto. Cada cadastro aparece na hora no painel e no terminal.
+
+> **O coletor precisa estar ligado na hora do cadastro.** Se o PC estiver
+> desligado, a pessoa **ainda consegue conectar** — o portal espera até
+> `webhookTimeout` (3,5s por padrão) e libera o acesso mesmo assim. Isso é de
+> propósito: morador não pode ficar sem internet porque o seu PC caiu. Mas o
+> cadastro daquele acesso se perde.
+>
+> Se o registro não pode ter buracos, deixe o coletor num equipamento que fica
+> sempre ligado (um mini PC na portaria, um Raspberry Pi), ou use a planilha do
+> Google como segunda via.
+
+Os arquivos ficam soltos na pasta, sem senha. Se o computador é compartilhado,
+guarde a pasta num diretório com acesso restrito — são nome, CPF e endereço de
+morador.
 
 ### 4.5 Guardar os logs de acesso
 
