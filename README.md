@@ -23,7 +23,8 @@ então qualquer recurso externo simplesmente não carregaria.
 | `hotspot/logout.html` | Tela de "desconectado". |
 | `hotspot/error.html` | Tela de erro. |
 | `hotspot/rlogin.html`, `hotspot/redirect.html` | Páginas internas de redirecionamento do hotspot. |
-| `mikrotik/setup-hotspot.rsc` | Comandos do RouterOS para criar o hotspot do zero. |
+| `mikrotik/hotspot-existente.rsc` | **Use este se você já tem hotspot.** 3 comandos para apontar o portal. |
+| `mikrotik/hotspot-novo.rsc` | Use este se vai montar o hotspot do zero (IP, pool, DHCP, perfil). |
 | `webhook/google-apps-script.js` | Opcional: grava cada cadastro numa planilha do Google. |
 
 ---
@@ -103,7 +104,7 @@ wordmark "VN SYSTEM" desenhado em CSS, com o mesmo degradê azul da marca.
 ### 4.2 Suba os arquivos
 
 Coloque **todo o conteúdo da pasta `hotspot/`** dentro de uma pasta no roteador.
-Use um nome próprio, por exemplo `hotspot-slaa` — assim uma atualização do
+Use um nome próprio, por exemplo `hotspot-vn` — assim uma atualização do
 RouterOS nunca sobrescreve a sua página.
 
 **Pelo WinBox (mais fácil):**
@@ -115,35 +116,45 @@ RouterOS nunca sobrescreve a sua página.
 **Por FTP** (usuário e senha são os mesmos do RouterOS):
 ```bash
 ftp 192.168.88.1
-# depois: mkdir hotspot-slaa ; cd hotspot-slaa ; binary ; mput *
+# depois: mkdir hotspot-vn ; cd hotspot-vn ; binary ; mput *
 ```
 
 **Por SCP/SFTP** (se o serviço SSH estiver ligado):
 ```bash
-scp -r hotspot/* admin@192.168.88.1:hotspot-slaa/
+scp -r hotspot/* admin@192.168.88.1:hotspot-vn/
 ```
 
 **Baixando direto de uma URL** (dentro do terminal do RouterOS):
 ```
-/tool fetch url="https://seu-servidor/login.html" dst-path=hotspot-slaa/login.html
+/tool fetch url="https://seu-servidor/login.html" dst-path=hotspot-vn/login.html
 ```
 
 ### 4.3 Configure o hotspot
 
-Se ainda **não** tem hotspot, o caminho rápido é o assistente:
-```
-/ip hotspot setup
-```
-Ele pergunta interface, faixa de IP, DNS e cria um usuário. Depois ajuste:
+**Se você JÁ TEM hotspot funcionando** — é só apontar para a pasta nova e criar
+a conta. Abra o terminal do WinBox e cole (`mikrotik/hotspot-existente.rsc`):
 
 ```
-/ip hotspot profile set [find] html-directory=hotspot-slaa login-by=cookie,http-chap http-cookie-lifetime=3d
-/ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M
+/ip hotspot print
+```
+Veja o nome na coluna `PROFILE` (normalmente `hsprof1`) e use ele abaixo:
+```
+/ip hotspot profile set [find name="hsprof1"] html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d
+/ip hotspot user profile add name=moradores shared-users=500 rate-limit=10M/50M idle-timeout=30m
 /ip hotspot user add name=visitante password=visitante profile=moradores
 ```
 
-Se quiser montar tudo do zero, use `mikrotik/setup-hotspot.rsc` como referência
-(leia antes de aplicar, ajustando interface e faixa de IP).
+**Se você AINDA NÃO TEM hotspot** — o caminho rápido é o assistente, que
+pergunta interface, faixa de IP e DNS:
+```
+/ip hotspot setup
+```
+Depois rode os três comandos acima. Para montar tudo na mão (IP, pool, DHCP,
+perfil, logs), use `mikrotik/hotspot-novo.rsc` como referência — leia antes de
+aplicar, ajustando interface e faixa de IP.
+
+> Os `.rsc` **não são para importar às cegas** com `/import`: eles têm nomes de
+> interface e faixas de IP de exemplo. Abra, ajuste e cole bloco por bloco.
 
 Confira que `usuario`/`senha` do `CONFIG` são **exatamente** os mesmos do
 `/ip hotspot user`, senão o login sempre falha.
@@ -262,7 +273,7 @@ Esse segundo reboot é obrigatório — sem ele o firmware novo não entra.
 /system routerboard print
 /ip hotspot print
 /ip hotspot profile print
-/file print where name~"hotspot-slaa"
+/file print where name~"hotspot-vn"
 ```
 Confirme que o `html-directory` ainda aponta para a sua pasta e que os arquivos
 continuam lá. Depois conecte um celular e teste o cadastro de ponta a ponta.

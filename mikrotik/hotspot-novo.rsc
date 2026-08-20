@@ -1,9 +1,12 @@
 # =============================================================================
-#  Hotspot Wi-Fi com identificacao (Nome / CPF / Bloco / Apartamento)
+#  VN System - portal Wi-Fi
+#  USE ESTE se voce ainda NAO TEM hotspot nenhum e vai montar do zero.
+#  Se ja tem hotspot funcionando, use hotspot-existente.rsc (bem mais curto).
+#
 #  RouterOS 6.4x e 7.x
 #
 #  NAO cole tudo de uma vez sem ler. Ajuste os nomes de interface, faixa de IP
-#  e senhas antes de aplicar. Rode linha por linha no terminal do WinBox.
+#  e senhas antes de aplicar. Rode bloco por bloco no terminal do WinBox.
 # =============================================================================
 
 # --- 0) SEMPRE FACA BACKUP ANTES -------------------------------------------
@@ -18,7 +21,7 @@
 #
 #   IFACE = bridge-wifi
 #   REDE  = 10.10.0.0/24  -> gateway 10.10.0.1
-#   DIR   = hotspot-slaa
+#   DIR   = hotspot-vn
 
 # --- 2) Endereco, pool e DHCP ------------------------------------------------
 /ip address add address=10.10.0.1/24 interface=bridge-wifi comment="gateway hotspot"
@@ -29,19 +32,19 @@
 # --- 3) Perfil do servidor hotspot ------------------------------------------
 #  login-by=cookie,http-chap  -> cookie evita pedir o cadastro toda hora
 #  html-directory             -> pasta onde voce subiu os arquivos
-/ip hotspot profile add name=perfil-slaa \
+/ip hotspot profile add name=perfil-vn \
     hotspot-address=10.10.0.1 \
-    dns-name=wifi.slaa \
-    html-directory=hotspot-slaa \
+    dns-name=wifi.vnsystem \
+    html-directory=hotspot-vn \
     login-by=cookie,http-chap \
     http-cookie-lifetime=3d
 
 # Se estiver editando o perfil que ja existe, use:
-# /ip hotspot profile set [find name=hsprof1] html-directory=hotspot-slaa login-by=cookie,http-chap http-cookie-lifetime=3d
+# /ip hotspot profile set [find name=hsprof1] html-directory=hotspot-vn login-by=cookie,http-chap http-cookie-lifetime=3d
 
 # --- 4) Servidor hotspot -----------------------------------------------------
-/ip hotspot add name=wifi-slaa interface=bridge-wifi address-pool=pool-hotspot \
-    profile=perfil-slaa addresses-per-mac=2 idle-timeout=30m keepalive-timeout=5m disabled=no
+/ip hotspot add name=wifi-vn interface=bridge-wifi address-pool=pool-hotspot \
+    profile=perfil-vn addresses-per-mac=2 idle-timeout=30m keepalive-timeout=5m disabled=no
 
 # --- 5) Perfil de usuario (velocidade e quantos aparelhos por conta) ---------
 #  shared-users alto porque TODO MUNDO usa a mesma conta; quem identifica a
@@ -75,4 +78,4 @@
 # /ip hotspot print
 # /ip hotspot active print
 # /ip hotspot user print
-# /file print where name~"hotspot-slaa"
+# /file print where name~"hotspot-vn"
