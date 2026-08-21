@@ -110,9 +110,10 @@ var CONFIG = {
   rodape:   "<b>ORBIT S&Atilde;O CAETANO</b><br>Uso restrito a moradores e visitantes autorizados",
 
   /* Blocos que aparecem no seletor */
-  blocos: ["A", "B", "C", "D", "E", "F"],
+  blocos: ["A", "B"],
 
   /* Campos extras -- false esconde */
+  pedirBloco: true,
   pedirEmail: true,
   pedirCelular: true,
 
@@ -209,7 +210,10 @@ var CAMPOS = ["nome", "bloco", "ap", "email", "fone", "aceite"];
 function checa(id){
   var v, ok;
   if (id === "nome")  return marca("f_nome",  nomeValido(el("nome").value));
-  if (id === "bloco") return marca("f_bloco", el("bloco").value !== "");
+  if (id === "bloco"){
+    if (!CONFIG.pedirBloco) return true;
+    return marca("f_bloco", el("bloco").value !== "");
+  }
   if (id === "ap")    return marca("f_ap",    el("ap").value.trim().length > 0);
   if (id === "email"){
     if (!CONFIG.pedirEmail) return true;
@@ -257,6 +261,10 @@ function revalida(){
     sel.appendChild(o);
   }
 
+  if (!CONFIG.pedirBloco){
+    el("f_bloco").style.display = "none";
+    el("f_ap").className = "field full";
+  }
   if (!CONFIG.pedirEmail)   el("f_email").style.display = "none";
   if (!CONFIG.pedirCelular) el("f_fone").style.display  = "none";
 
@@ -319,7 +327,7 @@ function enviar(){
 
   var dados = {
     nome:  el("nome").value.trim().replace(/\s+/g, " "),
-    bloco: el("bloco").value,
+    bloco: CONFIG.pedirBloco ? el("bloco").value : "",
     ap:    el("ap").value.trim(),
     email: CONFIG.pedirEmail ? el("email").value.trim().toLowerCase() : "",
     fone:  CONFIG.pedirCelular ? soDigitos(el("fone").value) : "",
