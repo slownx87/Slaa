@@ -1,0 +1,152 @@
+<title>Tabela de Precificação em Lote — Calculadora de Preço</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared/style.css">
+
+<main>
+  <header class="site-header">
+    <div class="brand"><span class="mark">R$</span><span>Calculadora de Preço</span></div>
+    <nav id="siteNav"></nav>
+  </header>
+
+  <section class="panel">
+    <h1>Precificar vários produtos rápido</h1>
+    <p class="hint">Use esta tela quando você quer o preço de venda de muitos produtos de uma vez, sem montar a ficha técnica de cada um. Digite só o custo e a margem que você quer — o preço sai na hora.</p>
+
+    <div class="row">
+      <div class="field"><label for="loteNome">Nome do produto</label><input type="text" id="loteNome" placeholder="Ex: Bolo de chocolate"></div>
+      <div class="field"><label for="loteDescricao">Descrição (opcional)</label><input type="text" id="loteDescricao" placeholder="Ex: Fatia individual"></div>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:0 0 170px;"><label for="loteCusto">Valor de custo (R$)</label><input type="number" id="loteCusto" min="0" step="0.01" placeholder="Ex: 5,00"></div>
+      <div class="field" style="flex:0 0 150px;"><label for="loteMargem">Margem desejada (%)</label><input type="number" id="loteMargem" min="0" step="0.1" placeholder="Ex: 10"></div>
+    </div>
+    <p class="hint">Nos campos de porcentagem, digite só o número — por exemplo, digitar "10" quer dizer 10%.</p>
+
+    <fieldset>
+      <legend>Como calcular os custos deste produto?</legend>
+      <p class="hint" style="margin:0;">Custo fixo e custo variável são a parte de cada venda que já está comprometida com as contas do negócio. Você pode usar os valores que já cadastrou na tela "Custos" (iguais para todos os produtos) ou definir um % só para este produto.</p>
+      <div class="radio-row">
+        <label><input type="radio" name="modoLote" value="referencia" checked> Usar meus custos já cadastrados</label>
+        <label><input type="radio" name="modoLote" value="aberto"> Definir % só para este produto</label>
+      </div>
+      <div id="blocoAberto" hidden>
+        <div class="row">
+          <div class="field"><label for="loteCustoFixoPct">% de custo fixo deste produto</label><input type="number" id="loteCustoFixoPct" min="0" step="0.1" placeholder="Ex: 20"></div>
+          <div class="field"><label for="loteCustoVariavelPct">% de custo variável deste produto</label><input type="number" id="loteCustoVariavelPct" min="0" step="0.1" placeholder="Ex: 5"></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <div id="loteAlert"></div>
+    <button class="btn" id="addItemLote" type="button">Adicionar item à lista</button>
+  </section>
+
+  <section class="panel">
+    <h2>Produtos desta tabela</h2>
+    <p class="hint">A lista é recalculada sempre que você abre esta tela — se você mudar seus custos cadastrados, o preço dos itens "Usar meus custos já cadastrados" muda sozinho.</p>
+    <div id="loteContainer" style="display:flex;flex-direction:column;gap:14px;"></div>
+  </section>
+
+  <footer class="site-footer">Calculadora de Preço · seus dados ficam salvos só neste navegador.</footer>
+</main>
+
+<script src="shared/engine.js"></script>
+<script src="shared/storage.js"></script>
+<script src="shared/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var state = Store.carregar();
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  /* ---------- alterna entre custos cadastrados / % próprio do item ---------- */
+  document.querySelectorAll('input[name="modoLote"]').forEach(function(r){
+    r.addEventListener("change", function(){
+      var aberto = document.querySelector('input[name="modoLote"]:checked').value === "aberto";
+      document.getElementById("blocoAberto").hidden = !aberto;
+    });
+  });
+
+  /* ---------- adicionar item novo ---------- */
+  document.getElementById("addItemLote").addEventListener("click", function(){
+    var alertBox = document.getElementById("loteAlert");
+    alertBox.innerHTML = "";
+
+    var nome = document.getElementById("loteNome").value.trim();
+    var descricao = document.getElementById("loteDescricao").value.trim();
+    var valorCusto = Number(document.getElementById("loteCusto").value);
+    var margemPct = Number(document.getElementById("loteMargem").value);
+    var modo = document.querySelector('input[name="modoLote"]:checked').value;
+
+    if(!nome){ alertBox.innerHTML = "<div class='alert bad'>Dê um nome ao produto.</div>"; return; }
+    if(!(valorCusto >= 0)){ alertBox.innerHTML = "<div class='alert bad'>Informe o valor de custo deste produto.</div>"; return; }
+
+    var item = {
+      id: Engine.uid(), nome: nome, descricao: descricao, valorCusto: valorCusto, margemPct: margemPct,
+      modo: modo, custoFixoPct: 0, custoVariavelPct: 0
+    };
+    if(modo === "aberto"){
+      item.custoFixoPct = Number(document.getElementById("loteCustoFixoPct").value) || 0;
+      item.custoVariavelPct = Number(document.getElementById("loteCustoVariavelPct").value) || 0;
+    }
+
+    var teste = Engine.precificarItemLote(item, state);
+    if(teste.erro){ alertBox.innerHTML = "<div class='alert bad'>"+escapeHtml(teste.erro)+"</div>"; return; }
+
+    state.itensLote.push(item);
+    Store.salvar(state);
+
+    document.getElementById("loteNome").value = "";
+    document.getElementById("loteDescricao").value = "";
+    document.getElementById("loteCusto").value = "";
+    document.getElementById("loteMargem").value = "";
+    document.getElementById("loteCustoFixoPct").value = "";
+    document.getElementById("loteCustoVariavelPct").value = "";
+
+    alertBox.innerHTML = "<div class='alert good'>Item adicionado! Veja o preço calculado na lista abaixo.</div>";
+    renderItens();
+  });
+
+  /* ---------- lista de itens (recalcula sempre: os custos globais podem ter mudado) ---------- */
+  function renderItens(){
+    var container = document.getElementById("loteContainer");
+    if(state.itensLote.length === 0){
+      container.innerHTML = "<p class='hint'>Nenhum produto adicionado ainda. Preencha o formulário acima.</p>";
+      return;
+    }
+    container.innerHTML = "";
+    state.itensLote.forEach(function(item){
+      var r = Engine.precificarItemLote(item, state);
+      var card = document.createElement("div");
+      card.className = "card";
+      if(r.erro){
+        card.innerHTML =
+          "<div class='card-head'><h3>"+escapeHtml(item.nome)+"</h3></div>" +
+          "<div class='alert bad'>"+escapeHtml(r.erro)+"</div>";
+      }else{
+        card.innerHTML =
+          "<div class='card-head'><h3>"+escapeHtml(item.nome)+"</h3><span class='price'>"+Engine.brl(r.valorVenda)+"</span></div>" +
+          (item.descricao ? "<p class='hint' style='margin:0;'>"+escapeHtml(item.descricao)+"</p>" : "") +
+          "<details><summary>Ver detalhe</summary><div class='dre' style='margin-top:8px;'>" +
+            "<div class='item'><span>Custo fixo</span><span>"+Engine.brl(r.ctFixoReais)+"</span></div>" +
+            "<div class='item'><span>Custo variável</span><span>"+Engine.brl(r.ctVarReais)+"</span></div>" +
+            "<div class='item total'><span>Margem (seu lucro)</span><span>"+Engine.brl(r.margemReais)+"</span></div>" +
+          "</div></details>";
+      }
+      var botoes = document.createElement("div");
+      var remover = document.createElement("button");
+      remover.className = "btn danger"; remover.type = "button"; remover.textContent = "Remover";
+      remover.addEventListener("click", function(){
+        state.itensLote = state.itensLote.filter(function(it){ return it.id !== item.id; });
+        Store.salvar(state); renderItens();
+      });
+      botoes.appendChild(remover);
+      card.appendChild(botoes);
+      container.appendChild(card);
+    });
+  }
+
+  Nav.render("lote");
+  renderItens();
+})();
+</script>
