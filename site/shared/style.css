@@ -34,21 +34,84 @@ h2{font-size:19px;font-weight:700;margin:0;}
 h3{font-size:16px;font-weight:700;margin:0;}
 .sub{color:var(--muted);font-size:15px;margin:0;line-height:1.5;}
 
-/* ---------- cabeçalho + navegação, iguais em toda página ---------- */
-.site-header{display:flex;flex-direction:column;gap:12px;}
+/* ---------- cabeçalho ---------- */
+.site-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;}
 .brand{display:flex;align-items:center;gap:10px;}
 .brand .mark{
   width:36px;height:36px;border-radius:9px;background:var(--accent);color:var(--accent-ink);
   display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;flex:0 0 auto;
 }
 .brand span{font-weight:700;font-size:17px;}
-#siteNav{display:flex;gap:4px;flex-wrap:wrap;border-bottom:2px solid var(--line);padding-bottom:0;}
-.nav-link{
-  font-family:var(--font-body);font-size:14.5px;font-weight:700;color:var(--muted);
-  text-decoration:none;padding:9px 12px;border-bottom:3px solid transparent;white-space:nowrap;
+
+/* ---------- navegação: botão "Menu" + gaveta no celular, barra lateral fixa no computador ----------
+   Gerado por shared/nav.js dentro de <nav id="siteNav">. Um fallback estático mínimo (link
+   "Início") fica escrito em cada página, por baixo do que o JS desenha, para o caso do script
+   não carregar a tempo (ou não carregar de jeito nenhum). */
+#siteNav{display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
+
+#navToggle{
+  font-family:var(--font-body);font-size:15px;font-weight:700;color:var(--fg);
+  background:var(--panel);border:1.5px solid var(--line);border-radius:8px;
+  padding:9px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;min-height:44px;
 }
-.nav-link:hover{color:var(--fg);}
-.nav-link.atual{color:var(--accent);border-bottom-color:var(--accent);}
+#navToggle:hover{border-color:var(--accent);}
+#navToggle span{font-size:17px;line-height:1;}
+
+.nav-status{margin:0;font-size:13.5px;color:var(--muted);}
+.nav-status b{color:var(--fg);}
+
+#navOverlay{
+  position:fixed;inset:0;background:rgba(20,15,5,.55);
+  opacity:0;visibility:hidden;transition:opacity .18s ease;z-index:40;
+}
+#navOverlay.aberta{opacity:1;visibility:visible;}
+
+#navList{
+  position:fixed;top:0;left:0;bottom:0;width:min(85vw,340px);z-index:50;background:var(--panel);
+  display:flex;flex-direction:column;box-shadow:2px 0 18px rgba(0,0,0,.25);
+  transform:translateX(-100%);transition:transform .18s ease;visibility:hidden;
+}
+#navList.aberta{transform:translateX(0);visibility:visible;}
+
+.nav-list-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:16px;border-bottom:1.5px solid var(--line);
+  position:sticky;top:0;background:var(--panel);flex:0 0 auto;
+}
+.nav-list-title{font-weight:700;font-size:16px;}
+#navClose{
+  font-family:var(--font-body);font-size:14.5px;font-weight:700;color:var(--fg);
+  background:var(--bg);border:1.5px solid var(--line);border-radius:8px;
+  padding:8px 12px;cursor:pointer;min-height:40px;
+}
+
+#navList ul{list-style:none;margin:0;padding:10px;display:flex;flex-direction:column;gap:2px;overflow-y:auto;}
+#navList li{margin:0;}
+.nav-link{
+  font-family:var(--font-body);font-size:16.5px;font-weight:700;color:var(--fg);
+  text-decoration:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:14px;border-radius:10px;border-left:4px solid transparent;min-height:44px;
+}
+.nav-link:hover{background:var(--bg);}
+.nav-link.atual{background:var(--accent-soft);color:var(--accent);border-left-color:var(--accent);}
+.nav-check{color:var(--good);}
+.nav-atual-tag{font-size:12.5px;font-weight:400;color:var(--muted);}
+
+@media (prefers-reduced-motion:reduce){
+  #navList, #navOverlay{transition:none;}
+}
+
+/* computador/tablet largo: barra lateral fixa, sempre visível, sem gaveta */
+@media (min-width:760px){
+  body{padding-left:236px;}
+  #navToggle, .nav-status, #navOverlay, .nav-list-head{display:none;}
+  #navList{
+    position:fixed;inset:0 auto 0 0;width:220px;height:100vh;height:100dvh;
+    transform:none;visibility:visible;border-right:1.5px solid var(--line);z-index:10;
+  }
+  #navList ul{padding:16px 10px;}
+  .nav-link{font-size:15px;padding:11px 12px;}
+}
 
 /* ---------- painéis / cartões ---------- */
 section.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:16px;}
