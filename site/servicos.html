@@ -1,0 +1,125 @@
+<meta charset="utf-8">
+<title>Serviços — Calculadora de Preço</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared/style.css">
+
+<main>
+  <header class="site-header">
+    <div class="brand"><span class="mark">R$</span><span>Calculadora de Preço</span></div>
+    <nav id="siteNav"></nav>
+  </header>
+
+  <section class="panel">
+    <h1>Preço da sua hora de trabalho</h1>
+    <p class="hint">Quanto cobrar pela sua hora de trabalho pra bater o salário que você quer no fim do mês. Essa conta é pra quem vende HORA de trabalho (consultoria, aula particular, serviço técnico) — não produto físico.</p>
+
+    <div class="row">
+      <div class="field">
+        <label for="servSalario">Salário mensal desejado (R$)</label>
+        <input type="number" id="servSalario" min="0" step="0.01" placeholder="Ex: 6000">
+        <p class="hint">Quanto você quer que sobre pra você, livre, no fim do mês.</p>
+      </div>
+      <div class="field">
+        <label for="servHoras">Horas de trabalho no mês</label>
+        <input type="number" id="servHoras" min="0" step="0.1" placeholder="Ex: 150">
+        <p class="hint">Quantas horas você de fato trabalha (e cobra) por mês.</p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="servCustosFixos">Total de custos fixos do negócio (R$/mês)</label>
+        <input type="number" id="servCustosFixos" min="0" step="0.01" placeholder="Ex: 2500">
+        <p class="hint">Aluguel, internet, sistema, tudo que você paga todo mês, trabalhando mais ou menos.</p>
+      </div>
+      <div class="field">
+        <label for="servCustoVarPct">% de custos variáveis sobre a venda</label>
+        <input type="number" id="servCustoVarPct" min="0" step="0.1" placeholder="Ex: 12.8">
+        <p class="hint">Impostos, taxa de cartão, comissão: o que sai em cima de cada venda que você faz.</p>
+      </div>
+    </div>
+
+    <div class="field" style="max-width:260px;">
+      <label for="servMargemPct">Margem final desejada (%)</label>
+      <input type="number" id="servMargemPct" min="0" step="0.1" placeholder="Ex: 15">
+      <p class="hint">Quanto de lucro extra, além do seu salário, você quer deixar sobrando no negócio.</p>
+    </div>
+
+    <div id="servAlert"></div>
+    <div id="servResultado"></div>
+  </section>
+
+  <footer class="site-footer">Calculadora de Preço · seus dados ficam salvos só neste navegador.</footer>
+</main>
+
+<script src="shared/engine.js"></script>
+<script src="shared/storage.js"></script>
+<script src="shared/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var state = Store.carregar();
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  /* ---------- preenche o formulário com o que já estava salvo ---------- */
+  function preencherForm(){
+    document.getElementById("servSalario").value = state.servico.salarioDesejado || "";
+    document.getElementById("servHoras").value = state.servico.horasMes || "";
+    document.getElementById("servCustosFixos").value = state.servico.custosFixosReais || "";
+    document.getElementById("servCustoVarPct").value = state.servico.custoVariavelPct || "";
+    document.getElementById("servMargemPct").value = state.servico.margemFinalPct || "";
+  }
+
+  /* ---------- calcula e mostra o resultado ---------- */
+  function renderResultado(){
+    var alertBox = document.getElementById("servAlert");
+    var resultadoBox = document.getElementById("servResultado");
+    var r = Engine.precificarServico(state.servico);
+
+    if(r.erro){
+      alertBox.innerHTML = "<div class='alert bad'>"+escapeHtml(r.erro)+"</div>";
+      resultadoBox.innerHTML = "";
+      return;
+    }
+    alertBox.innerHTML = "";
+    resultadoBox.innerHTML =
+      "<div class='kpis'>" +
+        "<div class='kpi good'><b>"+Engine.brl(r.valorHora)+"</b><span>é o valor da sua hora de trabalho</span></div>" +
+      "</div>" +
+      "<details open><summary>Ver detalhe por hora</summary>" +
+        "<div class='dre' style='margin-top:8px;'>" +
+          "<div class='item'><span>Custo variável</span><span>"+Engine.brl(r.dreHora.custoVariavel)+"</span></div>" +
+          "<div class='item'><span>Custo fixo</span><span>"+Engine.brl(r.dreHora.custoFixo)+"</span></div>" +
+          "<div class='item'><span>Total de custos</span><span>"+Engine.brl(r.dreHora.totalCustos)+"</span></div>" +
+          "<div class='item total'><span>Margem de lucro</span><span>"+Engine.brl(r.dreHora.margemLucro)+"</span></div>" +
+        "</div>" +
+      "</details>" +
+      "<details><summary>Ver detalhe no mês</summary>" +
+        "<div class='dre' style='margin-top:8px;'>" +
+          "<div class='item'><span>Custo variável</span><span>"+Engine.brl(r.dreMes.custoVariavel)+"</span></div>" +
+          "<div class='item'><span>Custo fixo</span><span>"+Engine.brl(r.dreMes.custoFixo)+"</span></div>" +
+          "<div class='item'><span>Margem de lucro</span><span>"+Engine.brl(r.dreMes.margemLucro)+"</span></div>" +
+          "<div class='item total'><span>Total que isso dá no mês</span><span>"+Engine.brl(r.dreMes.precoVendaMes)+"</span></div>" +
+        "</div>" +
+      "</details>";
+  }
+
+  /* ---------- liga cada campo ao state, salva e recalcula ---------- */
+  function ligarCampo(id, campo){
+    document.getElementById(id).addEventListener("input", function(e){
+      state.servico[campo] = Number(e.target.value) || 0;
+      Store.salvar(state);
+      renderResultado();
+    });
+  }
+  ligarCampo("servSalario", "salarioDesejado");
+  ligarCampo("servHoras", "horasMes");
+  ligarCampo("servCustosFixos", "custosFixosReais");
+  ligarCampo("servCustoVarPct", "custoVariavelPct");
+  ligarCampo("servMargemPct", "margemFinalPct");
+
+  Nav.render("servicos");
+  preencherForm();
+  renderResultado();
+})();
+</script>

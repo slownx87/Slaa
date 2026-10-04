@@ -1,0 +1,200 @@
+<meta charset="utf-8">
+<title>Cursos Online — Calculadora de Preço</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared/style.css">
+
+<main>
+  <header class="site-header">
+    <div class="brand"><span class="mark">R$</span><span>Calculadora de Preço</span></div>
+    <nav id="siteNav"></nav>
+  </header>
+
+  <section class="panel">
+    <h1>Pelo custo por clique</h1>
+    <p class="hint">Pra quem já roda anúncio pago e sabe quanto custa cada clique. A gente calcula o preço de venda do curso a partir disso.</p>
+
+    <div class="row">
+      <div class="field">
+        <label for="cplCustoClique">Custo por clique (R$)</label>
+        <input type="number" id="cplCustoClique" min="0" step="0.01" placeholder="Ex: 1.48">
+        <p class="hint">Quanto custa, em média, cada clique no seu anúncio.</p>
+      </div>
+      <div class="field">
+        <label for="cplConversao">Conversão da campanha (%)</label>
+        <input type="number" id="cplConversao" min="0" step="0.01" placeholder="Ex: 0.5">
+        <p class="hint">De cada 100 cliques, quantos viram venda — em %.</p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="cplTaxaPct">Taxa % na venda</label>
+        <input type="number" id="cplTaxaPct" min="0" step="0.01" placeholder="Ex: 9.9">
+        <p class="hint">Taxa que a plataforma de pagamento (gateway) cobra em cada venda, em %.</p>
+      </div>
+      <div class="field">
+        <label for="cplTaxaFixa">Taxa fixa na venda (R$)</label>
+        <input type="number" id="cplTaxaFixa" min="0" step="0.01" placeholder="Ex: 3.50">
+        <p class="hint">Taxa fixa que a plataforma cobra em cada venda, além da taxa em %.</p>
+      </div>
+      <div class="field">
+        <label for="cplMargem">Margem desejada (%)</label>
+        <input type="number" id="cplMargem" min="0" step="0.01" placeholder="Ex: 25">
+        <p class="hint">Quanto de lucro você quer guardar sobre o preço de venda, em %.</p>
+      </div>
+    </div>
+
+    <div id="cplSaida"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Pela audiência que você já tem</h2>
+    <p class="hint">Pra quem já tem uma lista de e-mails ou seguidores e quer calcular o preço a partir de uma meta de faturamento no lançamento.</p>
+
+    <div class="row">
+      <div class="field">
+        <label for="audResultadoEsperado">Resultado esperado (R$)</label>
+        <input type="number" id="audResultadoEsperado" min="0" step="0.01" placeholder="Ex: 12000">
+        <p class="hint">Quanto você quer faturar com esse lançamento, em R$.</p>
+      </div>
+      <div class="field">
+        <label for="audTamanhoAudiencia">Tamanho da audiência</label>
+        <input type="number" id="audTamanhoAudiencia" min="0" step="1" placeholder="Ex: 4000">
+        <p class="hint">Quantas pessoas estão na sua lista ou te seguem.</p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="audConversao">Conversão da campanha (%)</label>
+        <input type="number" id="audConversao" min="0" step="0.01" placeholder="Ex: 1">
+        <p class="hint">De cada 100 pessoas da audiência, quantas compram — em %.</p>
+      </div>
+      <div class="field">
+        <label for="audTaxaPct">Taxa % na venda</label>
+        <input type="number" id="audTaxaPct" min="0" step="0.01" placeholder="Ex: 9.9">
+        <p class="hint">Taxa que a plataforma de pagamento (gateway) cobra em cada venda, em %.</p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="audTaxaFixa">Taxa fixa na venda (R$)</label>
+        <input type="number" id="audTaxaFixa" min="0" step="0.01" placeholder="Ex: 3.50">
+        <p class="hint">Taxa fixa que a plataforma cobra em cada venda, além da taxa em %.</p>
+      </div>
+      <div class="field">
+        <label for="audCustosFixos">Custos fixos do projeto (R$)</label>
+        <input type="number" id="audCustosFixos" min="0" step="0.01" placeholder="Ex: 2000">
+        <p class="hint">Custo fixo TOTAL do lançamento (equipe, ferramentas, anúncios) — em R$.</p>
+      </div>
+    </div>
+
+    <div id="audSaida"></div>
+  </section>
+
+  <footer class="site-footer">Calculadora de Preço · seus dados ficam salvos só neste navegador.</footer>
+</main>
+
+<script src="shared/engine.js"></script>
+<script src="shared/storage.js"></script>
+<script src="shared/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var state = Store.carregar();
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  function itemDre(nome, valor){
+    return "<div class='item'><span>"+escapeHtml(nome)+"</span><span>"+Engine.brl(valor)+"</span></div>";
+  }
+  function itemDreTotal(nome, valor){
+    return "<div class='item total'><span>"+escapeHtml(nome)+"</span><span>"+Engine.brl(valor)+"</span></div>";
+  }
+
+  /* ---------- Bloco 1: pelo custo por clique ---------- */
+  var camposCpl = { cplCustoClique:"custoPorClique", cplConversao:"conversaoCampanha", cplTaxaPct:"taxaPctVenda", cplTaxaFixa:"taxaFixaVenda", cplMargem:"margemDesejada" };
+
+  function renderCpl(){
+    document.getElementById("cplCustoClique").value = state.cursoCPL.custoPorClique || "";
+    document.getElementById("cplConversao").value = state.cursoCPL.conversaoCampanha || "";
+    document.getElementById("cplTaxaPct").value = state.cursoCPL.taxaPctVenda || "";
+    document.getElementById("cplTaxaFixa").value = state.cursoCPL.taxaFixaVenda || "";
+    document.getElementById("cplMargem").value = state.cursoCPL.margemDesejada || "";
+
+    var saida = document.getElementById("cplSaida");
+    var r = Engine.precificarCursoCPL(state.cursoCPL);
+    if(r.erro){
+      saida.innerHTML = "<div class='alert bad'>"+escapeHtml(r.erro)+"</div>";
+      return;
+    }
+    saida.innerHTML =
+      "<div class='kpis'><div class='kpi good'><b>"+Engine.brl(r.precoVenda)+"</b><span>preço de venda sugerido</span></div></div>" +
+      "<details><summary>Ver detalhe (DRE)</summary><div class='dre' style='margin-top:8px;'>" +
+        itemDre("Investimento em tráfego", r.dre.investimentoTrafego) +
+        itemDre("Taxa variável (plataforma)", r.dre.totalCustosVariaveis) +
+        itemDre("Taxa fixa na venda", r.dre.totalTaxaFixaVenda) +
+        itemDre("Total de custos", r.dre.totalCustos) +
+        itemDreTotal("Margem de lucro", r.dre.margemLucro) +
+      "</div></details>";
+  }
+
+  Object.keys(camposCpl).forEach(function(id){
+    document.getElementById(id).addEventListener("input", function(e){
+      state.cursoCPL[camposCpl[id]] = Number(e.target.value) || 0;
+      Store.salvar(state); renderCpl();
+    });
+  });
+
+  /* ---------- Bloco 2: pela audiência que você já tem ---------- */
+  var camposAud = { audResultadoEsperado:"resultadoEsperado", audTamanhoAudiencia:"tamanhoAudiencia", audConversao:"conversaoCampanha", audTaxaPct:"taxaPctVenda", audTaxaFixa:"taxaFixaVenda", audCustosFixos:"custosFixos" };
+
+  function renderAud(){
+    document.getElementById("audResultadoEsperado").value = state.cursoAud.resultadoEsperado || "";
+    document.getElementById("audTamanhoAudiencia").value = state.cursoAud.tamanhoAudiencia || "";
+    document.getElementById("audConversao").value = state.cursoAud.conversaoCampanha || "";
+    document.getElementById("audTaxaPct").value = state.cursoAud.taxaPctVenda || "";
+    document.getElementById("audTaxaFixa").value = state.cursoAud.taxaFixaVenda || "";
+    document.getElementById("audCustosFixos").value = state.cursoAud.custosFixos || "";
+
+    var saida = document.getElementById("audSaida");
+    var r = Engine.precificarCursoAudiencia(state.cursoAud);
+    if(r.erro){
+      saida.innerHTML = "<div class='alert bad'>"+escapeHtml(r.erro)+"</div>";
+      return;
+    }
+    var qtd = (Number(r.qtdVendas)||0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    saida.innerHTML =
+      "<div class='kpis'>" +
+        "<div class='kpi'><b>"+qtd+"</b><span>vendas que você precisa fazer</span></div>" +
+        "<div class='kpi good'><b>"+Engine.brl(r.precoVendaPorVenda)+"</b><span>preço por venda</span></div>" +
+        "<div class='kpi good'><b>"+Engine.brl(r.precoVendaProjeto)+"</b><span>faturamento total do projeto</span></div>" +
+      "</div>" +
+      "<details><summary>Ver detalhe de uma venda (DRE)</summary><div class='dre' style='margin-top:8px;'>" +
+        itemDre("Taxa variável (plataforma)", r.dreVenda.totalCustosVariaveis) +
+        itemDre("Taxa fixa na venda", r.dreVenda.totalTaxaFixaVenda) +
+        itemDre("Custo fixo (rateado por venda)", r.dreVenda.totalCustoFixo) +
+        itemDre("Total de custos", r.dreVenda.totalCustos) +
+        itemDreTotal("Lucro por venda", r.dreVenda.margemLucro) +
+      "</div></details>" +
+      "<details><summary>Ver detalhe do projeto completo (DRE)</summary><div class='dre' style='margin-top:8px;'>" +
+        itemDre("Taxa variável (plataforma)", r.dreProjeto.totalCustosVariaveis) +
+        itemDre("Taxa fixa na venda", r.dreProjeto.totalTaxaFixaVenda) +
+        itemDre("Custo fixo do projeto", r.dreProjeto.totalCustoFixo) +
+        itemDre("Total de custos", r.dreProjeto.totalCustos) +
+        itemDreTotal("Lucro do projeto", r.dreProjeto.margemLucro) +
+      "</div></details>";
+  }
+
+  Object.keys(camposAud).forEach(function(id){
+    document.getElementById(id).addEventListener("input", function(e){
+      state.cursoAud[camposAud[id]] = Number(e.target.value) || 0;
+      Store.salvar(state); renderAud();
+    });
+  });
+
+  Nav.render("cursos");
+  renderCpl();
+  renderAud();
+})();
+</script>

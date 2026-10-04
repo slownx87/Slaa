@@ -1,0 +1,159 @@
+<meta charset="utf-8">
+<title>Limite dos Indicadores — Calculadora de Preço</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared/style.css">
+
+<main>
+  <header class="site-header">
+    <div class="brand"><span class="mark">R$</span><span>Calculadora de Preço</span></div>
+    <nav id="siteNav"></nav>
+  </header>
+
+  <section class="panel">
+    <h1>Limite dos Indicadores</h1>
+    <p class="hint">Diga até quanto você pode cobrar (o preço-limite que o mercado aceita) e veja até onde cada coisa — seu custo, seu custo fixo, seu custo variável ou sua margem — pode subir sozinha sem passar desse limite.</p>
+
+    <div class="field">
+      <label for="limPrecoVendaLimite">Preço de Venda Limite (R$)</label>
+      <input type="number" id="limPrecoVendaLimite" min="0" step="0.01" placeholder="Ex: 45">
+    </div>
+    <p class="hint">É o preço mais alto que o seu cliente aceitaria pagar por isso — o "teto" do mercado.</p>
+
+    <div class="row">
+      <div class="field">
+        <label for="limPrecoCusto">Preço de Custo (R$)</label>
+        <input type="number" id="limPrecoCusto" min="0" step="0.01" placeholder="Ex: 22">
+      </div>
+      <div class="field" style="flex:0 0 160px;">
+        <label for="limMargemPct">Margem desejada (%)</label>
+        <input type="number" id="limMargemPct" min="0" step="0.1" placeholder="Ex: 20">
+      </div>
+    </div>
+    <p class="hint">Preço de custo é quanto custa fazer ou comprar o que você vende. Margem é o lucro que você quer ganhar em cima disso.</p>
+
+    <fieldset>
+      <legend>De onde vêm os % de custo fixo e de custo variável?</legend>
+      <div class="radio-row">
+        <label><input type="radio" name="limModo" value="referencia" checked> Usar os % que já calculei em "Meus Custos"</label>
+        <label><input type="radio" name="limModo" value="aberto"> Eu mesmo digito os dois %</label>
+      </div>
+      <p class="hint">Se você já preencheu a tela "Meus Custos", deixe marcada a primeira opção. Só escolha a segunda se quiser testar outros números sem mudar o que já está salvo.</p>
+
+      <div id="limBlocoAberto" hidden>
+        <div class="row">
+          <div class="field">
+            <label for="limCustoFixoManual">% de custo fixo</label>
+            <input type="number" id="limCustoFixoManual" min="0" step="0.01" placeholder="Ex: 31.29">
+          </div>
+          <div class="field">
+            <label for="limCustoVariavelManual">% de custo variável</label>
+            <input type="number" id="limCustoVariavelManual" min="0" step="0.01" placeholder="Ex: 6.13">
+          </div>
+        </div>
+        <p class="hint">O quanto, de cada venda, costuma ir pra custos fixos (ex: aluguel) e pra custos variáveis (ex: taxa de cartão), em percentual.</p>
+      </div>
+    </fieldset>
+
+    <div>
+      <h2 style="margin-bottom:8px;">O que isso quer dizer pra você</h2>
+      <div id="limResultado"></div>
+    </div>
+  </section>
+
+  <footer class="site-footer">Calculadora de Preço · seus dados ficam salvos só neste navegador.</footer>
+</main>
+
+<script src="shared/engine.js"></script>
+<script src="shared/storage.js"></script>
+<script src="shared/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var state = Store.carregar();
+
+  /* ---------- preenche o formulário com o que já estava salvo ---------- */
+  function preencherFormulario(){
+    document.getElementById("limPrecoVendaLimite").value = state.limites.precoVendaLimite || "";
+    document.getElementById("limPrecoCusto").value = state.limites.precoCusto || "";
+    document.getElementById("limMargemPct").value = state.limites.margemPct || "";
+    document.getElementById("limCustoFixoManual").value = state.limites.custoFixoPctManual || "";
+    document.getElementById("limCustoVariavelManual").value = state.limites.custoVariavelPctManual || "";
+    var modo = state.limites.modo === "aberto" ? "aberto" : "referencia";
+    document.querySelector('input[name="limModo"][value="' + modo + '"]').checked = true;
+    document.getElementById("limBlocoAberto").hidden = modo !== "aberto";
+  }
+
+  /* ---------- uma linha de "indicador livre" (mostra o valor ou a frase de "não é possível") ---------- */
+  function linhaMax(valor, formatar, rotulo){
+    if(valor === null || valor === undefined){
+      return "<div class='kpi'><b>—</b><span>" + rotulo + ": só ajustando isso, não dá pra chegar no preço-limite.</span></div>";
+    }
+    return "<div class='kpi'><b>" + formatar(valor) + "</b><span>" + rotulo + "</span></div>";
+  }
+
+  /* ---------- recalcula tudo e desenha o resultado ---------- */
+  function calcularEMostrar(){
+    var precoVendaLimite = Number(state.limites.precoVendaLimite) || 0;
+    var precoCusto = Number(state.limites.precoCusto) || 0;
+    var margemPct = Number(state.limites.margemPct) || 0;
+    var custoFixoPctDigitado, custoVariavelPctDigitado;
+
+    if(state.limites.modo === "aberto"){
+      custoFixoPctDigitado = Number(state.limites.custoFixoPctManual) || 0;
+      custoVariavelPctDigitado = Number(state.limites.custoVariavelPctManual) || 0;
+    } else {
+      custoFixoPctDigitado = Engine.calcularCustoFixo(state.config).percentual * 100;
+      custoVariavelPctDigitado = Engine.calcularCustoVariavel(state.config).percentual * 100;
+    }
+
+    var r = Engine.simularLimites(precoVendaLimite, precoCusto, custoFixoPctDigitado, custoVariavelPctDigitado, margemPct);
+    var out = document.getElementById("limResultado");
+    var html = "";
+
+    if(r.precoCalculadoAtual === null){
+      html += "<div class='alert bad'>A soma dos custos com a margem passa de 100%. Revise os números acima antes de continuar.</div>";
+    } else {
+      var passaLimite = precoVendaLimite > 0 && r.precoCalculadoAtual > precoVendaLimite;
+      var classeKpi = passaLimite ? "kpi bad" : "kpi good";
+      var texto = passaLimite
+        ? "Seu preço hoje (" + Engine.brl(r.precoCalculadoAtual) + ") já passa do limite!"
+        : "Seu preço hoje (" + Engine.brl(r.precoCalculadoAtual) + ") está dentro do limite.";
+      html += "<div class='kpis' style='margin-bottom:12px;'><div class='" + classeKpi + "' style='flex:1 1 100%;'>" +
+        "<b>" + Engine.brl(r.precoCalculadoAtual) + "</b><span>" + texto + "</span></div></div>";
+    }
+
+    html += "<div class='kpis'>" +
+      linhaMax(r.maxPrecoCusto, Engine.brl, "Seu custo pode subir até") +
+      linhaMax(r.maxCustoFixoPct, Engine.pct, "% de custo fixo pode subir até") +
+      linhaMax(r.maxCustoVariavelPct, Engine.pct, "% de custo variável pode subir até") +
+      linhaMax(r.maxMargemPct, Engine.pct, "Sua margem pode subir até") +
+      "</div>";
+
+    out.innerHTML = html;
+  }
+
+  /* ---------- lê o formulário, salva e recalcula ---------- */
+  function atualizarEstado(){
+    state.limites.precoVendaLimite = Number(document.getElementById("limPrecoVendaLimite").value) || 0;
+    state.limites.precoCusto = Number(document.getElementById("limPrecoCusto").value) || 0;
+    state.limites.margemPct = Number(document.getElementById("limMargemPct").value) || 0;
+    state.limites.modo = document.querySelector('input[name="limModo"]:checked').value;
+    state.limites.custoFixoPctManual = Number(document.getElementById("limCustoFixoManual").value) || 0;
+    state.limites.custoVariavelPctManual = Number(document.getElementById("limCustoVariavelManual").value) || 0;
+    document.getElementById("limBlocoAberto").hidden = state.limites.modo !== "aberto";
+    Store.salvar(state);
+    calcularEMostrar();
+  }
+
+  ["limPrecoVendaLimite", "limPrecoCusto", "limMargemPct", "limCustoFixoManual", "limCustoVariavelManual"].forEach(function(id){
+    document.getElementById(id).addEventListener("input", atualizarEstado);
+  });
+  document.querySelectorAll('input[name="limModo"]').forEach(function(radio){
+    radio.addEventListener("change", atualizarEstado);
+  });
+
+  Nav.render("limites");
+  preencherFormulario();
+  calcularEMostrar();
+})();
+</script>

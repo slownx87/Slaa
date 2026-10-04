@@ -3,7 +3,7 @@
    visual usado desde a primeira versão do app, agora para o site inteiro. */
 :root{
   --bg:#fbf8f2; --panel:#ffffff; --fg:#2a2218; --muted:#6e6150; --line:#e6dfcc;
-  --accent:#b8650f; --accent-soft:#f6e8d2;
+  --accent:#9c530c; --accent-soft:#f6e8d2; --accent-ink:#ffffff;
   --good:#2f7d4f; --good-soft:#e5f3ea;
   --bad:#a13327; --bad-soft:#f8e6e2;
   --font-body:'Atkinson Hyperlegible',system-ui,sans-serif;
@@ -11,7 +11,7 @@
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#1a160f; --panel:#241e14; --fg:#f4ecdc; --muted:#b9ab91; --line:#3a3121;
-    --accent:#e5ac57; --accent-soft:#3a2c15;
+    --accent:#e5ac57; --accent-soft:#3a2c15; --accent-ink:#1a160f;
     --good:#5ecb8d; --good-soft:#1c3324;
     --bad:#e8847a; --bad-soft:#3a1f1a;
     color-scheme:dark;
@@ -19,7 +19,7 @@
 }
 :root[data-theme="dark"]{
   --bg:#1a160f; --panel:#241e14; --fg:#f4ecdc; --muted:#b9ab91; --line:#3a3121;
-  --accent:#e5ac57; --accent-soft:#3a2c15;
+  --accent:#e5ac57; --accent-soft:#3a2c15; --accent-ink:#1a160f;
   --good:#5ecb8d; --good-soft:#1c3324;
   --bad:#e8847a; --bad-soft:#3a1f1a;
   color-scheme:dark;
@@ -38,7 +38,7 @@ h3{font-size:16px;font-weight:700;margin:0;}
 .site-header{display:flex;flex-direction:column;gap:12px;}
 .brand{display:flex;align-items:center;gap:10px;}
 .brand .mark{
-  width:36px;height:36px;border-radius:9px;background:var(--accent);color:#fff;
+  width:36px;height:36px;border-radius:9px;background:var(--accent);color:var(--accent-ink);
   display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;flex:0 0 auto;
 }
 .brand span{font-weight:700;font-size:17px;}
@@ -72,7 +72,7 @@ fieldset legend{font-weight:700;font-size:15px;padding:0 6px;}
 /* ---------- botões ---------- */
 button.btn{
   font-family:var(--font-body);font-size:15px;font-weight:700;padding:9px 16px;border-radius:8px;
-  border:none;cursor:pointer;background:var(--accent);color:#fff;
+  border:none;cursor:pointer;background:var(--accent);color:var(--accent-ink);
 }
 button.btn.secondary{background:var(--bg);color:var(--fg);border:1.5px solid var(--line);}
 button.btn.danger{background:var(--bad-soft);color:var(--bad);border:1.5px solid var(--bad);}

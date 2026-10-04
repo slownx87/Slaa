@@ -1,0 +1,136 @@
+<meta charset="utf-8">
+<title>Início — Calculadora de Preço</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared/style.css">
+<style>
+  /* Botões em formato de link (<a>), já que shared/style.css só colore button.btn.
+     Mesmas cores dos botões normais, só reaproveitando as variáveis do tema. */
+  .hero .cta-row a.btn{background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:15px;padding:9px 16px;border-radius:8px;}
+  .hero .cta-row a.btn.secondary{background:var(--bg);color:var(--fg);border:1.5px solid var(--line);}
+
+  /* Cards do grid de ferramentas inteiros clicáveis, sem parecer link de texto. */
+  .feature-link{display:block;height:100%;color:inherit;text-decoration:none;}
+  .feature-link .feature{height:100%;transition:border-color .15s ease;}
+  .feature-link:hover .feature,
+  .feature-link:focus-visible .feature{border-color:var(--accent);}
+  .feature-open{color:var(--accent);font-weight:700;font-size:13.5px;margin-top:2px;}
+</style>
+
+<main>
+  <header class="site-header">
+    <div class="brand"><span class="mark">R$</span><span>Calculadora de Preço</span></div>
+    <nav id="siteNav"></nav>
+  </header>
+
+  <section class="panel">
+    <div class="hero">
+      <span class="eyebrow">Precificação simples</span>
+      <h1>Pare de adivinhar o preço dos seus produtos</h1>
+      <p>Cadastre seus custos e materiais uma vez, e cada produto novo é precificado sozinho — sem fórmula pra aprender.</p>
+      <div class="cta-row">
+        <a class="btn" href="custos.html">Começar pelos custos</a>
+        <a class="btn secondary" href="produtos.html">Já tenho custos, ir pra Produtos</a>
+      </div>
+      <p class="hint" id="resumoStatus"></p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>As ferramentas do site</h2>
+    <p class="hint">Toque em qualquer card abaixo pra abrir aquela calculadora. Você pode usar na ordem que quiser, mas se é a primeira vez, comece por Custos e Materiais.</p>
+
+    <div class="feature-grid">
+      <a class="feature-link" href="custos.html">
+        <div class="feature">
+          <span class="num">1</span>
+          <h3>Custos</h3>
+          <p>Cadastre o que você gasta todo mês (fixo e variável).</p>
+          <span class="feature-open">Abrir →</span>
+        </div>
+      </a>
+
+      <a class="feature-link" href="materiais.html">
+        <div class="feature">
+          <span class="num">2</span>
+          <h3>Materiais</h3>
+          <p>Cadastre os ingredientes e embalagens que você compra.</p>
+          <span class="feature-open">Abrir →</span>
+        </div>
+      </a>
+
+      <a class="feature-link" href="produtos.html">
+        <div class="feature">
+          <span class="num">3</span>
+          <h3>Produtos</h3>
+          <p>Monte a ficha técnica (ou informe o custo direto) e veja o preço de venda.</p>
+          <span class="feature-open">Abrir →</span>
+        </div>
+      </a>
+
+      <a class="feature-link" href="lote.html">
+        <div class="feature">
+          <span class="num">4</span>
+          <h3>Tabela em Lote</h3>
+          <p>Precifique vários produtos de uma vez, rápido.</p>
+          <span class="feature-open">Abrir →</span>
+        </div>
+      </a>
+
+      <a class="feature-link" href="limites.html">
+        <div class="feature">
+          <span class="num">5</span>
+          <h3>Limite dos Indicadores</h3>
+          <p>Veja até quanto cada coisa pode subir sem passar do preço que o mercado aceita.</p>
+          <span class="feature-open">Abrir →</span>
+        </div>
+      </a>
+
+      <a class="feature-link" href="servicos.html">
+        <div class="feature">
+          <span class="num">6</span>
+          <h3>Serviços</h3>
+          <p>Descubra quanto cobrar pela sua hora de trabalho.</p>
+          <span class="feature-open">Abrir →</span>
+        </div>
+      </a>
+
+      <a class="feature-link" href="cursos.html">
+        <div class="feature">
+          <span class="num">7</span>
+          <h3>Cursos Online</h3>
+          <p>Precifique um curso, por clique pago ou pela sua audiência.</p>
+          <span class="feature-open">Abrir →</span>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <footer class="site-footer">Calculadora de Preço · seus dados ficam salvos só neste navegador.</footer>
+</main>
+
+<script src="shared/engine.js"></script>
+<script src="shared/storage.js"></script>
+<script src="shared/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var state = Store.carregar();
+
+  /* ---------- toque pessoal: diz o que a pessoa já cadastrou, sem parecer vazio/quebrado ---------- */
+  var resumo = document.getElementById("resumoStatus");
+  if(resumo){
+    var nMateriais = (state.materiais || []).length;
+    var nProdutos = (state.produtos || []).length;
+    if(nProdutos > 0){
+      resumo.textContent = "Você já tem " + nProdutos + (nProdutos === 1 ? " produto cadastrado" : " produtos cadastrados") +
+        (nMateriais > 0 ? " e " + nMateriais + (nMateriais === 1 ? " material" : " materiais") + " no catálogo." : ".");
+    } else if(nMateriais > 0){
+      resumo.textContent = "Você já cadastrou " + nMateriais + (nMateriais === 1 ? " material" : " materiais") + ". Hora de montar seu primeiro produto!";
+    } else {
+      resumo.textContent = "Ainda não há nada cadastrado — comece pelos custos, é rápido.";
+    }
+  }
+
+  Nav.render("home");
+})();
+</script>
