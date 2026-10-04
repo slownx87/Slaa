@@ -1,0 +1,211 @@
+<title>Produtos — Calculadora de Preço</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared/style.css">
+
+<main>
+  <header class="site-header">
+    <div class="brand"><span class="mark">R$</span><span>Calculadora de Preço</span></div>
+    <nav id="siteNav"></nav>
+  </header>
+
+  <section class="panel">
+    <h1>Precificar um produto</h1>
+    <p class="hint">Dê um nome ao produto e diga a margem de lucro que você quer. Você pode informar o custo direto (se já souber) ou montar a receita com os materiais cadastrados — o preço de venda sai pronto dos dois jeitos.</p>
+
+    <div class="row">
+      <div class="field"><label for="prodNome">Nome do produto</label><input type="text" id="prodNome" placeholder="Ex: Coxinha de frango"></div>
+      <div class="field" style="flex:0 0 150px;"><label for="prodMargem">Margem desejada (%)</label><input type="number" id="prodMargem" min="0" step="0.1" placeholder="Ex: 10"></div>
+    </div>
+
+    <fieldset>
+      <legend>Como você quer informar o custo?</legend>
+      <div class="radio-row">
+        <label><input type="radio" name="modoCusto" value="receita" checked> Vou montar a receita (ficha técnica)</label>
+        <label><input type="radio" name="modoCusto" value="manual"> Eu já sei o custo do produto</label>
+      </div>
+
+      <div id="blocoReceita">
+        <div class="field" style="max-width:260px;margin-bottom:10px;">
+          <label for="prodUnidades">Quantas unidades a receita faz</label>
+          <input type="number" id="prodUnidades" min="1" step="1" placeholder="Ex: 20">
+        </div>
+        <div id="listaIngredientes" class="table-wrap"></div>
+        <div class="pick-row" style="margin-top:8px;">
+          <select id="prodIngMaterial"></select>
+          <input type="number" id="prodIngQtd" min="0.0001" step="any" placeholder="Quantidade usada" style="max-width:160px;">
+          <button class="btn secondary" id="addIngrediente" type="button">+ Adicionar ingrediente</button>
+        </div>
+      </div>
+
+      <div id="blocoManual" hidden>
+        <div class="field" style="max-width:260px;">
+          <label for="prodCustoManual">Custo do produto (R$ por unidade)</label>
+          <input type="number" id="prodCustoManual" min="0" step="0.01" placeholder="Ex: 0.97">
+        </div>
+      </div>
+    </fieldset>
+
+    <div id="prodAlert"></div>
+    <button class="btn" id="salvarProduto" type="button">Calcular e salvar produto</button>
+  </section>
+
+  <section class="panel">
+    <h2>Seus produtos</h2>
+    <div id="produtosContainer" style="display:flex;flex-direction:column;gap:14px;"></div>
+  </section>
+
+  <footer class="site-footer">Calculadora de Preço · seus dados ficam salvos só neste navegador.</footer>
+</main>
+
+<script src="shared/engine.js"></script>
+<script src="shared/storage.js"></script>
+<script src="shared/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var state = Store.carregar();
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  /* ---------- alterna entre receita / custo manual ---------- */
+  document.querySelectorAll('input[name="modoCusto"]').forEach(function(r){
+    r.addEventListener("change", function(){
+      var manual = document.querySelector('input[name="modoCusto"]:checked').value === "manual";
+      document.getElementById("blocoReceita").hidden = manual;
+      document.getElementById("blocoManual").hidden = !manual;
+    });
+  });
+
+  /* ---------- lista de materiais disponíveis para a receita ---------- */
+  function renderSelectMateriais(){
+    var select = document.getElementById("prodIngMaterial");
+    var atual = select.value;
+    select.innerHTML = "";
+    if(state.materiais.length === 0){
+      var opt = document.createElement("option");
+      opt.textContent = "Cadastre um material primeiro"; opt.value = "";
+      select.appendChild(opt);
+    }
+    state.materiais.forEach(function(m){
+      var opt = document.createElement("option");
+      opt.value = m.id; opt.textContent = m.nome;
+      select.appendChild(opt);
+    });
+    if(atual) select.value = atual;
+  }
+
+  /* ---------- ingredientes do produto em edição ---------- */
+  var ingredientesNovoProduto = [];
+  function renderIngredientesNovoProduto(){
+    var wrap = document.getElementById("listaIngredientes");
+    if(ingredientesNovoProduto.length === 0){
+      wrap.innerHTML = "<p class='hint'>Nenhum ingrediente adicionado ainda.</p>";
+      return;
+    }
+    var rows = ingredientesNovoProduto.map(function(ing, idx){
+      var mat = state.materiais.find(function(m){ return m.id === ing.materialId; });
+      var nome = mat ? mat.nome : "(material removido)";
+      return "<tr><td>"+escapeHtml(nome)+"</td><td class='num'>"+ing.qtd+"</td><td><button class='btn danger' data-idx='"+idx+"'>Remover</button></td></tr>";
+    }).join("");
+    wrap.innerHTML = "<table><thead><tr><th>Ingrediente</th><th>Qtd. usada</th><th></th></tr></thead><tbody>"+rows+"</tbody></table>";
+    wrap.querySelectorAll("button[data-idx]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        ingredientesNovoProduto.splice(Number(btn.dataset.idx), 1);
+        renderIngredientesNovoProduto();
+      });
+    });
+  }
+  document.getElementById("addIngrediente").addEventListener("click", function(){
+    var materialId = document.getElementById("prodIngMaterial").value;
+    var qtd = Number(document.getElementById("prodIngQtd").value);
+    if(!materialId || !(qtd > 0)) return;
+    ingredientesNovoProduto.push({ materialId: materialId, qtd: qtd });
+    document.getElementById("prodIngQtd").value = "";
+    renderIngredientesNovoProduto();
+  });
+
+  /* ---------- salvar produto ---------- */
+  document.getElementById("salvarProduto").addEventListener("click", function(){
+    var alertBox = document.getElementById("prodAlert");
+    alertBox.innerHTML = "";
+    var nome = document.getElementById("prodNome").value.trim();
+    var margem = Number(document.getElementById("prodMargem").value);
+    var modoManual = document.querySelector('input[name="modoCusto"]:checked').value === "manual";
+
+    if(!nome){ alertBox.innerHTML = "<div class='alert bad'>Dê um nome ao produto.</div>"; return; }
+
+    var produto = { id: Engine.uid(), nome: nome, margem: margem };
+
+    if(modoManual){
+      var custoManual = Number(document.getElementById("prodCustoManual").value);
+      if(!(custoManual >= 0)){ alertBox.innerHTML = "<div class='alert bad'>Informe o custo do produto.</div>"; return; }
+      produto.modoCusto = "manual";
+      produto.custoManual = custoManual;
+    } else {
+      var unidades = Number(document.getElementById("prodUnidades").value);
+      if(!(unidades > 0)){ alertBox.innerHTML = "<div class='alert bad'>Diga quantas unidades a receita faz (ex: 20).</div>"; return; }
+      if(ingredientesNovoProduto.length === 0){ alertBox.innerHTML = "<div class='alert bad'>Adicione pelo menos um ingrediente.</div>"; return; }
+      produto.modoCusto = "receita";
+      produto.unidades = unidades;
+      produto.ingredientes = ingredientesNovoProduto.slice();
+    }
+
+    var resultado = Engine.precificarProduto(produto, state);
+    if(resultado.erro){ alertBox.innerHTML = "<div class='alert bad'>"+escapeHtml(resultado.erro)+"</div>"; return; }
+
+    state.produtos.push(produto);
+    ingredientesNovoProduto = [];
+    document.getElementById("prodNome").value = "";
+    document.getElementById("prodMargem").value = "";
+    document.getElementById("prodUnidades").value = "";
+    document.getElementById("prodCustoManual").value = "";
+    renderIngredientesNovoProduto();
+    alertBox.innerHTML = "<div class='alert good'>Produto salvo! Veja o preço calculado abaixo, em “Seus produtos”.</div>";
+    Store.salvar(state); renderProdutos(); renderSelectMateriais();
+  });
+
+  /* ---------- lista de produtos já salvos (recalcula sempre: custos podem mudar) ---------- */
+  function renderProdutos(){
+    var container = document.getElementById("produtosContainer");
+    if(state.produtos.length === 0){
+      container.innerHTML = "<p class='hint'>Nenhum produto cadastrado ainda. Preencha o formulário acima.</p>";
+      return;
+    }
+    container.innerHTML = "";
+    state.produtos.forEach(function(produto){
+      var r = Engine.precificarProduto(produto, state);
+      var card = document.createElement("div");
+      card.className = "card";
+      if(r.erro){
+        card.innerHTML =
+          "<div class='card-head'><h3>"+escapeHtml(produto.nome)+"</h3></div>" +
+          "<div class='alert bad'>"+escapeHtml(r.erro)+"</div>";
+      }else{
+        var dre = r.dre;
+        var itensHtml = dre.itensVariaveis.map(function(it){
+          return "<div class='item'><span>"+escapeHtml(it.nome)+"</span><span>"+Engine.brl(it.valor)+"</span></div>";
+        }).join("");
+        card.innerHTML =
+          "<div class='card-head'><h3>"+escapeHtml(produto.nome)+"</h3><span class='price'>"+Engine.brl(r.precoVenda)+"</span></div>" +
+          "<p class='hint' style='margin:0;'>Preço sugerido por unidade · custo: "+Engine.brl(r.custoUnitario)+" · "+(produto.modoCusto==="manual"?"custo informado direto":"ficha técnica")+"</p>" +
+          "<details><summary>Ver detalhe (DRE)</summary><div class='dre' style='margin-top:8px;'>" +
+            itensHtml +
+            "<div class='item'><span>Custo fixo</span><span>"+Engine.brl(dre.totalCustosFixos)+"</span></div>" +
+            "<div class='item'><span>Custo do produto</span><span>"+Engine.brl(dre.custoProduto)+"</span></div>" +
+            "<div class='item total'><span>Lucro (margem)</span><span>"+Engine.brl(dre.margemLucro)+"</span></div>" +
+          "</div></details>" +
+          "<div><button class='btn danger' type='button'>Remover produto</button></div>";
+        card.querySelector("button.danger").addEventListener("click", function(){
+          state.produtos = state.produtos.filter(function(p){ return p.id !== produto.id; });
+          Store.salvar(state); renderProdutos();
+        });
+      }
+      container.appendChild(card);
+    });
+  }
+
+  Nav.render("produtos");
+  renderSelectMateriais();
+  renderIngredientesNovoProduto();
+  renderProdutos();
+})();
+</script>

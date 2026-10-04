@@ -1,0 +1,71 @@
+<title>Materiais — Calculadora de Preço</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared/style.css">
+
+<main>
+  <header class="site-header">
+    <div class="brand"><span class="mark">R$</span><span>Calculadora de Preço</span></div>
+    <nav id="siteNav"></nav>
+  </header>
+
+  <section class="panel">
+    <h1>Cadastro de materiais</h1>
+    <p class="hint">Cadastre os ingredientes e embalagens que você compra. Diga a quantidade e o preço de como você compra (ex: 1000 gramas por R$ 25,00) — o site calcula o preço de cada grama sozinho, e usa isso nas fichas técnicas dos seus produtos.</p>
+
+    <div class="table-wrap">
+      <table id="tabelaMateriais"><thead><tr><th>Nome</th><th>Qtd. que compra</th><th>Preço pago (R$)</th><th>Custo por unidade</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <div class="row">
+      <div class="field"><label for="novoMatNome">Nome do material</label><input type="text" id="novoMatNome" placeholder="Ex: Carne moída"></div>
+      <div class="field" style="flex:0 0 140px;"><label for="novoMatQtd">Qtd. que compra</label><input type="number" id="novoMatQtd" min="0.0001" step="any" placeholder="Ex: 1000"></div>
+      <div class="field" style="flex:0 0 140px;"><label for="novoMatValor">Preço pago (R$)</label><input type="number" id="novoMatValor" min="0" step="0.01" placeholder="Ex: 25"></div>
+      <button class="btn" id="addMaterial" type="button">Adicionar</button>
+    </div>
+  </section>
+
+  <footer class="site-footer">Calculadora de Preço · seus dados ficam salvos só neste navegador.</footer>
+</main>
+
+<script src="shared/engine.js"></script>
+<script src="shared/storage.js"></script>
+<script src="shared/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var state = Store.carregar();
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  function render(){
+    var corpo = document.querySelector("#tabelaMateriais tbody");
+    corpo.innerHTML = "";
+    state.materiais.forEach(function(m){
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>"+escapeHtml(m.nome)+"</td><td class='num'>"+(Number(m.qtd)||0).toLocaleString("pt-BR")+"</td><td class='num'>"+Engine.brl(m.valor)+"</td><td class='num'>"+Engine.brl(Engine.custoUnitarioMaterial(m))+"</td><td></td>";
+      var del = document.createElement("button");
+      del.className = "btn danger"; del.textContent = "Remover";
+      del.addEventListener("click", function(){
+        state.materiais = state.materiais.filter(function(x){ return x.id !== m.id; });
+        Store.salvar(state); render();
+      });
+      tr.lastElementChild.appendChild(del);
+      corpo.appendChild(tr);
+    });
+  }
+
+  document.getElementById("addMaterial").addEventListener("click", function(){
+    var nome = document.getElementById("novoMatNome").value.trim();
+    var qtd = Number(document.getElementById("novoMatQtd").value);
+    var valor = Number(document.getElementById("novoMatValor").value);
+    if(!nome || !(qtd > 0) || !(valor >= 0)) return;
+    state.materiais.push({ id: Engine.uid(), nome: nome, qtd: qtd, valor: valor });
+    document.getElementById("novoMatNome").value = "";
+    document.getElementById("novoMatQtd").value = "";
+    document.getElementById("novoMatValor").value = "";
+    Store.salvar(state); render();
+  });
+
+  Nav.render("materiais");
+  render();
+})();
+</script>
