@@ -1,0 +1,502 @@
+<title>Calculadora de Preço</title>
+<style>
+/* layout: app de uma página só, com abas no topo — Custos, Materiais, Produtos */
+:root{
+  --bg:#fbf8f2; --panel:#ffffff; --fg:#2a2218; --muted:#6e6150; --line:#e6dfcc;
+  --accent:#b8650f; --accent-soft:#f6e8d2;
+  --good:#2f7d4f; --good-soft:#e5f3ea;
+  --bad:#a13327; --bad-soft:#f8e6e2;
+  --font-body:'Atkinson Hyperlegible',system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1a160f; --panel:#241e14; --fg:#f4ecdc; --muted:#b9ab91; --line:#3a3121;
+    --accent:#e5ac57; --accent-soft:#3a2c15;
+    --good:#5ecb8d; --good-soft:#1c3324;
+    --bad:#e8847a; --bad-soft:#3a1f1a;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1a160f; --panel:#241e14; --fg:#f4ecdc; --muted:#b9ab91; --line:#3a3121;
+  --accent:#e5ac57; --accent-soft:#3a2c15;
+  --good:#5ecb8d; --good-soft:#1c3324;
+  --bad:#e8847a; --bad-soft:#3a1f1a;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);padding-inline:16px;padding-block:24px;}
+main{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:20px;}
+h1{font-size:clamp(22px,5vw,28px);font-weight:700;margin:0;}
+.sub{color:var(--muted);font-size:15px;margin:0;}
+
+nav.tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:2px solid var(--line);padding-bottom:0;}
+nav.tabs button{
+  font-family:var(--font-body);font-size:15px;font-weight:700;color:var(--muted);
+  background:none;border:none;padding:10px 14px;border-bottom:3px solid transparent;cursor:pointer;
+}
+nav.tabs button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent);}
+nav.tabs button:hover{color:var(--fg);}
+
+section.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:16px;}
+section.panel h2{font-size:18px;font-weight:700;margin:0;}
+.hint{font-size:14px;color:var(--muted);line-height:1.5;margin:0;}
+
+label{font-size:14px;font-weight:700;display:block;margin-bottom:4px;}
+input[type=text],input[type=number]{
+  width:100%;font-family:var(--font-body);font-size:16px;padding:9px 10px;
+  border:1.5px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);
+}
+input:focus{outline:2px solid var(--accent);outline-offset:1px;}
+.field{display:flex;flex-direction:column;gap:2px;flex:1 1 140px;min-width:0;}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+
+button.btn{
+  font-family:var(--font-body);font-size:15px;font-weight:700;padding:9px 16px;border-radius:8px;
+  border:none;cursor:pointer;background:var(--accent);color:#fff;
+}
+button.btn.secondary{background:var(--bg);color:var(--fg);border:1.5px solid var(--line);}
+button.btn.danger{background:var(--bad-soft);color:var(--bad);border:1.5px solid var(--bad);}
+button.btn:disabled{opacity:.5;cursor:not-allowed;}
+
+table{width:100%;border-collapse:collapse;font-size:15px;}
+table th{text-align:left;font-size:13px;color:var(--muted);padding:6px 8px;border-bottom:1.5px solid var(--line);}
+table td{padding:8px;border-bottom:1px solid var(--line);vertical-align:middle;}
+table td.num{font-variant-numeric:tabular-nums;text-align:right;}
+.table-wrap{overflow-x:auto;}
+
+.kpis{display:flex;gap:12px;flex-wrap:wrap;}
+.kpi{flex:1 1 140px;background:var(--accent-soft);border-radius:10px;padding:12px 14px;}
+.kpi b{display:block;font-size:22px;font-variant-numeric:tabular-nums;color:var(--accent);}
+.kpi span{font-size:13px;color:var(--muted);}
+
+.card{background:var(--bg);border:1.5px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;}
+.card-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.card-head h3{font-size:17px;margin:0;}
+.price{font-size:24px;font-weight:700;color:var(--good);font-variant-numeric:tabular-nums;}
+.dre{display:flex;flex-direction:column;gap:4px;font-size:14px;}
+.dre .item{display:flex;justify-content:space-between;color:var(--muted);}
+.dre .item.total{color:var(--fg);font-weight:700;border-top:1px solid var(--line);padding-top:4px;}
+details summary{cursor:pointer;font-size:14px;font-weight:700;color:var(--accent);}
+
+.alert{border-radius:10px;padding:10px 12px;font-size:14px;line-height:1.5;}
+.alert.bad{background:var(--bad-soft);color:var(--bad);}
+.alert.good{background:var(--good-soft);color:var(--good);}
+
+.pick-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+select{font-family:var(--font-body);font-size:15px;padding:8px;border:1.5px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);}
+[hidden]{display:none!important;}
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+
+<main>
+  <header>
+    <h1>Calculadora de Preço</h1>
+    <p class="sub">Cadastre uma vez seus custos e materiais. Depois, cada produto novo é calculado sozinho.</p>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Seções do aplicativo">
+    <button type="button" role="tab" data-tab="custos" aria-selected="true">1. Meus Custos</button>
+    <button type="button" role="tab" data-tab="materiais" aria-selected="false">2. Materiais</button>
+    <button type="button" role="tab" data-tab="produtos" aria-selected="false">3. Produtos</button>
+  </nav>
+
+  <!-- ===================== ABA 1: CUSTOS ===================== -->
+  <section class="panel" id="tab-custos" role="tabpanel">
+    <h2>Quanto você gasta por mês</h2>
+    <p class="hint">Informe o quanto você fatura em média por mês e todos os custos fixos e variáveis do negócio. Isso é usado para calcular o preço de <b>todos</b> os seus produtos.</p>
+
+    <div class="field">
+      <label for="faturamentoMensal">Faturamento médio mensal (R$)</label>
+      <input type="number" id="faturamentoMensal" min="0" step="0.01" placeholder="Ex: 10000">
+    </div>
+
+    <div>
+      <h3 style="font-size:15px;margin:0 0 8px;">Custos fixos (valor em R$ por mês)</h3>
+      <div class="table-wrap">
+        <table id="tabelaCustosFixos"><thead><tr><th>Nome</th><th>Valor mensal (R$)</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <div class="field"><label for="novoCustoFixoNome">Nome do custo</label><input type="text" id="novoCustoFixoNome" placeholder="Ex: Aluguel"></div>
+        <div class="field" style="flex:0 0 160px;"><label for="novoCustoFixoValor">Valor mensal (R$)</label><input type="number" id="novoCustoFixoValor" min="0" step="0.01"></div>
+        <button class="btn" id="addCustoFixo" type="button">Adicionar</button>
+      </div>
+    </div>
+
+    <div>
+      <h3 style="font-size:15px;margin:0 0 8px;">Custos variáveis (% sobre cada venda)</h3>
+      <div class="table-wrap">
+        <table id="tabelaCustosVar"><thead><tr><th>Nome</th><th>% sobre a venda</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <div class="field"><label for="novoCustoVarNome">Nome do custo</label><input type="text" id="novoCustoVarNome" placeholder="Ex: Maquininha de cartão"></div>
+        <div class="field" style="flex:0 0 160px;"><label for="novoCustoVarValor">% sobre a venda</label><input type="number" id="novoCustoVarValor" min="0" step="0.01" placeholder="Ex: 3"></div>
+        <button class="btn" id="addCustoVar" type="button">Adicionar</button>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><b id="kpiCustoFixoPct">—</b><span>do faturamento é custo fixo</span></div>
+      <div class="kpi"><b id="kpiCustoVarPct">—</b><span>de cada venda é custo variável</span></div>
+    </div>
+  </section>
+
+  <!-- ===================== ABA 2: MATERIAIS ===================== -->
+  <section class="panel" id="tab-materiais" role="tabpanel" hidden>
+    <h2>Cadastro de materiais</h2>
+    <p class="hint">Cadastre os ingredientes e embalagens que você compra. Diga a quantidade e o preço de como você compra (ex: 1000 gramas por R$ 25,00) — o aplicativo calcula o preço de cada grama sozinho.</p>
+
+    <div class="table-wrap">
+      <table id="tabelaMateriais"><thead><tr><th>Nome</th><th>Qtd. que compra</th><th>Preço pago (R$)</th><th>Custo por unidade</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <div class="row">
+      <div class="field"><label for="novoMatNome">Nome do material</label><input type="text" id="novoMatNome" placeholder="Ex: Carne moída"></div>
+      <div class="field" style="flex:0 0 140px;"><label for="novoMatQtd">Qtd. que compra</label><input type="number" id="novoMatQtd" min="0.0001" step="any" placeholder="Ex: 1000"></div>
+      <div class="field" style="flex:0 0 140px;"><label for="novoMatValor">Preço pago (R$)</label><input type="number" id="novoMatValor" min="0" step="0.01" placeholder="Ex: 25"></div>
+      <button class="btn" id="addMaterial" type="button">Adicionar</button>
+    </div>
+  </section>
+
+  <!-- ===================== ABA 3: PRODUTOS ===================== -->
+  <section class="panel" id="tab-produtos" role="tabpanel" hidden>
+    <h2>Precificar um produto</h2>
+    <p class="hint">Dê um nome ao produto, diga a margem de lucro que você quer e monte a receita com os materiais já cadastrados. O preço de venda sai pronto.</p>
+
+    <div class="row">
+      <div class="field"><label for="prodNome">Nome do produto</label><input type="text" id="prodNome" placeholder="Ex: Coxinha de frango"></div>
+      <div class="field" style="flex:0 0 150px;"><label for="prodMargem">Margem desejada (%)</label><input type="number" id="prodMargem" min="0" step="0.1" placeholder="Ex: 10"></div>
+      <div class="field" style="flex:0 0 170px;"><label for="prodUnidades">Quantas unidades a receita faz</label><input type="number" id="prodUnidades" min="1" step="1" placeholder="Ex: 20"></div>
+    </div>
+
+    <div>
+      <h3 style="font-size:15px;margin:0 0 8px;">Ingredientes da receita</h3>
+      <div id="listaIngredientes" class="table-wrap"></div>
+      <div class="pick-row" style="margin-top:8px;">
+        <select id="prodIngMaterial"></select>
+        <input type="number" id="prodIngQtd" min="0.0001" step="any" placeholder="Quantidade usada" style="max-width:160px;">
+        <button class="btn secondary" id="addIngrediente" type="button">+ Adicionar ingrediente</button>
+      </div>
+    </div>
+
+    <div id="prodAlert"></div>
+    <button class="btn" id="salvarProduto" type="button">Calcular e salvar produto</button>
+  </section>
+
+  <section class="panel" id="listaProdutos">
+    <h2>Seus produtos</h2>
+    <div id="produtosContainer" style="display:flex;flex-direction:column;gap:14px;"></div>
+  </section>
+</main>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- utilidades ---------- */
+  function uid(){ return Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
+  function brl(n){ return "R$ " + (Number(n)||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function pct(n){ return ((Number(n)||0)*100).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1}) + "%"; }
+
+  /* ---------- armazenamento (fica salvo no navegador) ---------- */
+  var STORAGE_KEY = "calculadora_preco_v1";
+  function estadoInicial(){
+    return {
+      config: { faturamentoMensal: 0, custosFixos: [], custosVariaveis: [] },
+      materiais: [],
+      produtos: []
+    };
+  }
+  var state = estadoInicial();
+  function carregar(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){ var parsed = JSON.parse(raw); state = Object.assign(estadoInicial(), parsed); }
+    }catch(e){ /* navegador sem localStorage (ex: aba anônima) — segue com estado em memória */ }
+  }
+  function salvar(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){ /* ignora falha de armazenamento */ }
+  }
+
+  /* ---------- motor de cálculo (a mesma lógica usada em todos os produtos) ---------- */
+  function calcularCustoFixo(){
+    var total = state.config.custosFixos.reduce(function(s,c){ return s + (Number(c.valor)||0); }, 0);
+    var faturamento = Number(state.config.faturamentoMensal) || 0;
+    var percentual = faturamento > 0 ? total/faturamento : 0;
+    return { total: total, percentual: percentual };
+  }
+  function calcularCustoVariavel(){
+    var total = state.config.custosVariaveis.reduce(function(s,c){ return s + ((Number(c.valor)||0)/100); }, 0);
+    return { percentual: total };
+  }
+  function custoUnitarioMaterial(material){
+    var qtd = Number(material.qtd)||0;
+    return qtd > 0 ? (Number(material.valor)||0)/qtd : 0;
+  }
+  function calcularFichaTecnica(ingredientes, unidadesPorLote){
+    var custoTotal = ingredientes.reduce(function(s, ing){
+      var mat = state.materiais.find(function(m){ return m.id === ing.materialId; });
+      if(!mat) return s;
+      return s + (Number(ing.qtd)||0) * custoUnitarioMaterial(mat);
+    }, 0);
+    var unidades = Number(unidadesPorLote)||0;
+    return { custoTotalReceita: custoTotal, custoUnitario: unidades > 0 ? custoTotal/unidades : 0 };
+  }
+  // motor central: a mesma fórmula de markup usada por qualquer tela de precificação
+  function motorPrecificacao(custo, custoFixoPct, custoVariavelPct, margemPct){
+    var soma = custoFixoPct + custoVariavelPct + margemPct;
+    if(soma >= 1){ return { erro: "A soma dos custos e da margem passa de 100%. Reduza a margem ou revise os custos." }; }
+    var markup = 1/(1-soma);
+    return { markup: markup, precoVenda: custo * markup };
+  }
+  function montarDRE(precoVenda, custoFixoPct, custoVariavelPct, custoProduto){
+    var itensVariaveis = state.config.custosVariaveis.map(function(c){
+      var valor = ((Number(c.valor)||0)/100) * precoVenda;
+      return { nome: c.nome, valor: valor };
+    });
+    var totalCustosVariaveis = custoVariavelPct * precoVenda;
+    var totalCustosFixos = custoFixoPct * precoVenda;
+    var totalCustos = totalCustosVariaveis + totalCustosFixos + custoProduto;
+    var margemLucro = precoVenda - totalCustos;
+    return { itensVariaveis: itensVariaveis, totalCustosVariaveis: totalCustosVariaveis, totalCustosFixos: totalCustosFixos, custoProduto: custoProduto, totalCustos: totalCustos, margemLucro: margemLucro };
+  }
+  function precificarProduto(produto){
+    var ft = calcularFichaTecnica(produto.ingredientes, produto.unidades);
+    var cf = calcularCustoFixo();
+    var cv = calcularCustoVariavel();
+    var margem = (Number(produto.margem)||0)/100;
+    var resultado = motorPrecificacao(ft.custoUnitario, cf.percentual, cv.percentual, margem);
+    if(resultado.erro) return { erro: resultado.erro, custoUnitario: ft.custoUnitario };
+    var dre = montarDRE(resultado.precoVenda, cf.percentual, cv.percentual, ft.custoUnitario);
+    return { custoUnitario: ft.custoUnitario, markup: resultado.markup, precoVenda: resultado.precoVenda, dre: dre };
+  }
+
+  /* ---------- abas ---------- */
+  var tabs = document.querySelectorAll("nav.tabs button");
+  tabs.forEach(function(btn){
+    btn.addEventListener("click", function(){
+      tabs.forEach(function(b){ b.setAttribute("aria-selected", String(b===btn)); });
+      ["custos","materiais","produtos"].forEach(function(name){
+        document.getElementById("tab-"+name).hidden = (name !== btn.dataset.tab);
+      });
+    });
+  });
+
+  /* ---------- renderização: Custos ---------- */
+  function renderCustos(){
+    document.getElementById("faturamentoMensal").value = state.config.faturamentoMensal || "";
+
+    var corpoFixos = document.querySelector("#tabelaCustosFixos tbody");
+    corpoFixos.innerHTML = "";
+    state.config.custosFixos.forEach(function(c){
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>"+escapeHtml(c.nome)+"</td><td class='num'>"+brl(c.valor)+"</td><td></td>";
+      var tdBtn = tr.lastElementChild;
+      var del = document.createElement("button");
+      del.className = "btn danger"; del.textContent = "Remover";
+      del.addEventListener("click", function(){
+        state.config.custosFixos = state.config.custosFixos.filter(function(x){ return x.id !== c.id; });
+        salvar(); renderAll();
+      });
+      tdBtn.appendChild(del);
+      corpoFixos.appendChild(tr);
+    });
+
+    var corpoVar = document.querySelector("#tabelaCustosVar tbody");
+    corpoVar.innerHTML = "";
+    state.config.custosVariaveis.forEach(function(c){
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>"+escapeHtml(c.nome)+"</td><td class='num'>"+(Number(c.valor)||0).toLocaleString("pt-BR")+"%</td><td></td>";
+      var tdBtn = tr.lastElementChild;
+      var del = document.createElement("button");
+      del.className = "btn danger"; del.textContent = "Remover";
+      del.addEventListener("click", function(){
+        state.config.custosVariaveis = state.config.custosVariaveis.filter(function(x){ return x.id !== c.id; });
+        salvar(); renderAll();
+      });
+      tdBtn.appendChild(del);
+      corpoVar.appendChild(tr);
+    });
+
+    var cf = calcularCustoFixo(), cv = calcularCustoVariavel();
+    document.getElementById("kpiCustoFixoPct").textContent = pct(cf.percentual);
+    document.getElementById("kpiCustoVarPct").textContent = pct(cv.percentual);
+  }
+
+  document.getElementById("faturamentoMensal").addEventListener("input", function(e){
+    state.config.faturamentoMensal = Number(e.target.value)||0;
+    salvar(); renderCustos(); renderProdutos();
+  });
+  document.getElementById("addCustoFixo").addEventListener("click", function(){
+    var nome = document.getElementById("novoCustoFixoNome").value.trim();
+    var valor = Number(document.getElementById("novoCustoFixoValor").value);
+    if(!nome || !(valor >= 0)) return;
+    state.config.custosFixos.push({ id: uid(), nome: nome, valor: valor });
+    document.getElementById("novoCustoFixoNome").value = "";
+    document.getElementById("novoCustoFixoValor").value = "";
+    salvar(); renderAll();
+  });
+  document.getElementById("addCustoVar").addEventListener("click", function(){
+    var nome = document.getElementById("novoCustoVarNome").value.trim();
+    var valor = Number(document.getElementById("novoCustoVarValor").value);
+    if(!nome || !(valor >= 0)) return;
+    state.config.custosVariaveis.push({ id: uid(), nome: nome, valor: valor });
+    document.getElementById("novoCustoVarNome").value = "";
+    document.getElementById("novoCustoVarValor").value = "";
+    salvar(); renderAll();
+  });
+
+  /* ---------- renderização: Materiais ---------- */
+  function renderMateriais(){
+    var corpo = document.querySelector("#tabelaMateriais tbody");
+    corpo.innerHTML = "";
+    state.materiais.forEach(function(m){
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>"+escapeHtml(m.nome)+"</td><td class='num'>"+(Number(m.qtd)||0).toLocaleString("pt-BR")+"</td><td class='num'>"+brl(m.valor)+"</td><td class='num'>"+brl(custoUnitarioMaterial(m))+"</td><td></td>";
+      var tdBtn = tr.lastElementChild;
+      var del = document.createElement("button");
+      del.className = "btn danger"; del.textContent = "Remover";
+      del.addEventListener("click", function(){
+        state.materiais = state.materiais.filter(function(x){ return x.id !== m.id; });
+        salvar(); renderAll();
+      });
+      tdBtn.appendChild(del);
+      corpo.appendChild(tr);
+    });
+
+    var select = document.getElementById("prodIngMaterial");
+    var atual = select.value;
+    select.innerHTML = "";
+    if(state.materiais.length === 0){
+      var opt = document.createElement("option");
+      opt.textContent = "Cadastre um material primeiro"; opt.value = "";
+      select.appendChild(opt);
+    }
+    state.materiais.forEach(function(m){
+      var opt = document.createElement("option");
+      opt.value = m.id; opt.textContent = m.nome;
+      select.appendChild(opt);
+    });
+    if(atual) select.value = atual;
+  }
+
+  document.getElementById("addMaterial").addEventListener("click", function(){
+    var nome = document.getElementById("novoMatNome").value.trim();
+    var qtd = Number(document.getElementById("novoMatQtd").value);
+    var valor = Number(document.getElementById("novoMatValor").value);
+    if(!nome || !(qtd > 0) || !(valor >= 0)) return;
+    state.materiais.push({ id: uid(), nome: nome, qtd: qtd, valor: valor });
+    document.getElementById("novoMatNome").value = "";
+    document.getElementById("novoMatQtd").value = "";
+    document.getElementById("novoMatValor").value = "";
+    salvar(); renderAll();
+  });
+
+  /* ---------- formulário de novo produto (ingredientes em memória até salvar) ---------- */
+  var ingredientesNovoProduto = [];
+  function renderIngredientesNovoProduto(){
+    var wrap = document.getElementById("listaIngredientes");
+    if(ingredientesNovoProduto.length === 0){
+      wrap.innerHTML = "<p class='hint'>Nenhum ingrediente adicionado ainda.</p>";
+      return;
+    }
+    var rows = ingredientesNovoProduto.map(function(ing, idx){
+      var mat = state.materiais.find(function(m){ return m.id === ing.materialId; });
+      var nome = mat ? mat.nome : "(material removido)";
+      return "<tr><td>"+escapeHtml(nome)+"</td><td class='num'>"+ing.qtd+"</td><td><button class='btn danger' data-idx='"+idx+"'>Remover</button></td></tr>";
+    }).join("");
+    wrap.innerHTML = "<table><thead><tr><th>Ingrediente</th><th>Qtd. usada</th><th></th></tr></thead><tbody>"+rows+"</tbody></table>";
+    wrap.querySelectorAll("button[data-idx]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        ingredientesNovoProduto.splice(Number(btn.dataset.idx), 1);
+        renderIngredientesNovoProduto();
+      });
+    });
+  }
+  document.getElementById("addIngrediente").addEventListener("click", function(){
+    var materialId = document.getElementById("prodIngMaterial").value;
+    var qtd = Number(document.getElementById("prodIngQtd").value);
+    if(!materialId || !(qtd > 0)) return;
+    ingredientesNovoProduto.push({ materialId: materialId, qtd: qtd });
+    document.getElementById("prodIngQtd").value = "";
+    renderIngredientesNovoProduto();
+  });
+
+  document.getElementById("salvarProduto").addEventListener("click", function(){
+    var alertBox = document.getElementById("prodAlert");
+    alertBox.innerHTML = "";
+    var nome = document.getElementById("prodNome").value.trim();
+    var margem = Number(document.getElementById("prodMargem").value);
+    var unidades = Number(document.getElementById("prodUnidades").value);
+    if(!nome){ alertBox.innerHTML = "<div class='alert bad'>Dê um nome ao produto.</div>"; return; }
+    if(!(unidades > 0)){ alertBox.innerHTML = "<div class='alert bad'>Diga quantas unidades a receita faz (ex: 20).</div>"; return; }
+    if(ingredientesNovoProduto.length === 0){ alertBox.innerHTML = "<div class='alert bad'>Adicione pelo menos um ingrediente.</div>"; return; }
+
+    var produto = { id: uid(), nome: nome, margem: margem, unidades: unidades, ingredientes: ingredientesNovoProduto.slice() };
+    var resultado = precificarProduto(produto);
+    if(resultado.erro){ alertBox.innerHTML = "<div class='alert bad'>"+escapeHtml(resultado.erro)+"</div>"; return; }
+
+    state.produtos.push(produto);
+    ingredientesNovoProduto = [];
+    document.getElementById("prodNome").value = "";
+    document.getElementById("prodMargem").value = "";
+    document.getElementById("prodUnidades").value = "";
+    renderIngredientesNovoProduto();
+    alertBox.innerHTML = "<div class='alert good'>Produto salvo! Veja o preço calculado abaixo, em “Seus produtos”.</div>";
+    salvar(); renderAll();
+  });
+
+  /* ---------- lista de produtos já salvos (recalcula sempre, pois custos podem mudar) ---------- */
+  function renderProdutos(){
+    var container = document.getElementById("produtosContainer");
+    if(state.produtos.length === 0){
+      container.innerHTML = "<p class='hint'>Nenhum produto cadastrado ainda. Vá para a aba “3. Produtos” para calcular o primeiro.</p>";
+      return;
+    }
+    container.innerHTML = "";
+    state.produtos.forEach(function(produto){
+      var r = precificarProduto(produto);
+      var card = document.createElement("div");
+      card.className = "card";
+      if(r.erro){
+        card.innerHTML =
+          "<div class='card-head'><h3>"+escapeHtml(produto.nome)+"</h3></div>" +
+          "<div class='alert bad'>"+escapeHtml(r.erro)+"</div>";
+      }else{
+        var dre = r.dre;
+        var itensHtml = dre.itensVariaveis.map(function(it){
+          return "<div class='item'><span>"+escapeHtml(it.nome)+"</span><span>"+brl(it.valor)+"</span></div>";
+        }).join("");
+        card.innerHTML =
+          "<div class='card-head'><h3>"+escapeHtml(produto.nome)+"</h3><span class='price'>"+brl(r.precoVenda)+"</span></div>" +
+          "<p class='hint' style='margin:0;'>Preço sugerido por unidade · custo da receita: "+brl(r.custoUnitario)+"</p>" +
+          "<details><summary>Ver detalhe (DRE)</summary><div class='dre' style='margin-top:8px;'>" +
+            itensHtml +
+            "<div class='item'><span>Custo fixo</span><span>"+brl(dre.totalCustosFixos)+"</span></div>" +
+            "<div class='item'><span>Custo do produto</span><span>"+brl(dre.custoProduto)+"</span></div>" +
+            "<div class='item total'><span>Lucro (margem)</span><span>"+brl(dre.margemLucro)+"</span></div>" +
+          "</div></details>" +
+          "<div><button class='btn danger' type='button'>Remover produto</button></div>";
+        card.querySelector("button.danger").addEventListener("click", function(){
+          state.produtos = state.produtos.filter(function(p){ return p.id !== produto.id; });
+          salvar(); renderAll();
+        });
+      }
+      container.appendChild(card);
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function renderAll(){ renderCustos(); renderMateriais(); renderProdutos(); }
+
+  carregar();
+  renderAll();
+})();
+</script>
