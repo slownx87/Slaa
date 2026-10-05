@@ -54,6 +54,7 @@
 <script src="shared/engine.js"></script>
 <script src="shared/storage.js"></script>
 <script src="shared/nav.js"></script>
+<script src="shared/ui.js"></script>
 <script>
 (function(){
   "use strict";
@@ -137,7 +138,7 @@
       var botoes = document.createElement("div");
       var remover = document.createElement("button");
       remover.className = "btn danger"; remover.type = "button"; remover.textContent = "Remover";
-      remover.addEventListener("click", function(){
+      UI.confirmarAntes(remover, function(){
         state.itensLote = state.itensLote.filter(function(it){ return it.id !== item.id; });
         Store.salvar(state); renderItens();
       });

@@ -61,6 +61,7 @@
 <script src="shared/engine.js"></script>
 <script src="shared/storage.js"></script>
 <script src="shared/nav.js"></script>
+<script src="shared/ui.js"></script>
 <script>
 (function(){
   "use strict";
@@ -195,7 +196,7 @@
             "<div class='item total'><span>Lucro (margem)</span><span>"+Engine.brl(dre.margemLucro)+"</span></div>" +
           "</div></details>" +
           "<div><button class='btn danger' type='button'>Remover produto</button></div>";
-        card.querySelector("button.danger").addEventListener("click", function(){
+        UI.confirmarAntes(card.querySelector("button.danger"), function(){
           state.produtos = state.produtos.filter(function(p){ return p.id !== produto.id; });
           Store.salvar(state); renderProdutos();
         });

@@ -26,6 +26,24 @@
     return !!(global.matchMedia && global.matchMedia("(min-width: 760px)").matches);
   }
 
+  // Indicador de progresso bem leve: uma bolinha ao lado das páginas que
+  // já têm algum dado salvo. Não é informação essencial (a página em si
+  // sempre mostra o que tem), então fica aria-hidden — é só um atalho
+  // visual a mais, reaproveitando o estado que o Store já guarda.
+  function temDados(chave, state) {
+    if (!state) return false;
+    switch (chave) {
+      case "custos": return (state.config.custosFixos || []).length > 0 || (state.config.custosVariaveis || []).length > 0 || Number(state.config.faturamentoMensal) > 0;
+      case "materiais": return (state.materiais || []).length > 0;
+      case "produtos": return (state.produtos || []).length > 0;
+      case "lote": return (state.itensLote || []).length > 0;
+      case "limites": return Number(state.limites.precoVendaLimite) > 0 || Number(state.limites.precoCusto) > 0;
+      case "servicos": return Number(state.servico.salarioDesejado) > 0 || Number(state.servico.horasMes) > 0;
+      case "cursos": return Number(state.cursoCPL.custoPorClique) > 0 || Number(state.cursoAud.tamanhoAudiencia) > 0;
+      default: return false;
+    }
+  }
+
   function render(paginaAtual) {
     var el = document.getElementById("siteNav");
     if (!el) return;
@@ -36,11 +54,15 @@
     for (var i = 0; i < PAGINAS.length; i++) { if (PAGINAS[i].chave === paginaAtual) { atual = PAGINAS[i]; break; } }
     var nomeAtual = atual ? atual.label : "";
 
+    var state = null;
+    try { if (global.Store && global.Store.carregar) state = global.Store.carregar(); } catch (e) { /* segue sem o indicador */ }
+
     var itensHtml = PAGINAS.map(function (p) {
       var ehAtual = p.chave === paginaAtual;
       var marca = ehAtual ? '<span class="nav-check" aria-hidden="true">✓</span> ' : "";
       var rotuloExtra = ehAtual ? ' <span class="nav-atual-tag">(página atual)</span>' : "";
-      return '<li><a href="' + p.href + '" class="nav-link' + (ehAtual ? " atual" : "") + '"' + (ehAtual ? ' aria-current="page"' : "") + ">" + marca + p.label + rotuloExtra + "</a></li>";
+      var ponto = (!ehAtual && temDados(p.chave, state)) ? ' <span class="nav-dot" aria-hidden="true"></span>' : "";
+      return '<li><a href="' + p.href + '" class="nav-link' + (ehAtual ? " atual" : "") + '"' + (ehAtual ? ' aria-current="page"' : "") + ">" + marca + p.label + rotuloExtra + ponto + "</a></li>";
     }).join("");
 
     el.innerHTML =
