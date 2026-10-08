@@ -535,6 +535,8 @@ class CondyMassRegister:
         print("=" * 60)
 
         dry_run = input("\n🧪 Modo teste (só mostra, não altera nada)? (s/n): ").strip().lower() == 's'
+        ask_ambiguous = input("❓ Unidade com mais de um morador: perguntar de quem é cada tag? (n = só lista no final) (s/n): ").strip().lower() == 's'
+        pending = []
 
         print("\n🏷️  Carregando tags Nice...")
         tags = self.search_credential("", manufacturer_filter='niceguarita', credential_type='tag',
@@ -582,10 +584,16 @@ class CondyMassRegister:
                 self.stats["skip"] += len(unit_tags)
                 continue
 
-            for tag in unit_tags:
-                print(f"\n   🏷️  Tag {tag.get('description')} (ident: {tag['identification']})")
+            if len(residents) > 1 and not ask_ambiguous:
+                print(f"⏭️  {len(residents)} moradores e {len(unit_tags)} tag(s): ambíguo, pulando")
+                pending.append(f"{label}: {len(residents)} moradores, tags {[t.get('description') for t in unit_tags]}")
+                self.stats["skip"] += len(unit_tags)
+                continue
 
-                if len(unit_tags) == 1 and len(residents) == 1:
+            for tag in unit_tags:
+                print(f"\n   🏷️  Tag {tag.get('description')} (ident: {tag['identification']}, id: {tag['id']})")
+
+                if len(residents) == 1:
                     resident = residents[0]
                 else:
                     for i, r in enumerate(residents, 1):
@@ -608,6 +616,11 @@ class CondyMassRegister:
                 else:
                     print("      ❌ Erro ao vincular")
                     self.stats["fail"] += 1
+
+        if pending:
+            print(f"\n⚠️  {len(pending)} unidade(s) puladas por ambiguidade:")
+            for item in pending:
+                print(f"   - {item}")
 
     def show_stats(self):
         """Mostra estatísticas finais"""
