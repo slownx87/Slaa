@@ -172,15 +172,41 @@ class CondyMassRegister:
         }
 
         try:
-            response = self.session.get(url, params=params, headers=self.headers)
+            response = self.session.get(url, params=params, headers=self.headers, timeout=15)
             if response.status_code == 200:
-                data = response.json()
-                if data.get('content'):
-                    return data['content'][0]
-        except:
+                content = response.json().get('content') or []
+                # A busca é parcial ("1" acha "10", "101"): exigir nome exato
+                for unit in content:
+                    if str(unit.get('name', '')).strip() == str(unit_number).strip():
+                        return unit
+        except requests.RequestException:
             pass
 
         return None
+
+    def get_all_units(self) -> List[str]:
+        """Lista os nomes de todas as unidades do bloco direto da API (sem Excel)"""
+        url = f"{BASE_URL}/licenses/{LICENSE_ID}/units/options"
+        names = []
+        page = 0
+
+        try:
+            while page < 200:
+                params = {"page": page, "blockId": BLOCK_ID, "name": "", "size": 100}
+                response = self.session.get(url, params=params, headers=self.headers, timeout=15)
+                if response.status_code != 200:
+                    print(f"⚠️  Listagem de unidades: HTTP {response.status_code}")
+                    break
+                data = response.json()
+                content = data.get('content') or []
+                names.extend(str(u['name']) for u in content if u.get('name') is not None)
+                if not content or data.get('last', True):
+                    break
+                page += 1
+        except requests.RequestException as e:
+            print(f"⚠️  Erro de rede: {e}")
+
+        return names
 
     def get_residents_api(self, unit_id: int) -> Optional[list]:
         """Procura os moradores de uma unidade na API"""
@@ -419,6 +445,9 @@ class CondyMassRegister:
         # Determinar quais unidades processar
         if unit_number:
             units_to_process = {unit_number: self.excel_data.get(unit_number, [])}
+        elif manufacturer == 'niceguarita':
+            # Nice não usa Excel: unidades vêm direto da API
+            units_to_process = {name: [] for name in self.get_all_units()}
         else:
             units_to_process = self.excel_data
 
@@ -563,15 +592,13 @@ class CondyMassRegister:
             elif opcao == '3':
                 unit_number = input("\n📍 Número da unidade (Enter para TODAS): ").strip()
                 if not unit_number:
-                    confirm = input("\n⚠️  Isso vai processar TODAS as unidades do Excel (Nice Guarita). Confirma? (s/n): ").strip().lower()
+                    confirm = input("\n⚠️  Isso vai processar TODAS as unidades da API (Nice Guarita). Confirma? (s/n): ").strip().lower()
                     if confirm == 's':
                         self.mass_register(manufacturer='niceguarita')
                         self.show_stats()
-                elif unit_number in self.excel_data:
+                else:
                     self.mass_register(unit_number, manufacturer='niceguarita')
                     self.show_stats()
-                else:
-                    print(f"❌ Unidade {unit_number} não encontrada no Excel")
 
             elif opcao == '4':
                 if self.get_new_cookie():
