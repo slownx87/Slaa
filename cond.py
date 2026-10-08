@@ -340,11 +340,19 @@ class CondyMassRegister:
 
     def update_credential_nice(self, credential: dict, resident: dict) -> bool:
         """Vincula credential Nice Guarita (LINEAR_GUARITA) ao morador via PUT /credentials/{id}"""
+        # Trava: o payload é de tag Nice; nunca aplicar a facial, controle remoto ou outro fabricante
+        if ('nice' not in (credential.get('manufacturer') or '').lower()
+                or credential.get('equipmentType') != 'LINEAR_GUARITA'
+                or (credential.get('credentialTypeDescription') or '').strip().lower() != 'tag'):
+            print(f"\n      🚫 Recusado: credencial {credential.get('id')} não é tag Nice "
+                  f"({credential.get('manufacturer')}/{credential.get('credentialTypeDescription')})")
+            return False
+
         payload = {
             "linkTypeName": "MORADOR",
             "linkId": resident['id'],
             "equipmentTypeName": "LINEAR_GUARITA",
-            "configurationId": NICE_CONFIGURATION_ID,
+            "configurationId": credential.get('configurationId') or NICE_CONFIGURATION_ID,
             "name": credential.get('description') or credential.get('identification', ''),
             "unlimitedPeriod": True,
             "groups": NICE_GROUPS,
