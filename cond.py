@@ -14,6 +14,8 @@ COOKIE_FILE = "condfy_session.json"
 MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
 
 # Nice Guarita (LINEAR_GUARITA) - valores copiados da tela de edição do Condfy
+# Tags Nice sem dono ficam na unidade "0" (bloco "tags ??"), ligadas a um morador-reserva
+NICE_FREE_UNIT_NUMBER = "0"
 NICE_CONFIGURATION_ID = 3420
 NICE_GROUPS = [{"id": "0", "description": "LIVRE  (0)"}]
 NICE_READERS = [
@@ -228,7 +230,7 @@ class CondyMassRegister:
 
         return None
 
-    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision', credential_type: Optional[str] = None, all_pages: bool = False) -> List[dict]:
+    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision', credential_type: Optional[str] = None, all_pages: bool = False, free_unit_number: Optional[str] = None) -> List[dict]:
         """Procura credentials pelo nome, filtrando por fabricante (padrão: Hikvision)"""
         url = f"{BASE_URL}/licenses/{LICENSE_ID}/credentials"
         params = {
@@ -273,8 +275,12 @@ class CondyMassRegister:
                     if credential_type and (credential.get('credentialTypeDescription') or '').strip().lower() != credential_type.lower():
                         continue
 
-                    # Verificar se unitId é null
-                    if credential.get('unitId') is None:
+                    # Livre: sem unidade, ou (Nice) guardada na unidade reserva (ex: "0")
+                    if free_unit_number is not None:
+                        is_free = str(credential.get('unitNumber')).strip() == free_unit_number
+                    else:
+                        is_free = credential.get('unitId') is None
+                    if is_free:
                         credentials.append(credential)
 
                 if not all_pages or not content or data.get('last', True) or params["page"] >= 200:
@@ -288,6 +294,7 @@ class CondyMassRegister:
             print(f"      fabricantes: {seen['manufacturers']}")
             print(f"      tipos: {seen['types']}")
             print(f"      já vinculadas a unidade: {seen['com_unidade']}")
+            print(f"      (livre = unidade reserva '{free_unit_number}')" if free_unit_number is not None else "")
 
         return credentials
 
@@ -332,7 +339,7 @@ class CondyMassRegister:
             "linkId": resident['id'],
             "equipmentTypeName": "LINEAR_GUARITA",
             "configurationId": NICE_CONFIGURATION_ID,
-            "name": credential.get('identification') or credential.get('description', ''),
+            "name": credential.get('description') or credential.get('identification', ''),
             "unlimitedPeriod": True,
             "groups": NICE_GROUPS,
             "timeOptions": [],
@@ -429,14 +436,16 @@ class CondyMassRegister:
     def ask_user_nice(self, resident_name: str, pool: List[dict]) -> Optional[dict]:
         """Nice: escolhe a tag pela identificação (sem busca por nome)"""
         while True:
-            entrada = input(f"\n   🏷️  Tag para '{resident_name}' (identificação, 'l' lista, Enter pula): ").strip()
+            entrada = input(f"\n   🏷️  Tag para '{resident_name}' (número da tag ou identificação, 'l' lista, Enter pula): ").strip()
             if not entrada:
                 return None
             if entrada.lower() == 'l':
                 for cred in pool:
-                    print(f"      {cred['identification']}  (ID: {cred['id']}, {cred.get('description', '')})")
+                    print(f"      {cred.get('description', '')}  (ident: {cred['identification']}, ID: {cred['id']})")
                 continue
-            matches = [c for c in pool if str(c.get('identification', '')).strip() == entrada]
+            matches = [c for c in pool
+                       if entrada.lower() in (str(c.get('description', '')).strip().lower(),
+                                              str(c.get('identification', '')).strip().lower())]
             if len(matches) == 1:
                 return matches[0]
             if not matches:
@@ -472,7 +481,7 @@ class CondyMassRegister:
         nice_pool = None
         if manufacturer == 'niceguarita':
             print("\n🏷️  Carregando tags Nice livres...")
-            nice_pool = self.search_credential("", manufacturer_filter=manufacturer, credential_type='tag', all_pages=True)
+            nice_pool = self.search_credential("", manufacturer_filter=manufacturer, credential_type='tag', all_pages=True, free_unit_number=NICE_FREE_UNIT_NUMBER)
             print(f"   {len(nice_pool)} tags livres")
             if not nice_pool:
                 print("❌ Nenhuma tag livre encontrada")
