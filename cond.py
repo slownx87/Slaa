@@ -3,7 +3,6 @@ import requests
 import json
 import os
 import openpyxl
-import unicodedata
 from typing import Optional, List, Dict
 
 # Configurações
@@ -16,10 +15,6 @@ COOKIE_FILE = "condfy_session.json"
 MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
 
 # Nice Guarita (LINEAR_GUARITA) - valores copiados da tela de edição do Condfy
-# Tags Nice sem dono ficam na unidade "0" (bloco "tags ??")
-NICE_FREE_UNIT_NUMBER = "0"
-# Ignora tags cujo nome tem mais dígitos que isso (ex: 3 -> usa "002" e "110", ignora "00234")
-NICE_MAX_DIGITS = 3
 NICE_CONFIGURATION_ID = 3420
 NICE_GROUPS = [{"id": "0", "description": "LIVRE  (0)"}]
 NICE_READERS = [
@@ -200,27 +195,6 @@ class CondyMassRegister:
         found = self.find_units(unit_number, block_id)
         return found[0] if found else None
 
-    def get_all_units(self) -> List[dict]:
-        """Todas as unidades de todos os blocos, direto da API (cada uma com '_block_id')"""
-        units = []
-        for bid in BLOCK_IDS:
-            count = 0
-            page = 0
-            while page < 200:
-                result = self._search_units_in_block(bid, "", page=page, size=100)
-                if not result:
-                    break
-                content, last = result
-                for u in content:
-                    if u.get('name') is not None:
-                        units.append({**u, '_block_id': bid})
-                        count += 1
-                if not content or last:
-                    break
-                page += 1
-            print(f"   bloco {bid}: {count} unidades")
-        return units
-
     def get_residents_api(self, unit_id: int) -> Optional[list]:
         """Procura os moradores de uma unidade na API"""
         url = f"{BASE_URL}/units/{unit_id}/residents/options"
@@ -338,8 +312,8 @@ class CondyMassRegister:
         except:
             return False
 
-    def update_credential_nice(self, credential: dict, resident: dict) -> bool:
-        """Vincula credential Nice Guarita (LINEAR_GUARITA) ao morador via PUT /credentials/{id}"""
+    def update_credential_nice(self, credential: dict) -> bool:
+        """PUT /credentials/{id} com a configuração da tag Nice, mantendo o vínculo atual dela"""
         # Trava: o payload é de tag Nice; nunca aplicar a facial, controle remoto ou outro fabricante
         if ('nice' not in (credential.get('manufacturer') or '').lower()
                 or credential.get('equipmentType') != 'LINEAR_GUARITA'
@@ -349,8 +323,8 @@ class CondyMassRegister:
             return False
 
         payload = {
-            "linkTypeName": "MORADOR",
-            "linkId": resident['id'],
+            "linkTypeName": credential.get('linkTypeDescription') or "MORADOR",
+            "linkId": credential['linkId'],
             "equipmentTypeName": "LINEAR_GUARITA",
             "configurationId": credential.get('configurationId') or NICE_CONFIGURATION_ID,
             "name": credential.get('description') or credential.get('identification', ''),
@@ -449,8 +423,6 @@ class CondyMassRegister:
 
     def do_link(self, credential: dict, unit: dict, resident: dict, manufacturer: str) -> bool:
         """Vincula de acordo com o fabricante (morador ou veículo)"""
-        if manufacturer == 'niceguarita':
-            return self.update_credential_nice(credential, resident)
         return self.link_credential(credential, unit, resident)
 
     def mass_register(self, unit_number: str = None, manufacturer: str = 'hikvision'):
@@ -532,100 +504,66 @@ class CondyMassRegister:
                         print("   ⏭️  Pulado")
                         self.stats["skip"] += 1
 
-    @staticmethod
-    def _is_placeholder(name) -> bool:
-        """Nome só com números (ex: "002", "00145") = morador/tag provisório"""
-        text = str(name or '').replace(' ', '').replace('.', '')
-        return bool(text) and text.isdigit()
+    def fetch_nice_credentials(self) -> List[dict]:
+        """Todas as credenciais Nice, página por página (0, 1, 2, ...) até acabar"""
+        url = f"{BASE_URL}/licenses/{LICENSE_ID}/credentials"
+        result = []
+        page = 0
+        while page < 500:
+            params = {"block": "", "unit": "", "description": "", "identification": "",
+                      "manufacturer": MANUFACTURER_TERMS['niceguarita'], "page": page}
+            try:
+                response = self.session.get(url, params=params, headers=self.headers, timeout=20)
+            except requests.RequestException as e:
+                print(f"\n⚠️  Erro de rede na página {page}: {e}")
+                break
+            if response.status_code != 200:
+                print(f"\n⚠️  Página {page}: HTTP {response.status_code}")
+                break
+            data = response.json()
+            content = data.get('content') or []
+            result.extend(content)
+            print(f"   página {page}: {len(content)} credenciais (acumulado {len(result)})")
+            if not content or not (data.get('links') or {}).get('next'):
+                break
+            page += 1
+        return result
 
-    @staticmethod
-    def _norm(text) -> str:
-        """Minúsculas, sem acento e com espaços simples"""
-        text = unicodedata.normalize('NFKD', str(text or '')).encode('ascii', 'ignore').decode()
-        return ' '.join(text.lower().split())
-
-    def _tag_matches_resident(self, tag: dict, resident: dict) -> bool:
-        """Nome da tag = nome do morador (números como 002, ou nome cortado em ~18 letras)"""
-        name = self._norm(resident.get('name'))
-        desc = self._norm(tag.get('description'))
-        if not name or not desc:
-            return False
-        if name == desc:
-            return True
-        return len(desc) >= 10 and not self._is_placeholder(desc) and name.startswith(desc)
-
-    def register_nice(self, unit_number: str = None):
-        """Nice (tag): para cada morador da unidade, acha a tag com o mesmo nome e faz o PUT.
-        Tudo pela API, sem Excel."""
+    def configure_nice_tags(self, only_unit: str = None):
+        """Nice: aplica a configuração do PUT (grupo + leitores) em cada tag, uma por uma,
+        usando o id da própria credencial e mantendo o vínculo (linkId/nome) que ela já tem."""
         print("\n" + "=" * 60)
-        print("🚀 NICE GUARITA (TAG)")
+        print("🚀 NICE GUARITA: CONFIGURAR TAGS")
         print("=" * 60)
 
         dry_run = input("\n🧪 Modo teste (só mostra, não altera nada)? (s/n): ").strip().lower() == 's'
 
-        print("\n🏷️  Carregando tags Nice...")
-        tags = self.search_credential("", manufacturer_filter='niceguarita', credential_type='tag',
-                                      all_pages=True, only_free=False)
-        # Só tags sem dono real: na unidade reserva ("0") ou ligadas a nome numérico
-        movable = [t for t in tags
-                   if str(t.get('unitNumber')).strip() == NICE_FREE_UNIT_NUMBER
-                   or self._is_placeholder(t.get('linkDescription'))]
-        print(f"   {len(tags)} tags Nice, {len(movable)} candidatas (reserva ou nome numérico)")
+        print("\n🏷️  Lendo credenciais Nice, página por página...")
+        credentials = self.fetch_nice_credentials()
+        tags = [c for c in credentials
+                if 'nice' in (c.get('manufacturer') or '').lower()
+                and c.get('equipmentType') == 'LINEAR_GUARITA'
+                and (c.get('credentialTypeDescription') or '').strip().lower() == 'tag'
+                and c.get('linkId')]
+        if only_unit:
+            tags = [c for c in tags if str(c.get('unitNumber')).strip() == only_unit]
+        print(f"\n   {len(credentials)} credenciais lidas, {len(tags)} tags Nice a configurar")
+        if not tags:
+            return
 
-        if unit_number:
-            matches = self.find_units(unit_number)
-            if not matches:
-                print(f"❌ Unidade {unit_number} não encontrada em nenhum bloco")
-                return
-            if len(matches) > 1:
-                print(f"\n❓ Unidade {unit_number} existe em {len(matches)} blocos:")
-                for i, m in enumerate(matches, 1):
-                    print(f"   {i}. bloco {m['_block_id']}")
-                escolha = input("   Qual bloco? (número, Enter cancela): ").strip()
-                if not escolha.isdigit() or not 1 <= int(escolha) <= len(matches):
-                    return
-                matches = [matches[int(escolha) - 1]]
-            units = matches
-        else:
-            print("\n🏢 Listando unidades dos blocos...")
-            units = [u for u in self.get_all_units() if str(u.get('name')).strip() != NICE_FREE_UNIT_NUMBER]
-
-        for n, unit in enumerate(units, 1):
-            print(f"\n{'=' * 60}\n📍 [{n}/{len(units)}] Unidade {unit['name']} (bloco {unit['_block_id']})\n{'=' * 60}")
-
-            residents = self.get_residents_api(unit['id'])
-            if not residents:
-                print("⚠️  Nenhum morador encontrado na API")
+        for n, tag in enumerate(tags, 1):
+            label = (f"[{n}/{len(tags)}] id {tag['id']}  {tag.get('description')}  "
+                     f"(unid {tag.get('unitNumber')}, ident {tag.get('identification')})")
+            if dry_run:
+                print(f"🧪 {label}")
                 continue
-
-            for resident in residents:
-                name = str(resident.get('name') or '')
-                # Ignora nomes com dígitos demais (ex: 00145)
-                if sum(c.isdigit() for c in name) > NICE_MAX_DIGITS:
-                    continue
-
-                candidates = [t for t in movable
-                              if t.get('linkId') != resident['id'] and self._tag_matches_resident(t, resident)]
-                if not candidates:
-                    continue
-
-                # Várias com o mesmo nome: prefere a da unidade reserva, depois a de menor id
-                candidates.sort(key=lambda t: (str(t.get('unitNumber')).strip() != NICE_FREE_UNIT_NUMBER, t['id']))
-                tag = candidates[0]
-                print(f"\n   👤 {name} ← 🏷️  {tag.get('description')} (ident: {tag['identification']}, id: {tag['id']})"
-                      + (f"  [{len(candidates)} tags com esse nome]" if len(candidates) > 1 else ""), end=" ")
-
-                if dry_run:
-                    print("🧪 (teste)")
-                    continue
-
-                if self.update_credential_nice(tag, resident):
-                    print("✅")
-                    self.stats["success"] += 1
-                    movable.remove(tag)
-                else:
-                    print("❌")
-                    self.stats["fail"] += 1
+            print(f"{label} ...", end=" ")
+            if self.update_credential_nice(tag):
+                print("✅")
+                self.stats["success"] += 1
+            else:
+                print("❌")
+                self.stats["fail"] += 1
 
     def show_stats(self):
         """Mostra estatísticas finais"""
@@ -654,7 +592,7 @@ class CondyMassRegister:
             print("=" * 60)
             print("1. Cadastrar TODAS as unidades")
             print("2. Cadastrar UMA unidade específica")
-            print("3. Cadastrar Nice Guarita (tag)")
+            print("3. Nice Guarita: configurar tags")
             print("4. Renovar cookie")
             print("5. Sair")
 
@@ -675,12 +613,12 @@ class CondyMassRegister:
                     print(f"❌ Unidade {unit_number} não encontrada no Excel")
 
             elif opcao == '3':
-                unit_number = input("\n📍 Número da unidade (Enter para TODAS): ").strip()
+                unit_number = input("\n📍 Unidade (Enter para TODAS as tags Nice): ").strip()
                 if not unit_number:
-                    confirm = input("\n⚠️  Isso vai processar TODAS as unidades com tags Nice pendentes. Confirma? (s/n): ").strip().lower()
+                    confirm = input("\n⚠️  Isso vai aplicar a configuração em TODAS as tags Nice. Confirma? (s/n): ").strip().lower()
                     if confirm != 's':
                         continue
-                self.register_nice(unit_number or None)
+                self.configure_nice_tags(unit_number or None)
                 self.show_stats()
 
             elif opcao == '4':
