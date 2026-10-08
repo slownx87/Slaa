@@ -15,12 +15,13 @@ BLOCK_IDS = ["94701", "94700", "93649", "93367", "94698", "94071", "94860"]
 BLOCK_ID = BLOCK_IDS[0]  # padrão nos payloads quando a unidade não traz o bloco
 COOKIE_FILE = "condfy_session.json"
 API_HOST = "api.condfy.com.br"
+PROGRESS_FILE = "nice_done.json"  # ids das tags Nice já configuradas
 
 MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
 
 # Nice Guarita (LINEAR_GUARITA) - valores copiados da tela de edição do Condfy
-# Requisições em paralelo (se a API devolver 429, diminua)
-NICE_WORKERS = 10
+# Requisições em paralelo (com muitas, a API pode devolver 403/429)
+NICE_WORKERS = 1  # 1 = uma por vez (mais seguro); suba só se a API aceitar
 NICE_CONFIGURATION_ID = 3420
 NICE_GROUPS = [{"id": "0", "description": "LIVRE  (0)"}]
 NICE_READERS = [
@@ -40,7 +41,7 @@ class CondyMassRegister:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
         }
         self.excel_data = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.forbidden_count = 0
         self.stats = {"success": 0, "skip": 0, "fail": 0, "manual": 0}
 
@@ -550,6 +551,22 @@ class CondyMassRegister:
         print(f"\n⚠️  Página {page}: falhou após 3 tentativas")
         return None
 
+    def load_progress(self) -> set:
+        try:
+            with open(PROGRESS_FILE, 'r') as f:
+                return set(json.load(f).get('done', []))
+        except (OSError, ValueError):
+            return set()
+
+    def mark_done(self, done: set, credential_id: int):
+        """Grava na hora cada tag configurada, para não repetir se reiniciar"""
+        with self._lock:
+            done.add(credential_id)
+            tmp = PROGRESS_FILE + ".tmp"
+            with open(tmp, 'w') as f:
+                json.dump({'done': sorted(done)}, f)
+            os.replace(tmp, PROGRESS_FILE)
+
     def fetch_nice_credentials(self) -> List[dict]:
         """Todas as credenciais Nice, páginas em paralelo (lotes de NICE_WORKERS) até acabar"""
         result = {}
@@ -593,55 +610,77 @@ class CondyMassRegister:
         if not tags:
             return
 
-        if not dry_run:
-            # Garante token novo e testa UMA tag antes de disparar as outras
-            self.get_new_xsrf_token()
-            self.forbidden_count = 0
-            first = tags[0]
-            print(f"\n🔬 Teste com a primeira tag (id {first['id']})...")
-            ok = self.update_credential_nice(first)
-            if not ok and getattr(self, 'last_put', (0,))[0] == 403:
-                print("   403: renovando o XSRF e tentando de novo...")
-                self.get_new_xsrf_token()
-                ok = self.update_credential_nice(first)
-            if not ok:
-                names = sorted({f"{c.name}@{c.domain}" for c in self.session.cookies})
-                print("\n🛑 PUT recusado. Nenhuma outra tag foi enviada.")
-                print(f"   resposta: {getattr(self, 'last_put', None)}")
-                print(f"   token enviado no header: {'sim' if self.xsrf_token else 'NÃO'}")
-                print(f"   cookies na sessão: {names}")
-                print("   → Renove o cookie (opção 4) colando 'csl' E o 'XSRF-TOKEN' do navegador.")
-                return
-            print("   ✅ funcionou, enviando as demais")
-            self.stats["success"] += 1
-            tags = tags[1:]
+        done = self.load_progress()
+        if done and not dry_run:
+            pulados = [t for t in tags if t['id'] in done]
+            if pulados:
+                resp = input(f"\n♻️  {len(pulados)} tags já configuradas antes. Pular essas? (S/n): ").strip().lower()
+                if resp != 'n':
+                    tags = [t for t in tags if t['id'] not in done]
+                    print(f"   {len(tags)} restantes")
+        if not tags:
+            print("✅ Nada a fazer: todas as tags já foram configuradas")
+            return
 
+        if dry_run:
+            for n, tag in enumerate(tags, 1):
+                print(f"🧪 [{n}/{len(tags)}] id {tag['id']}  {tag.get('description')}  "
+                      f"(unid {tag.get('unitNumber')}, ident {tag.get('identification')})")
+            return
+
+        self.get_new_xsrf_token()
         total = len(tags)
         counter = {"n": 0}
+        stop = threading.Event()
+
+        def send(tag) -> bool:
+            """PUT; se a sessão cair (401/403), pede cookie novo e tenta de novo, sem reiniciar"""
+            ok = self.update_credential_nice(tag)
+            if ok:
+                return True
+            status = getattr(self, 'last_put', (0,))[0]
+            if status in (401, 403):
+                with self._lock:   # um de cada vez renova a sessão
+                    if not stop.is_set():
+                        self.get_new_xsrf_token()
+                        ok = self.update_credential_nice(tag)
+                        if not ok and getattr(self, 'last_put', (0,))[0] in (401, 403):
+                            print("\n🔐 Sessão caiu. Cole um cookie novo para continuar (Enter vazio = parar).")
+                            if self.get_new_cookie():
+                                self.get_new_xsrf_token()
+                                ok = self.update_credential_nice(tag)
+                            else:
+                                stop.set()
+                if ok:
+                    return True
+            return False
 
         def work(tag):
-            if self.forbidden_count >= 5:
-                return  # muitos 403 seguidos: para de enviar
-            ok = None if dry_run else self.update_credential_nice(tag)
+            if stop.is_set():
+                return
+            ok = send(tag)
             with self._lock:
                 counter["n"] += 1
                 label = (f"[{counter['n']}/{total}] id {tag['id']}  {tag.get('description')}  "
                          f"(unid {tag.get('unitNumber')}, ident {tag.get('identification')})")
-                if dry_run:
-                    print(f"🧪 {label}")
-                elif ok:
+                if ok:
                     print(f"✅ {label}")
                     self.stats["success"] += 1
                 else:
                     print(f"❌ {label}")
                     self.stats["fail"] += 1
+            if ok:
+                self.mark_done(done, tag['id'])
+            elif self.forbidden_count >= 5 and NICE_WORKERS > 1:
+                stop.set()
 
+        self.forbidden_count = 0
         with ThreadPoolExecutor(max_workers=NICE_WORKERS) as pool:
             for f in as_completed([pool.submit(work, t) for t in tags]):
                 f.result()
 
-        if self.forbidden_count >= 5:
-            print("\n🛑 Parado por excesso de 403. Renove o cookie (opção 4) e rode de novo.")
+        if stop.is_set():
+            print(f"\n🛑 Parado. {len(done)} tags já salvas em {PROGRESS_FILE}; rode de novo para continuar.")
 
     def show_stats(self):
         """Mostra estatísticas finais"""
