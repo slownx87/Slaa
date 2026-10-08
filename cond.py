@@ -11,6 +11,8 @@ LICENSE_ID = "18788"
 BLOCK_ID = "137108"
 COOKIE_FILE = "condfy_session.json"
 
+MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
+
 # Nice Guarita (LINEAR_GUARITA) - valores copiados da tela de edição do Condfy
 NICE_CONFIGURATION_ID = 3420
 NICE_GROUPS = [{"id": "0", "description": "LIVRE  (0)"}]
@@ -214,6 +216,10 @@ class CondyMassRegister:
 
         credentials = []
 
+        # Termo usado pela API/filtro para cada fabricante (ex: niceguarita -> "nice")
+        manufacturer_term = MANUFACTURER_TERMS.get(manufacturer_filter, manufacturer_filter)
+        params["manufacturer"] = manufacturer_term
+
         try:
             response = self.session.get(url, params=params, headers=self.headers)
             if response.status_code == 200:
@@ -223,7 +229,7 @@ class CondyMassRegister:
                         manufacturer = credential.get('manufacturer', '')
 
                         # Aceitar apenas o fabricante desejado
-                        if manufacturer_filter not in manufacturer.lower():
+                        if manufacturer_term not in manufacturer.lower():
                             continue
 
                         # Filtrar pelo tipo de credencial (ex: tag)
