@@ -14,6 +14,7 @@ LICENSE_ID = "18788"
 BLOCK_IDS = ["94701", "94700", "93649", "93367", "94698", "94071", "94860"]
 BLOCK_ID = BLOCK_IDS[0]  # padrão nos payloads quando a unidade não traz o bloco
 COOKIE_FILE = "condfy_session.json"
+API_HOST = "api.condfy.com.br"
 
 MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
 
@@ -39,6 +40,8 @@ class CondyMassRegister:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
         }
         self.excel_data = {}
+        self._lock = threading.Lock()
+        self.forbidden_count = 0
         self.stats = {"success": 0, "skip": 0, "fail": 0, "manual": 0}
 
         self.load_cookie()
@@ -74,6 +77,14 @@ class CondyMassRegister:
             print(f"❌ Erro ao carregar Excel: {e}")
             return False
 
+    def _set_cookie(self, name: str, value: str):
+        """Define UM cookie com esse nome (apaga duplicatas de qualquer domínio antes).
+        Cookie duplicado (um sem domínio + outro do servidor) faz o CSRF dar 403."""
+        for cookie in list(self.session.cookies):
+            if cookie.name == name:
+                self.session.cookies.clear(cookie.domain, cookie.path, cookie.name)
+        self.session.cookies.set(name, value, domain=API_HOST, path='/')
+
     def load_cookie(self):
         """Carrega o cookie do arquivo se existir"""
         if os.path.exists(COOKIE_FILE):
@@ -85,9 +96,9 @@ class CondyMassRegister:
 
                     if self.csl_cookie:
                         print(f"📂 Cookie carregado")
-                        self.session.cookies.set('csl', self.csl_cookie)
+                        self._set_cookie('csl', self.csl_cookie)
                         if self.xsrf_token:
-                            self.session.cookies.set('XSRF-TOKEN', self.xsrf_token)
+                            self._set_cookie('XSRF-TOKEN', self.xsrf_token)
                         return True
             except:
                 pass
@@ -127,9 +138,9 @@ class CondyMassRegister:
 
         self.csl_cookie = csl_cookie
         self.xsrf_token = xsrf_token if xsrf_token else None
-        self.session.cookies.set('csl', csl_cookie)
+        self._set_cookie('csl', csl_cookie)
         if self.xsrf_token:
-            self.session.cookies.set('XSRF-TOKEN', self.xsrf_token)
+            self._set_cookie('XSRF-TOKEN', self.xsrf_token)
 
         if self.test_cookie():
             print("✅ Cookie válido!")
@@ -144,27 +155,31 @@ class CondyMassRegister:
         """Garante que temos um cookie válido"""
         if self.test_cookie():
             print("✅ Cookie válido")
+            self.get_new_xsrf_token()
             return True
 
         print("⚠️  Cookie expirado ou inválido")
         return self.get_new_cookie()
 
     def get_new_xsrf_token(self) -> bool:
-        """Obtém um novo XSRF token"""
+        """Obtém um XSRF token novo e deixa token (header) e cookie com o mesmo valor, sem duplicata"""
         url = f"{BASE_URL}/public/csrf"
 
         try:
-            response = self.session.get(url, headers=self.headers)
+            response = self.session.get(url, headers=self.headers, timeout=15)
             response.raise_for_status()
-            data = response.json()
-            self.xsrf_token = data.get('token')
-
-            if self.xsrf_token:
-                self.session.cookies.set('XSRF-TOKEN', self.xsrf_token)
-                self.save_cookie()
-                return True
-            return False
-        except:
+            token = response.json().get('token')
+            # Se o servidor também mandou o cookie, ele manda: header tem que ser igual a ele
+            for cookie in self.session.cookies:
+                if cookie.name == 'XSRF-TOKEN' and cookie.value:
+                    token = cookie.value
+            if not token:
+                return False
+            self.xsrf_token = token
+            self._set_cookie('XSRF-TOKEN', token)
+            self.save_cookie()
+            return True
+        except (requests.RequestException, ValueError):
             return False
 
     def _search_units_in_block(self, block_id: str, name: str, page: int = 0, size: int = 15):
@@ -363,6 +378,10 @@ class CondyMassRegister:
                 response = self.session.put(url, json=payload, headers=headers, timeout=20)
                 if response.status_code in [200, 201, 204]:
                     return True
+                self.last_put = (response.status_code, response.text[:300])
+                if response.status_code == 403:
+                    with self._lock:
+                        self.forbidden_count += 1
                 if response.status_code not in (429, 500, 502, 503, 504):
                     print(f"\n      ⚠️  id {credential['id']}: HTTP {response.status_code}: {response.text[:200]}")
                     return False
@@ -574,13 +593,37 @@ class CondyMassRegister:
         if not tags:
             return
 
-        lock = threading.Lock()
+        if not dry_run:
+            # Garante token novo e testa UMA tag antes de disparar as outras
+            self.get_new_xsrf_token()
+            self.forbidden_count = 0
+            first = tags[0]
+            print(f"\n🔬 Teste com a primeira tag (id {first['id']})...")
+            ok = self.update_credential_nice(first)
+            if not ok and getattr(self, 'last_put', (0,))[0] == 403:
+                print("   403: renovando o XSRF e tentando de novo...")
+                self.get_new_xsrf_token()
+                ok = self.update_credential_nice(first)
+            if not ok:
+                names = sorted({f"{c.name}@{c.domain}" for c in self.session.cookies})
+                print("\n🛑 PUT recusado. Nenhuma outra tag foi enviada.")
+                print(f"   resposta: {getattr(self, 'last_put', None)}")
+                print(f"   token enviado no header: {'sim' if self.xsrf_token else 'NÃO'}")
+                print(f"   cookies na sessão: {names}")
+                print("   → Renove o cookie (opção 4) colando 'csl' E o 'XSRF-TOKEN' do navegador.")
+                return
+            print("   ✅ funcionou, enviando as demais")
+            self.stats["success"] += 1
+            tags = tags[1:]
+
         total = len(tags)
         counter = {"n": 0}
 
         def work(tag):
+            if self.forbidden_count >= 5:
+                return  # muitos 403 seguidos: para de enviar
             ok = None if dry_run else self.update_credential_nice(tag)
-            with lock:
+            with self._lock:
                 counter["n"] += 1
                 label = (f"[{counter['n']}/{total}] id {tag['id']}  {tag.get('description')}  "
                          f"(unid {tag.get('unitNumber')}, ident {tag.get('identification')})")
@@ -596,6 +639,9 @@ class CondyMassRegister:
         with ThreadPoolExecutor(max_workers=NICE_WORKERS) as pool:
             for f in as_completed([pool.submit(work, t) for t in tags]):
                 f.result()
+
+        if self.forbidden_count >= 5:
+            print("\n🛑 Parado por excesso de 403. Renove o cookie (opção 4) e rode de novo.")
 
     def show_stats(self):
         """Mostra estatísticas finais"""
