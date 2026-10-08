@@ -535,7 +535,7 @@ class CondyMassRegister:
         print("=" * 60)
 
         dry_run = input("\n🧪 Modo teste (só mostra, não altera nada)? (s/n): ").strip().lower() == 's'
-        ask_ambiguous = input("❓ Unidade com mais de um morador: perguntar de quem é cada tag? (n = só lista no final) (s/n): ").strip().lower() == 's'
+        ask_ambiguous = input("❓ Unidade com mais de um morador: perguntar de quem é cada tag? (n = distribui sozinho, tags em ordem de id pelos moradores) (s/n): ").strip().lower() == 's'
         pending = []
 
         print("\n🏷️  Carregando tags Nice...")
@@ -585,16 +585,14 @@ class CondyMassRegister:
                 continue
 
             if len(residents) > 1 and not ask_ambiguous:
-                print(f"⏭️  {len(residents)} moradores e {len(unit_tags)} tag(s): ambíguo, pulando")
+                print(f"⚠️  {len(residents)} moradores e {len(unit_tags)} tag(s): distribuindo em ordem")
                 pending.append(f"{label}: {len(residents)} moradores, tags {[t.get('description') for t in unit_tags]}")
-                self.stats["skip"] += len(unit_tags)
-                continue
 
-            for tag in unit_tags:
+            for idx, tag in enumerate(sorted(unit_tags, key=lambda t: t['id'])):
                 print(f"\n   🏷️  Tag {tag.get('description')} (ident: {tag['identification']}, id: {tag['id']})")
 
-                if len(residents) == 1:
-                    resident = residents[0]
+                if len(residents) == 1 or not ask_ambiguous:
+                    resident = residents[idx % len(residents)]
                 else:
                     for i, r in enumerate(residents, 1):
                         print(f"      {i}. {r['name']}")
@@ -618,7 +616,7 @@ class CondyMassRegister:
                     self.stats["fail"] += 1
 
         if pending:
-            print(f"\n⚠️  {len(pending)} unidade(s) puladas por ambiguidade:")
+            print(f"\n⚠️  {len(pending)} unidade(s) com mais de um morador (tags distribuídas em ordem, confira):")
             for item in pending:
                 print(f"   - {item}")
 
