@@ -3,6 +3,7 @@ import requests
 import json
 import os
 import openpyxl
+import unicodedata
 from typing import Optional, List, Dict
 
 # Configurações
@@ -441,6 +442,24 @@ class CondyMassRegister:
             except:
                 print(f"   ❌ Digite um número válido")
 
+    @staticmethod
+    def _norm(text) -> str:
+        """Minúsculas, sem acento e com espaços simples"""
+        text = unicodedata.normalize('NFKD', str(text or '')).encode('ascii', 'ignore').decode()
+        return ' '.join(text.lower().split())
+
+    def match_nice_tags(self, resident_name: str, pool: List[dict]) -> List[dict]:
+        """Tags cuja descrição é o nome do morador (a descrição Nice vem cortada, ~18 letras)"""
+        name = self._norm(resident_name)
+        matches = []
+        for cred in pool:
+            desc = self._norm(cred.get('description'))
+            if len(desc) < 5 or desc.replace(' ', '').replace('.', '').isdigit():
+                continue
+            if name == desc or name.startswith(desc):
+                matches.append(cred)
+        return matches
+
     def ask_user_nice(self, resident_name: str, pool: List[dict]) -> Optional[dict]:
         """Nice: escolhe a tag pela identificação (sem busca por nome)"""
         while True:
@@ -510,6 +529,7 @@ class CondyMassRegister:
             if not nice_pool:
                 print("❌ Nenhuma tag livre encontrada")
                 return
+            ask_manual = input("\n❓ Quando não achar a tag sozinho, perguntar manualmente? (s/n): ").strip().lower() == 's'
 
         total_units = len(units_to_process)
         processed_units = 0
@@ -540,14 +560,26 @@ class CondyMassRegister:
                 print(f"\n   👤 {resident_name}...", end=" ")
 
                 if nice_pool is not None:
-                    selected_cred = self.ask_user_nice(resident_name, nice_pool)
+                    candidates = self.match_nice_tags(resident_name, nice_pool)
+                    if len(candidates) == 1:
+                        selected_cred = candidates[0]
+                        print(f"🏷️  tag '{selected_cred.get('description')}' ({selected_cred['identification']})", end=" ")
+                    elif len(candidates) > 1:
+                        selected_cred = self.ask_user(resident_name, candidates)
+                        self.stats["manual"] += 1
+                    elif ask_manual:
+                        selected_cred = self.ask_user_nice(resident_name, nice_pool)
+                        self.stats["manual"] += 1
+                    else:
+                        print("⏭️  Sem tag com esse nome")
+                        self.stats["skip"] += 1
+                        continue
                     if not selected_cred:
                         print("   ⏭️  Pulado")
                         self.stats["skip"] += 1
                     elif self.do_link(selected_cred, unit_api, resident, manufacturer):
                         print("   ✅ Vinculado")
                         self.stats["success"] += 1
-                        self.stats["manual"] += 1
                         nice_pool.remove(selected_cred)
                     else:
                         print("   ❌ Erro ao vincular")
