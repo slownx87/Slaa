@@ -202,7 +202,7 @@ class CondyMassRegister:
 
         return None
 
-    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision', credential_type: Optional[str] = None) -> List[dict]:
+    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision', credential_type: Optional[str] = None, all_pages: bool = False) -> List[dict]:
         """Procura credentials pelo nome, filtrando por fabricante (padrão: Hikvision)"""
         url = f"{BASE_URL}/licenses/{LICENSE_ID}/credentials"
         params = {
@@ -221,26 +221,33 @@ class CondyMassRegister:
         params["manufacturer"] = manufacturer_term
 
         try:
-            response = self.session.get(url, params=params, headers=self.headers)
-            if response.status_code == 200:
+            while True:
+                response = self.session.get(url, params=params, headers=self.headers, timeout=15)
+                if response.status_code != 200:
+                    print(f"\n      ⚠️  Busca de credenciais: HTTP {response.status_code}")
+                    break
                 data = response.json()
-                if data.get('content'):
-                    for credential in data['content']:
-                        manufacturer = credential.get('manufacturer', '')
+                content = data.get('content') or []
+                for credential in content:
+                    manufacturer = credential.get('manufacturer') or ''
 
-                        # Aceitar apenas o fabricante desejado
-                        if manufacturer_term not in manufacturer.lower():
-                            continue
+                    # Aceitar apenas o fabricante desejado
+                    if manufacturer_term not in manufacturer.lower():
+                        continue
 
-                        # Filtrar pelo tipo de credencial (ex: tag)
-                        if credential_type and (credential.get('credentialTypeDescription') or '').strip().lower() != credential_type.lower():
-                            continue
+                    # Filtrar pelo tipo de credencial (ex: tag)
+                    if credential_type and (credential.get('credentialTypeDescription') or '').strip().lower() != credential_type.lower():
+                        continue
 
-                        # Verificar se unitId é null
-                        if credential.get('unitId') is None:
-                            credentials.append(credential)
-        except:
-            pass
+                    # Verificar se unitId é null
+                    if credential.get('unitId') is None:
+                        credentials.append(credential)
+
+                if not all_pages or not content or data.get('last', True) or params["page"] >= 200:
+                    break
+                params["page"] += 1
+        except requests.RequestException as e:
+            print(f"\n      ⚠️  Erro de rede na busca: {e}")
 
         return credentials
 
@@ -379,6 +386,24 @@ class CondyMassRegister:
             except:
                 print(f"   ❌ Digite um número válido")
 
+    def ask_user_nice(self, resident_name: str, pool: List[dict]) -> Optional[dict]:
+        """Nice: escolhe a tag pela identificação (sem busca por nome)"""
+        while True:
+            entrada = input(f"\n   🏷️  Tag para '{resident_name}' (identificação, 'l' lista, Enter pula): ").strip()
+            if not entrada:
+                return None
+            if entrada.lower() == 'l':
+                for cred in pool:
+                    print(f"      {cred['identification']}  (ID: {cred['id']}, {cred.get('description', '')})")
+                continue
+            matches = [c for c in pool if str(c.get('identification', '')).strip() == entrada]
+            if len(matches) == 1:
+                return matches[0]
+            if not matches:
+                print("   ❌ Tag não encontrada entre as livres")
+            else:
+                return self.ask_user(resident_name, matches)
+
     def do_link(self, credential: dict, unit: dict, resident: dict, manufacturer: str) -> bool:
         """Vincula de acordo com o fabricante (morador ou veículo)"""
         if manufacturer == 'niceguarita':
@@ -400,6 +425,15 @@ class CondyMassRegister:
         if not units_to_process:
             print("❌ Nenhuma unidade para processar")
             return
+
+        nice_pool = None
+        if manufacturer == 'niceguarita':
+            print("\n🏷️  Carregando tags Nice livres...")
+            nice_pool = self.search_credential("", manufacturer_filter=manufacturer, credential_type='tag', all_pages=True)
+            print(f"   {len(nice_pool)} tags livres")
+            if not nice_pool:
+                print("❌ Nenhuma tag livre encontrada")
+                return
 
         total_units = len(units_to_process)
         processed_units = 0
@@ -429,15 +463,25 @@ class CondyMassRegister:
                 resident_name = resident['name']
                 print(f"\n   👤 {resident_name}...", end=" ")
 
-                # Nice Guarita não tem nome completo na descrição: buscar pelo primeiro nome
-                if manufacturer == 'niceguarita':
-                    search_name = resident_name.split()[0]
-                else:
-                    search_name = resident_name
+                if nice_pool is not None:
+                    selected_cred = self.ask_user_nice(resident_name, nice_pool)
+                    if not selected_cred:
+                        print("   ⏭️  Pulado")
+                        self.stats["skip"] += 1
+                    elif self.do_link(selected_cred, unit_api, resident, manufacturer):
+                        print("   ✅ Vinculado")
+                        self.stats["success"] += 1
+                        self.stats["manual"] += 1
+                        nice_pool.remove(selected_cred)
+                    else:
+                        print("   ❌ Erro ao vincular")
+                        self.stats["fail"] += 1
+                    continue
+
+                search_name = resident_name
 
                 # Procurar credential
-                credential_type = 'tag' if manufacturer == 'niceguarita' else None
-                credentials = self.search_credential(search_name, manufacturer_filter=manufacturer, credential_type=credential_type)
+                credentials = self.search_credential(search_name, manufacturer_filter=manufacturer)
 
                 if not credentials:
                     print("⏭️  Sem credential")
