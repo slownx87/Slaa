@@ -246,6 +246,8 @@ class CondyMassRegister:
         manufacturer_term = MANUFACTURER_TERMS.get(manufacturer_filter, manufacturer_filter)
         params["manufacturer"] = manufacturer_term
 
+        seen = {"total": 0, "manufacturers": {}, "types": {}, "com_unidade": 0}
+
         try:
             while True:
                 response = self.session.get(url, params=params, headers=self.headers, timeout=15)
@@ -256,6 +258,12 @@ class CondyMassRegister:
                 content = data.get('content') or []
                 for credential in content:
                     manufacturer = credential.get('manufacturer') or ''
+                    seen["total"] += 1
+                    seen["manufacturers"][manufacturer] = seen["manufacturers"].get(manufacturer, 0) + 1
+                    ctype = credential.get('credentialTypeDescription')
+                    seen["types"][ctype] = seen["types"].get(ctype, 0) + 1
+                    if credential.get('unitId') is not None:
+                        seen["com_unidade"] += 1
 
                     # Aceitar apenas o fabricante desejado
                     if manufacturer_term not in manufacturer.lower():
@@ -274,6 +282,12 @@ class CondyMassRegister:
                 params["page"] += 1
         except requests.RequestException as e:
             print(f"\n      ⚠️  Erro de rede na busca: {e}")
+
+        if all_pages and not credentials:
+            print(f"   🔎 Diagnóstico: {seen['total']} credenciais retornadas pela API")
+            print(f"      fabricantes: {seen['manufacturers']}")
+            print(f"      tipos: {seen['types']}")
+            print(f"      já vinculadas a unidade: {seen['com_unidade']}")
 
         return credentials
 
