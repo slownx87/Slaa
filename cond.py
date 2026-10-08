@@ -86,6 +86,20 @@ class CondyMassRegister:
                 self.session.cookies.clear(cookie.domain, cookie.path, cookie.name)
         self.session.cookies.set(name, value, domain=API_HOST, path='/')
 
+    def _absorb_cookies(self, response):
+        """O servidor troca XSRF-TOKEN (e às vezes csl) a cada resposta: adota os novos
+        valores, mantendo um cookie só por nome e o header igual ao cookie"""
+        try:
+            for cookie in response.cookies:
+                if cookie.name == 'XSRF-TOKEN' and cookie.value:
+                    self.xsrf_token = cookie.value
+                    self._set_cookie('XSRF-TOKEN', cookie.value)
+                elif cookie.name == 'csl' and cookie.value:
+                    self.csl_cookie = cookie.value
+                    self._set_cookie('csl', cookie.value)
+        except Exception:
+            pass
+
     def load_cookie(self):
         """Carrega o cookie do arquivo se existir"""
         if os.path.exists(COOKIE_FILE):
@@ -169,6 +183,7 @@ class CondyMassRegister:
         try:
             response = self.session.get(url, headers=self.headers, timeout=15)
             response.raise_for_status()
+            self._absorb_cookies(response)
             token = response.json().get('token')
             # Se o servidor também mandou o cookie, ele manda: header tem que ser igual a ele
             for cookie in self.session.cookies:
@@ -376,15 +391,18 @@ class CondyMassRegister:
 
         for attempt in range(3):
             try:
+                headers["x-xsrf-token"] = self.xsrf_token
                 response = self.session.put(url, json=payload, headers=headers, timeout=20)
+                self._absorb_cookies(response)
+                self.last_put = (response.status_code, response.text[:300])
                 if response.status_code in [200, 201, 204]:
                     return True
-                self.last_put = (response.status_code, response.text[:300])
                 if response.status_code == 403:
                     with self._lock:
                         self.forbidden_count += 1
                 if response.status_code not in (429, 500, 502, 503, 504):
-                    print(f"\n      ⚠️  id {credential['id']}: HTTP {response.status_code}: {response.text[:200]}")
+                    if response.status_code not in (401, 403):  # 401/403: quem chamou trata
+                        print(f"\n      ⚠️  id {credential['id']}: HTTP {response.status_code}: {response.text[:200]}")
                     return False
             except requests.RequestException as e:
                 print(f"\n      ⚠️  id {credential['id']}: erro de rede: {e}")
@@ -639,6 +657,8 @@ class CondyMassRegister:
             if ok:
                 return True
             status = getattr(self, 'last_put', (0,))[0]
+            if status not in (401, 403):
+                return False
             if status in (401, 403):
                 with self._lock:   # um de cada vez renova a sessão
                     if not stop.is_set():
@@ -653,6 +673,8 @@ class CondyMassRegister:
                                 stop.set()
                 if ok:
                     return True
+            print(f"\n      ⚠️  id {tag['id']}: HTTP {getattr(self, 'last_put', ('?', ''))[0]}: "
+                  f"{getattr(self, 'last_put', ('', ''))[1][:150]}")
             return False
 
         def work(tag):
