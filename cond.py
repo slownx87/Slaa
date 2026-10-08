@@ -200,7 +200,7 @@ class CondyMassRegister:
 
         return None
 
-    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision') -> List[dict]:
+    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision', credential_type: Optional[str] = None) -> List[dict]:
         """Procura credentials pelo nome, filtrando por fabricante (padrão: Hikvision)"""
         url = f"{BASE_URL}/licenses/{LICENSE_ID}/credentials"
         params = {
@@ -224,6 +224,10 @@ class CondyMassRegister:
 
                         # Aceitar apenas o fabricante desejado
                         if manufacturer_filter not in manufacturer.lower():
+                            continue
+
+                        # Filtrar pelo tipo de credencial (ex: tag)
+                        if credential_type and (credential.get('credentialTypeDescription') or '').strip().lower() != credential_type.lower():
                             continue
 
                         # Verificar se unitId é null
@@ -426,7 +430,8 @@ class CondyMassRegister:
                     search_name = resident_name
 
                 # Procurar credential
-                credentials = self.search_credential(search_name, manufacturer_filter=manufacturer)
+                credential_type = 'tag' if manufacturer == 'niceguarita' else None
+                credentials = self.search_credential(search_name, manufacturer_filter=manufacturer, credential_type=credential_type)
 
                 if not credentials:
                     print("⏭️  Sem credential")
