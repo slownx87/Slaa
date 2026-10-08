@@ -3,6 +3,7 @@ import requests
 import json
 import os
 import openpyxl
+import unicodedata
 from typing import Optional, List, Dict
 
 # Configurações
@@ -199,8 +200,8 @@ class CondyMassRegister:
         found = self.find_units(unit_number, block_id)
         return found[0] if found else None
 
-    def get_all_units(self) -> List[tuple]:
-        """Lista (block_id, nome) de todas as unidades de todos os blocos, direto da API"""
+    def get_all_units(self) -> List[dict]:
+        """Todas as unidades de todos os blocos, direto da API (cada uma com '_block_id')"""
         units = []
         for bid in BLOCK_IDS:
             count = 0
@@ -212,7 +213,7 @@ class CondyMassRegister:
                 content, last = result
                 for u in content:
                     if u.get('name') is not None:
-                        units.append((bid, str(u['name'])))
+                        units.append({**u, '_block_id': bid})
                         count += 1
                 if not content or last:
                     break
@@ -529,30 +530,39 @@ class CondyMassRegister:
         text = str(name or '').replace(' ', '').replace('.', '')
         return bool(text) and text.isdigit()
 
+    @staticmethod
+    def _norm(text) -> str:
+        """Minúsculas, sem acento e com espaços simples"""
+        text = unicodedata.normalize('NFKD', str(text or '')).encode('ascii', 'ignore').decode()
+        return ' '.join(text.lower().split())
+
+    def _tag_matches_resident(self, tag: dict, resident: dict) -> bool:
+        """Nome da tag = nome do morador (números como 002, ou nome cortado em ~18 letras)"""
+        name = self._norm(resident.get('name'))
+        desc = self._norm(tag.get('description'))
+        if not name or not desc:
+            return False
+        if name == desc:
+            return True
+        return len(desc) >= 10 and not self._is_placeholder(desc) and name.startswith(desc)
+
     def register_nice(self, unit_number: str = None):
-        """Nice: tags que estão na unidade ligadas a um morador provisório (nome numérico)
-        passam para o morador real da unidade. Tudo pela API, sem Excel."""
+        """Nice (tag): para cada morador da unidade, acha a tag com o mesmo nome e faz o PUT.
+        Tudo pela API, sem Excel."""
         print("\n" + "=" * 60)
         print("🚀 NICE GUARITA (TAG)")
         print("=" * 60)
 
         dry_run = input("\n🧪 Modo teste (só mostra, não altera nada)? (s/n): ").strip().lower() == 's'
-        ask_ambiguous = input("❓ Unidade com mais de um morador: perguntar de quem é cada tag? (n = distribui sozinho, tags em ordem de id pelos moradores) (s/n): ").strip().lower() == 's'
-        pending = []
 
         print("\n🏷️  Carregando tags Nice...")
         tags = self.search_credential("", manufacturer_filter='niceguarita', credential_type='tag',
                                       all_pages=True, only_free=False)
-        by_unit: Dict[int, List[dict]] = {}
-        for tag in tags:
-            if str(tag.get('unitNumber')).strip() == NICE_FREE_UNIT_NUMBER:
-                continue  # unidade reserva
-            if sum(c.isdigit() for c in str(tag.get('description') or '')) > NICE_MAX_DIGITS:
-                continue  # nome com dígitos demais
-            if tag.get('unitId') is not None and self._is_placeholder(tag.get('linkDescription')):
-                by_unit.setdefault(tag['unitId'], []).append(tag)
-        print(f"   {len(tags)} tags Nice no total, {sum(len(v) for v in by_unit.values())} "
-              f"em {len(by_unit)} unidades esperando morador")
+        # Só tags sem dono real: na unidade reserva ("0") ou ligadas a nome numérico
+        movable = [t for t in tags
+                   if str(t.get('unitNumber')).strip() == NICE_FREE_UNIT_NUMBER
+                   or self._is_placeholder(t.get('linkDescription'))]
+        print(f"   {len(tags)} tags Nice, {len(movable)} candidatas (reserva ou nome numérico)")
 
         if unit_number:
             matches = self.find_units(unit_number)
@@ -567,62 +577,47 @@ class CondyMassRegister:
                 if not escolha.isdigit() or not 1 <= int(escolha) <= len(matches):
                     return
                 matches = [matches[int(escolha) - 1]]
-            unit_ids = [matches[0]['id']]
+            units = matches
         else:
-            unit_ids = list(by_unit)
+            print("\n🏢 Listando unidades dos blocos...")
+            units = [u for u in self.get_all_units() if str(u.get('name')).strip() != NICE_FREE_UNIT_NUMBER]
 
-        unit_ids = [u for u in unit_ids if u in by_unit]
-        if not unit_ids:
-            print("❌ Nenhuma tag esperando morador")
-            return
+        for n, unit in enumerate(units, 1):
+            print(f"\n{'=' * 60}\n📍 [{n}/{len(units)}] Unidade {unit['name']} (bloco {unit['_block_id']})\n{'=' * 60}")
 
-        for n, unit_id in enumerate(unit_ids, 1):
-            unit_tags = by_unit[unit_id]
-            label = f"{unit_tags[0].get('unitNumber')} (bloco {unit_tags[0].get('blockName')})"
-            print(f"\n{'=' * 60}\n📍 [{n}/{len(unit_ids)}] Unidade {label}\n{'=' * 60}")
-
-            residents = [r for r in (self.get_residents_api(unit_id) or [])
-                         if not self._is_placeholder(r.get('name'))]
+            residents = self.get_residents_api(unit['id'])
             if not residents:
-                print("⚠️  Nenhum morador real na unidade")
-                self.stats["skip"] += len(unit_tags)
+                print("⚠️  Nenhum morador encontrado na API")
                 continue
 
-            if len(residents) > 1 and not ask_ambiguous:
-                print(f"⚠️  {len(residents)} moradores e {len(unit_tags)} tag(s): distribuindo em ordem")
-                pending.append(f"{label}: {len(residents)} moradores, tags {[t.get('description') for t in unit_tags]}")
+            for resident in residents:
+                name = str(resident.get('name') or '')
+                # Ignora nomes com dígitos demais (ex: 00145)
+                if sum(c.isdigit() for c in name) > NICE_MAX_DIGITS:
+                    continue
 
-            for idx, tag in enumerate(sorted(unit_tags, key=lambda t: t['id'])):
-                print(f"\n   🏷️  Tag {tag.get('description')} (ident: {tag['identification']}, id: {tag['id']})")
+                candidates = [t for t in movable
+                              if t.get('linkId') != resident['id'] and self._tag_matches_resident(t, resident)]
+                if not candidates:
+                    continue
 
-                if len(residents) == 1 or not ask_ambiguous:
-                    resident = residents[idx % len(residents)]
-                else:
-                    for i, r in enumerate(residents, 1):
-                        print(f"      {i}. {r['name']}")
-                    escolha = input(f"      Morador desta tag? (1-{len(residents)}, Enter pula): ").strip()
-                    if not escolha.isdigit() or not 1 <= int(escolha) <= len(residents):
-                        print("      ⏭️  Pulado")
-                        self.stats["skip"] += 1
-                        continue
-                    resident = residents[int(escolha) - 1]
-                    self.stats["manual"] += 1
+                # Várias com o mesmo nome: prefere a da unidade reserva, depois a de menor id
+                candidates.sort(key=lambda t: (str(t.get('unitNumber')).strip() != NICE_FREE_UNIT_NUMBER, t['id']))
+                tag = candidates[0]
+                print(f"\n   👤 {name} ← 🏷️  {tag.get('description')} (ident: {tag['identification']}, id: {tag['id']})"
+                      + (f"  [{len(candidates)} tags com esse nome]" if len(candidates) > 1 else ""), end=" ")
 
                 if dry_run:
-                    print(f"      🧪 (teste) → {resident['name']}")
+                    print("🧪 (teste)")
                     continue
 
                 if self.update_credential_nice(tag, resident):
-                    print(f"      ✅ {resident['name']}")
+                    print("✅")
                     self.stats["success"] += 1
+                    movable.remove(tag)
                 else:
-                    print("      ❌ Erro ao vincular")
+                    print("❌")
                     self.stats["fail"] += 1
-
-        if pending:
-            print(f"\n⚠️  {len(pending)} unidade(s) com mais de um morador (tags distribuídas em ordem, confira):")
-            for item in pending:
-                print(f"   - {item}")
 
     def show_stats(self):
         """Mostra estatísticas finais"""
