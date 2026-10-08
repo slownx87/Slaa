@@ -540,7 +540,7 @@ class CondyMassRegister:
             print("=" * 60)
             print("1. Cadastrar TODAS as unidades")
             print("2. Cadastrar UMA unidade específica")
-            print("3. Cadastrar Nice Guarita (veículo)")
+            print("3. Cadastrar Nice Guarita (tag)")
             print("4. Renovar cookie")
             print("5. Sair")
 
