@@ -3,6 +3,9 @@ import requests
 import json
 import os
 import openpyxl
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Dict
 
 # Configurações
@@ -15,6 +18,8 @@ COOKIE_FILE = "condfy_session.json"
 MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
 
 # Nice Guarita (LINEAR_GUARITA) - valores copiados da tela de edição do Condfy
+# Requisições em paralelo (se a API devolver 429, diminua)
+NICE_WORKERS = 10
 NICE_CONFIGURATION_ID = 3420
 NICE_GROUPS = [{"id": "0", "description": "LIVRE  (0)"}]
 NICE_READERS = [
@@ -353,15 +358,18 @@ class CondyMassRegister:
 
         url = f"{BASE_URL}/credentials/{credential['id']}"
 
-        try:
-            response = self.session.put(url, json=payload, headers=headers, timeout=15)
-            if response.status_code not in [200, 201, 204]:
-                print(f"\n      ⚠️  HTTP {response.status_code}: {response.text[:200]}")
-                return False
-            return True
-        except requests.RequestException as e:
-            print(f"\n      ⚠️  Erro de rede: {e}")
-            return False
+        for attempt in range(3):
+            try:
+                response = self.session.put(url, json=payload, headers=headers, timeout=20)
+                if response.status_code in [200, 201, 204]:
+                    return True
+                if response.status_code not in (429, 500, 502, 503, 504):
+                    print(f"\n      ⚠️  id {credential['id']}: HTTP {response.status_code}: {response.text[:200]}")
+                    return False
+            except requests.RequestException as e:
+                print(f"\n      ⚠️  id {credential['id']}: erro de rede: {e}")
+            time.sleep(1 + attempt)
+        return False
 
     def link_credential_veiculo(self, credential: dict, unit: dict, vehicle: dict) -> bool:
         """Vincula o credential Nice Guarita criando um veículo novo"""
@@ -504,30 +512,45 @@ class CondyMassRegister:
                         print("   ⏭️  Pulado")
                         self.stats["skip"] += 1
 
-    def fetch_nice_credentials(self) -> List[dict]:
-        """Todas as credenciais Nice, página por página (0, 1, 2, ...) até acabar"""
+    def _fetch_nice_page(self, page: int) -> Optional[dict]:
+        """Uma página de credenciais Nice (com 3 tentativas). None em erro."""
         url = f"{BASE_URL}/licenses/{LICENSE_ID}/credentials"
-        result = []
-        page = 0
-        while page < 500:
-            params = {"block": "", "unit": "", "description": "", "identification": "",
-                      "manufacturer": MANUFACTURER_TERMS['niceguarita'], "page": page}
+        params = {"block": "", "unit": "", "description": "", "identification": "",
+                  "manufacturer": MANUFACTURER_TERMS['niceguarita'], "page": page}
+        for attempt in range(3):
             try:
                 response = self.session.get(url, params=params, headers=self.headers, timeout=20)
-            except requests.RequestException as e:
-                print(f"\n⚠️  Erro de rede na página {page}: {e}")
-                break
-            if response.status_code != 200:
-                print(f"\n⚠️  Página {page}: HTTP {response.status_code}")
-                break
-            data = response.json()
-            content = data.get('content') or []
-            result.extend(content)
-            print(f"   página {page}: {len(content)} credenciais (acumulado {len(result)})")
-            if not content or not (data.get('links') or {}).get('next'):
-                break
-            page += 1
-        return result
+                if response.status_code == 200:
+                    return response.json()
+                if response.status_code not in (429, 500, 502, 503, 504):
+                    print(f"\n⚠️  Página {page}: HTTP {response.status_code}")
+                    return None
+            except requests.RequestException:
+                pass
+            time.sleep(1 + attempt)
+        print(f"\n⚠️  Página {page}: falhou após 3 tentativas")
+        return None
+
+    def fetch_nice_credentials(self) -> List[dict]:
+        """Todas as credenciais Nice, páginas em paralelo (lotes de NICE_WORKERS) até acabar"""
+        result = {}
+        page = 0
+        done = False
+        with ThreadPoolExecutor(max_workers=NICE_WORKERS) as pool:
+            while not done and page < 500:
+                batch = list(range(page, page + NICE_WORKERS))
+                pages = dict(zip(batch, pool.map(self._fetch_nice_page, batch)))
+                for pg in batch:
+                    data = pages[pg]
+                    content = (data or {}).get('content') or []
+                    for c in content:
+                        result[c['id']] = c
+                    if not content or not ((data or {}).get('links') or {}).get('next'):
+                        done = True
+                        break
+                page += NICE_WORKERS
+                print(f"   {len(result)} credenciais lidas...")
+        return list(result.values())
 
     def configure_nice_tags(self, only_unit: str = None):
         """Nice: aplica a configuração do PUT (grupo + leitores) em cada tag, uma por uma,
@@ -551,19 +574,28 @@ class CondyMassRegister:
         if not tags:
             return
 
-        for n, tag in enumerate(tags, 1):
-            label = (f"[{n}/{len(tags)}] id {tag['id']}  {tag.get('description')}  "
-                     f"(unid {tag.get('unitNumber')}, ident {tag.get('identification')})")
-            if dry_run:
-                print(f"🧪 {label}")
-                continue
-            print(f"{label} ...", end=" ")
-            if self.update_credential_nice(tag):
-                print("✅")
-                self.stats["success"] += 1
-            else:
-                print("❌")
-                self.stats["fail"] += 1
+        lock = threading.Lock()
+        total = len(tags)
+        counter = {"n": 0}
+
+        def work(tag):
+            ok = None if dry_run else self.update_credential_nice(tag)
+            with lock:
+                counter["n"] += 1
+                label = (f"[{counter['n']}/{total}] id {tag['id']}  {tag.get('description')}  "
+                         f"(unid {tag.get('unitNumber')}, ident {tag.get('identification')})")
+                if dry_run:
+                    print(f"🧪 {label}")
+                elif ok:
+                    print(f"✅ {label}")
+                    self.stats["success"] += 1
+                else:
+                    print(f"❌ {label}")
+                    self.stats["fail"] += 1
+
+        with ThreadPoolExecutor(max_workers=NICE_WORKERS) as pool:
+            for f in as_completed([pool.submit(work, t) for t in tags]):
+                f.result()
 
     def show_stats(self):
         """Mostra estatísticas finais"""
