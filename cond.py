@@ -3,7 +3,6 @@ import requests
 import json
 import os
 import openpyxl
-import unicodedata
 from typing import Optional, List, Dict
 
 # Configurações
@@ -16,7 +15,7 @@ COOKIE_FILE = "condfy_session.json"
 MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
 
 # Nice Guarita (LINEAR_GUARITA) - valores copiados da tela de edição do Condfy
-# Tags Nice sem dono ficam na unidade "0" (bloco "tags ??"), ligadas a um morador-reserva
+# Tags Nice sem dono ficam na unidade "0" (bloco "tags ??")
 NICE_FREE_UNIT_NUMBER = "0"
 NICE_CONFIGURATION_ID = 3420
 NICE_GROUPS = [{"id": "0", "description": "LIVRE  (0)"}]
@@ -239,7 +238,7 @@ class CondyMassRegister:
 
         return None
 
-    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision', credential_type: Optional[str] = None, all_pages: bool = False, free_unit_number: Optional[str] = None) -> List[dict]:
+    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision', credential_type: Optional[str] = None, all_pages: bool = False, only_free: bool = True) -> List[dict]:
         """Procura credentials pelo nome, filtrando por fabricante (padrão: Hikvision)"""
         url = f"{BASE_URL}/licenses/{LICENSE_ID}/credentials"
         params = {
@@ -284,12 +283,8 @@ class CondyMassRegister:
                     if credential_type and (credential.get('credentialTypeDescription') or '').strip().lower() != credential_type.lower():
                         continue
 
-                    # Livre: sem unidade, ou (Nice) guardada na unidade reserva (ex: "0")
-                    if free_unit_number is not None:
-                        is_free = str(credential.get('unitNumber')).strip() == free_unit_number
-                    else:
-                        is_free = credential.get('unitId') is None
-                    if is_free:
+                    # Só as sem unidade (ou todas, com only_free=False)
+                    if not only_free or credential.get('unitId') is None:
                         credentials.append(credential)
 
                 if not all_pages or not content or data.get('last', True) or params["page"] >= 200:
@@ -303,7 +298,6 @@ class CondyMassRegister:
             print(f"      fabricantes: {seen['manufacturers']}")
             print(f"      tipos: {seen['types']}")
             print(f"      já vinculadas a unidade: {seen['com_unidade']}")
-            print(f"      (livre = unidade reserva '{free_unit_number}')" if free_unit_number is not None else "")
 
         return credentials
 
@@ -442,44 +436,6 @@ class CondyMassRegister:
             except:
                 print(f"   ❌ Digite um número válido")
 
-    @staticmethod
-    def _norm(text) -> str:
-        """Minúsculas, sem acento e com espaços simples"""
-        text = unicodedata.normalize('NFKD', str(text or '')).encode('ascii', 'ignore').decode()
-        return ' '.join(text.lower().split())
-
-    def match_nice_tags(self, resident_name: str, pool: List[dict]) -> List[dict]:
-        """Tags cuja descrição é o nome do morador (a descrição Nice vem cortada, ~18 letras)"""
-        name = self._norm(resident_name)
-        matches = []
-        for cred in pool:
-            desc = self._norm(cred.get('description'))
-            if len(desc) < 5 or desc.replace(' ', '').replace('.', '').isdigit():
-                continue
-            if name == desc or name.startswith(desc):
-                matches.append(cred)
-        return matches
-
-    def ask_user_nice(self, resident_name: str, pool: List[dict]) -> Optional[dict]:
-        """Nice: escolhe a tag pela identificação (sem busca por nome)"""
-        while True:
-            entrada = input(f"\n   🏷️  Tag para '{resident_name}' (número da tag ou identificação, 'l' lista, Enter pula): ").strip()
-            if not entrada:
-                return None
-            if entrada.lower() == 'l':
-                for cred in pool:
-                    print(f"      {cred.get('description', '')}  (ident: {cred['identification']}, ID: {cred['id']})")
-                continue
-            matches = [c for c in pool
-                       if entrada.lower() in (str(c.get('description', '')).strip().lower(),
-                                              str(c.get('identification', '')).strip().lower())]
-            if len(matches) == 1:
-                return matches[0]
-            if not matches:
-                print("   ❌ Tag não encontrada entre as livres")
-            else:
-                return self.ask_user(resident_name, matches)
-
     def do_link(self, credential: dict, unit: dict, resident: dict, manufacturer: str) -> bool:
         """Vincula de acordo com o fabricante (morador ou veículo)"""
         if manufacturer == 'niceguarita':
@@ -489,47 +445,18 @@ class CondyMassRegister:
     def mass_register(self, unit_number: str = None, manufacturer: str = 'hikvision'):
         """Faz registro em massa de unidades"""
         print("\n" + "=" * 60)
-        print(f"🚀 CADASTRO EM MASSA ({'NICE GUARITA' if manufacturer == 'niceguarita' else 'HIKVISION'})")
+        print("🚀 CADASTRO EM MASSA (HIKVISION)")
         print("=" * 60)
 
         # Determinar quais unidades processar: lista de (block_id ou None, número)
-        if unit_number and manufacturer == 'niceguarita':
-            matches = self.find_units(unit_number)
-            if not matches:
-                print(f"❌ Unidade {unit_number} não encontrada em nenhum bloco")
-                return
-            if len(matches) > 1:
-                print(f"\n❓ Unidade {unit_number} existe em {len(matches)} blocos:")
-                for i, m in enumerate(matches, 1):
-                    print(f"   {i}. bloco {m['_block_id']}")
-                escolha = input("   Qual bloco? (número, Enter cancela): ").strip()
-                if not escolha.isdigit() or not 1 <= int(escolha) <= len(matches):
-                    return
-                matches = [matches[int(escolha) - 1]]
-            units_to_process = [(matches[0]['_block_id'], unit_number)]
-        elif unit_number:
+        if unit_number:
             units_to_process = [(None, unit_number)]
-        elif manufacturer == 'niceguarita':
-            # Nice não usa Excel: unidades vêm direto da API
-            print("\n🏢 Listando unidades dos blocos...")
-            # pula a unidade reserva das tags ("0")
-            units_to_process = [u for u in self.get_all_units() if u[1].strip() != NICE_FREE_UNIT_NUMBER]
         else:
             units_to_process = [(None, u) for u in self.excel_data]
 
         if not units_to_process:
             print("❌ Nenhuma unidade para processar")
             return
-
-        nice_pool = None
-        if manufacturer == 'niceguarita':
-            print("\n🏷️  Carregando tags Nice livres...")
-            nice_pool = self.search_credential("", manufacturer_filter=manufacturer, credential_type='tag', all_pages=True, free_unit_number=NICE_FREE_UNIT_NUMBER)
-            print(f"   {len(nice_pool)} tags livres")
-            if not nice_pool:
-                print("❌ Nenhuma tag livre encontrada")
-                return
-            ask_manual = input("\n❓ Quando não achar a tag sozinho, perguntar manualmente? (s/n): ").strip().lower() == 's'
 
         total_units = len(units_to_process)
         processed_units = 0
@@ -558,33 +485,6 @@ class CondyMassRegister:
             for resident in residents_api:
                 resident_name = resident['name']
                 print(f"\n   👤 {resident_name}...", end=" ")
-
-                if nice_pool is not None:
-                    candidates = self.match_nice_tags(resident_name, nice_pool)
-                    if len(candidates) == 1:
-                        selected_cred = candidates[0]
-                        print(f"🏷️  tag '{selected_cred.get('description')}' ({selected_cred['identification']})", end=" ")
-                    elif len(candidates) > 1:
-                        selected_cred = self.ask_user(resident_name, candidates)
-                        self.stats["manual"] += 1
-                    elif ask_manual:
-                        selected_cred = self.ask_user_nice(resident_name, nice_pool)
-                        self.stats["manual"] += 1
-                    else:
-                        print("⏭️  Sem tag com esse nome")
-                        self.stats["skip"] += 1
-                        continue
-                    if not selected_cred:
-                        print("   ⏭️  Pulado")
-                        self.stats["skip"] += 1
-                    elif self.do_link(selected_cred, unit_api, resident, manufacturer):
-                        print("   ✅ Vinculado")
-                        self.stats["success"] += 1
-                        nice_pool.remove(selected_cred)
-                    else:
-                        print("   ❌ Erro ao vincular")
-                        self.stats["fail"] += 1
-                    continue
 
                 search_name = resident_name
 
@@ -620,6 +520,94 @@ class CondyMassRegister:
                     else:
                         print("   ⏭️  Pulado")
                         self.stats["skip"] += 1
+
+    @staticmethod
+    def _is_placeholder(name) -> bool:
+        """Nome só com números (ex: "002", "00145") = morador/tag provisório"""
+        text = str(name or '').replace(' ', '').replace('.', '')
+        return bool(text) and text.isdigit()
+
+    def register_nice(self, unit_number: str = None):
+        """Nice: tags que estão na unidade ligadas a um morador provisório (nome numérico)
+        passam para o morador real da unidade. Tudo pela API, sem Excel."""
+        print("\n" + "=" * 60)
+        print("🚀 NICE GUARITA (TAG)")
+        print("=" * 60)
+
+        dry_run = input("\n🧪 Modo teste (só mostra, não altera nada)? (s/n): ").strip().lower() == 's'
+
+        print("\n🏷️  Carregando tags Nice...")
+        tags = self.search_credential("", manufacturer_filter='niceguarita', credential_type='tag',
+                                      all_pages=True, only_free=False)
+        by_unit: Dict[int, List[dict]] = {}
+        for tag in tags:
+            if str(tag.get('unitNumber')).strip() == NICE_FREE_UNIT_NUMBER:
+                continue  # unidade reserva
+            if tag.get('unitId') is not None and self._is_placeholder(tag.get('linkDescription')):
+                by_unit.setdefault(tag['unitId'], []).append(tag)
+        print(f"   {len(tags)} tags Nice no total, {sum(len(v) for v in by_unit.values())} "
+              f"em {len(by_unit)} unidades esperando morador")
+
+        if unit_number:
+            matches = self.find_units(unit_number)
+            if not matches:
+                print(f"❌ Unidade {unit_number} não encontrada em nenhum bloco")
+                return
+            if len(matches) > 1:
+                print(f"\n❓ Unidade {unit_number} existe em {len(matches)} blocos:")
+                for i, m in enumerate(matches, 1):
+                    print(f"   {i}. bloco {m['_block_id']}")
+                escolha = input("   Qual bloco? (número, Enter cancela): ").strip()
+                if not escolha.isdigit() or not 1 <= int(escolha) <= len(matches):
+                    return
+                matches = [matches[int(escolha) - 1]]
+            unit_ids = [matches[0]['id']]
+        else:
+            unit_ids = list(by_unit)
+
+        unit_ids = [u for u in unit_ids if u in by_unit]
+        if not unit_ids:
+            print("❌ Nenhuma tag esperando morador")
+            return
+
+        for n, unit_id in enumerate(unit_ids, 1):
+            unit_tags = by_unit[unit_id]
+            label = f"{unit_tags[0].get('unitNumber')} (bloco {unit_tags[0].get('blockName')})"
+            print(f"\n{'=' * 60}\n📍 [{n}/{len(unit_ids)}] Unidade {label}\n{'=' * 60}")
+
+            residents = [r for r in (self.get_residents_api(unit_id) or [])
+                         if not self._is_placeholder(r.get('name'))]
+            if not residents:
+                print("⚠️  Nenhum morador real na unidade")
+                self.stats["skip"] += len(unit_tags)
+                continue
+
+            for tag in unit_tags:
+                print(f"\n   🏷️  Tag {tag.get('description')} (ident: {tag['identification']})")
+
+                if len(unit_tags) == 1 and len(residents) == 1:
+                    resident = residents[0]
+                else:
+                    for i, r in enumerate(residents, 1):
+                        print(f"      {i}. {r['name']}")
+                    escolha = input(f"      Morador desta tag? (1-{len(residents)}, Enter pula): ").strip()
+                    if not escolha.isdigit() or not 1 <= int(escolha) <= len(residents):
+                        print("      ⏭️  Pulado")
+                        self.stats["skip"] += 1
+                        continue
+                    resident = residents[int(escolha) - 1]
+                    self.stats["manual"] += 1
+
+                if dry_run:
+                    print(f"      🧪 (teste) → {resident['name']}")
+                    continue
+
+                if self.update_credential_nice(tag, resident):
+                    print(f"      ✅ {resident['name']}")
+                    self.stats["success"] += 1
+                else:
+                    print("      ❌ Erro ao vincular")
+                    self.stats["fail"] += 1
 
     def show_stats(self):
         """Mostra estatísticas finais"""
@@ -671,13 +659,11 @@ class CondyMassRegister:
             elif opcao == '3':
                 unit_number = input("\n📍 Número da unidade (Enter para TODAS): ").strip()
                 if not unit_number:
-                    confirm = input("\n⚠️  Isso vai processar TODAS as unidades da API (Nice Guarita). Confirma? (s/n): ").strip().lower()
-                    if confirm == 's':
-                        self.mass_register(manufacturer='niceguarita')
-                        self.show_stats()
-                else:
-                    self.mass_register(unit_number, manufacturer='niceguarita')
-                    self.show_stats()
+                    confirm = input("\n⚠️  Isso vai processar TODAS as unidades com tags Nice pendentes. Confirma? (s/n): ").strip().lower()
+                    if confirm != 's':
+                        continue
+                self.register_nice(unit_number or None)
+                self.show_stats()
 
             elif opcao == '4':
                 if self.get_new_cookie():
