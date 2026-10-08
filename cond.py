@@ -7,7 +7,7 @@ from typing import Optional, List, Dict
 
 # Configurações
 BASE_URL = "https://api.condfy.com.br/api/cwa/v1"
-LICENSE_ID = "30871"
+LICENSE_ID = "18788"
 BLOCK_ID = "137108"
 COOKIE_FILE = "condfy_session.json"
 
