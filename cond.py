@@ -17,6 +17,8 @@ MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
 # Nice Guarita (LINEAR_GUARITA) - valores copiados da tela de edição do Condfy
 # Tags Nice sem dono ficam na unidade "0" (bloco "tags ??")
 NICE_FREE_UNIT_NUMBER = "0"
+# Ignora tags cujo nome tem mais dígitos que isso (ex: 3 -> usa "002" e "110", ignora "00234")
+NICE_MAX_DIGITS = 3
 NICE_CONFIGURATION_ID = 3420
 NICE_GROUPS = [{"id": "0", "description": "LIVRE  (0)"}]
 NICE_READERS = [
@@ -545,6 +547,8 @@ class CondyMassRegister:
         for tag in tags:
             if str(tag.get('unitNumber')).strip() == NICE_FREE_UNIT_NUMBER:
                 continue  # unidade reserva
+            if sum(c.isdigit() for c in str(tag.get('description') or '')) > NICE_MAX_DIGITS:
+                continue  # nome com dígitos demais
             if tag.get('unitId') is not None and self._is_placeholder(tag.get('linkDescription')):
                 by_unit.setdefault(tag['unitId'], []).append(tag)
         print(f"   {len(tags)} tags Nice no total, {sum(len(v) for v in by_unit.values())} "
