@@ -8,7 +8,8 @@ from typing import Optional, List, Dict
 # Configurações
 BASE_URL = "https://api.condfy.com.br/api/cwa/v1"
 LICENSE_ID = "18788"
-BLOCK_ID = "137108"
+BLOCK_IDS = ["94701", "94700", "93649", "93367", "94698", "94071", "94860"]
+BLOCK_ID = BLOCK_IDS[0]  # padrão nos payloads quando a unidade não traz o bloco
 COOKIE_FILE = "condfy_session.json"
 
 MANUFACTURER_TERMS = {'niceguarita': 'nice', 'hikvision': 'hikvision'}
@@ -163,52 +164,59 @@ class CondyMassRegister:
         except:
             return False
 
-    def get_unit_id(self, unit_number: str) -> Optional[dict]:
-        """Procura o unitId pelo número do apartamento"""
+    def _search_units_in_block(self, block_id: str, name: str, page: int = 0, size: int = 15):
+        """Uma página de units/options de um bloco. Retorna (content, last) ou None em erro."""
         url = f"{BASE_URL}/licenses/{LICENSE_ID}/units/options"
-        params = {
-            "page": 0,
-            "blockId": BLOCK_ID,
-            "name": unit_number,
-            "size": 15
-        }
-
+        params = {"page": page, "blockId": block_id, "name": name, "size": size}
         try:
             response = self.session.get(url, params=params, headers=self.headers, timeout=15)
-            if response.status_code == 200:
-                content = response.json().get('content') or []
-                # A busca é parcial ("1" acha "10", "101"): exigir nome exato
-                for unit in content:
-                    if str(unit.get('name', '')).strip() == str(unit_number).strip():
-                        return unit
-        except requests.RequestException:
-            pass
+            if response.status_code != 200:
+                print(f"⚠️  units/options bloco {block_id}: HTTP {response.status_code}")
+                return None
+            data = response.json()
+            return data.get('content') or [], data.get('last', True)
+        except requests.RequestException as e:
+            print(f"⚠️  Erro de rede (bloco {block_id}): {e}")
+            return None
 
-        return None
+    def find_units(self, unit_number: str, block_id: Optional[str] = None) -> List[dict]:
+        """Unidades com nome exato, em um bloco ou em todos. Cada uma ganha '_block_id'."""
+        found = []
+        for bid in ([block_id] if block_id else BLOCK_IDS):
+            result = self._search_units_in_block(bid, str(unit_number))
+            if not result:
+                continue
+            # A busca é parcial ("1" acha "10", "101"): exigir nome exato
+            for unit in result[0]:
+                if str(unit.get('name', '')).strip() == str(unit_number).strip():
+                    found.append({**unit, '_block_id': bid})
+        return found
 
-    def get_all_units(self) -> List[str]:
-        """Lista os nomes de todas as unidades do bloco direto da API (sem Excel)"""
-        url = f"{BASE_URL}/licenses/{LICENSE_ID}/units/options"
-        names = []
-        page = 0
+    def get_unit_id(self, unit_number: str, block_id: Optional[str] = None) -> Optional[dict]:
+        """Procura a unidade pelo número (em um bloco, ou no primeiro bloco que a tiver)"""
+        found = self.find_units(unit_number, block_id)
+        return found[0] if found else None
 
-        try:
+    def get_all_units(self) -> List[tuple]:
+        """Lista (block_id, nome) de todas as unidades de todos os blocos, direto da API"""
+        units = []
+        for bid in BLOCK_IDS:
+            count = 0
+            page = 0
             while page < 200:
-                params = {"page": page, "blockId": BLOCK_ID, "name": "", "size": 100}
-                response = self.session.get(url, params=params, headers=self.headers, timeout=15)
-                if response.status_code != 200:
-                    print(f"⚠️  Listagem de unidades: HTTP {response.status_code}")
+                result = self._search_units_in_block(bid, "", page=page, size=100)
+                if not result:
                     break
-                data = response.json()
-                content = data.get('content') or []
-                names.extend(str(u['name']) for u in content if u.get('name') is not None)
-                if not content or data.get('last', True):
+                content, last = result
+                for u in content:
+                    if u.get('name') is not None:
+                        units.append((bid, str(u['name'])))
+                        count += 1
+                if not content or last:
                     break
                 page += 1
-        except requests.RequestException as e:
-            print(f"⚠️  Erro de rede: {e}")
-
-        return names
+            print(f"   bloco {bid}: {count} unidades")
+        return units
 
     def get_residents_api(self, unit_id: int) -> Optional[list]:
         """Procura os moradores de uma unidade na API"""
@@ -302,7 +310,7 @@ class CondyMassRegister:
         """Vincula o credential ao residente"""
         payload = {
             "credentialId": credential['id'],
-            "blockId": BLOCK_ID,
+            "blockId": unit.get('_block_id', BLOCK_ID),
             "blockName": "0",
             "unitId": unit['id'],
             "unitNumber": unit['name'],
@@ -379,7 +387,7 @@ class CondyMassRegister:
         """Vincula o credential Nice Guarita criando um veículo novo"""
         payload = {
             "credentialId": credential['id'],
-            "blockId": BLOCK_ID,
+            "blockId": unit.get('_block_id', BLOCK_ID),
             "blockName": "0",
             "unitId": unit['id'],
             "unitNumber": unit['name'],
@@ -465,14 +473,30 @@ class CondyMassRegister:
         print(f"🚀 CADASTRO EM MASSA ({'NICE GUARITA' if manufacturer == 'niceguarita' else 'HIKVISION'})")
         print("=" * 60)
 
-        # Determinar quais unidades processar
-        if unit_number:
-            units_to_process = {unit_number: self.excel_data.get(unit_number, [])}
+        # Determinar quais unidades processar: lista de (block_id ou None, número)
+        if unit_number and manufacturer == 'niceguarita':
+            matches = self.find_units(unit_number)
+            if not matches:
+                print(f"❌ Unidade {unit_number} não encontrada em nenhum bloco")
+                return
+            if len(matches) > 1:
+                print(f"\n❓ Unidade {unit_number} existe em {len(matches)} blocos:")
+                for i, m in enumerate(matches, 1):
+                    print(f"   {i}. bloco {m['_block_id']}")
+                escolha = input("   Qual bloco? (número, Enter cancela): ").strip()
+                if not escolha.isdigit() or not 1 <= int(escolha) <= len(matches):
+                    return
+                matches = [matches[int(escolha) - 1]]
+            units_to_process = [(matches[0]['_block_id'], unit_number)]
+        elif unit_number:
+            units_to_process = [(None, unit_number)]
         elif manufacturer == 'niceguarita':
             # Nice não usa Excel: unidades vêm direto da API
-            units_to_process = {name: [] for name in self.get_all_units()}
+            print("\n🏢 Listando unidades dos blocos...")
+            # pula a unidade reserva das tags ("0")
+            units_to_process = [u for u in self.get_all_units() if u[1].strip() != NICE_FREE_UNIT_NUMBER]
         else:
-            units_to_process = self.excel_data
+            units_to_process = [(None, u) for u in self.excel_data]
 
         if not units_to_process:
             print("❌ Nenhuma unidade para processar")
@@ -490,14 +514,14 @@ class CondyMassRegister:
         total_units = len(units_to_process)
         processed_units = 0
 
-        for unit_num, moradores_excel in units_to_process.items():
+        for block_id, unit_num in units_to_process:
             processed_units += 1
             print(f"\n{'=' * 60}")
-            print(f"📍 [{processed_units}/{total_units}] Unidade {unit_num}")
+            print(f"📍 [{processed_units}/{total_units}] Unidade {unit_num}" + (f" (bloco {block_id})" if block_id else ""))
             print(f"{'=' * 60}")
 
             # Buscar unidade na API
-            unit_api = self.get_unit_id(unit_num)
+            unit_api = self.get_unit_id(unit_num, block_id)
             if not unit_api:
                 print(f"❌ Unidade não encontrada na API")
                 continue
