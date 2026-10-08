@@ -1,0 +1,541 @@
+#!/usr/bin/env python3
+import requests
+import json
+import os
+import openpyxl
+from typing import Optional, List, Dict
+
+# Configurações
+BASE_URL = "https://api.condfy.com.br/api/cwa/v1"
+LICENSE_ID = "30871"
+BLOCK_ID = "137108"
+COOKIE_FILE = "condfy_session.json"
+
+# Nice Guarita (LINEAR_GUARITA) - valores copiados da tela de edição do Condfy
+NICE_CONFIGURATION_ID = 3420
+NICE_GROUPS = [{"id": "0", "description": "LIVRE  (0)"}]
+NICE_READERS = [
+    {"id": "0", "description": "GAR S1"},
+    {"id": "1", "description": "GAR S2"},
+    {"id": "2", "description": "REC TP 3"},
+]
+EXCEL_FILE = r"C:\Users\VnSystem\Downloads\arqv.xlsx"
+
+class CondyMassRegister:
+    def __init__(self):
+        self.csl_cookie = None
+        self.xsrf_token = None
+        self.session = requests.Session()
+        self.headers = {
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+        }
+        self.excel_data = {}
+        self.stats = {"success": 0, "skip": 0, "fail": 0, "manual": 0}
+
+        self.load_cookie()
+        self.load_excel()
+
+    def load_excel(self):
+        """Carrega dados do Excel"""
+        print(f"\n📂 Carregando Excel...")
+        try:
+            wb = openpyxl.load_workbook(EXCEL_FILE)
+            ws = wb.active
+
+            for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True)):
+                bloco, unidade, nome = row[0], row[1], row[2]
+                if not nome or not unidade:
+                    continue
+
+                unit_key = str(int(unidade)) if isinstance(unidade, (int, float)) else str(unidade)
+                if unit_key not in self.excel_data:
+                    self.excel_data[unit_key] = []
+
+                self.excel_data[unit_key].append({
+                    'nome': str(nome).strip(),
+                    'rg': row[3],
+                    'cpf': row[4],
+                    'telefone': row[8],
+                    'email': row[6]
+                })
+
+            print(f"✅ Excel carregado: {len(self.excel_data)} unidades, {sum(len(v) for v in self.excel_data.values())} moradores")
+            return True
+        except Exception as e:
+            print(f"❌ Erro ao carregar Excel: {e}")
+            return False
+
+    def load_cookie(self):
+        """Carrega o cookie do arquivo se existir"""
+        if os.path.exists(COOKIE_FILE):
+            try:
+                with open(COOKIE_FILE, 'r') as f:
+                    data = json.load(f)
+                    self.csl_cookie = data.get('csl_cookie')
+                    self.xsrf_token = data.get('xsrf_token')
+
+                    if self.csl_cookie:
+                        print(f"📂 Cookie carregado")
+                        self.session.cookies.set('csl', self.csl_cookie)
+                        if self.xsrf_token:
+                            self.session.cookies.set('XSRF-TOKEN', self.xsrf_token)
+                        return True
+            except:
+                pass
+        return False
+
+    def save_cookie(self):
+        """Salva o cookie em arquivo"""
+        with open(COOKIE_FILE, 'w') as f:
+            json.dump({
+                'csl_cookie': self.csl_cookie,
+                'xsrf_token': self.xsrf_token
+            }, f)
+
+    def test_cookie(self) -> bool:
+        """Testa se o cookie é válido"""
+        if not self.csl_cookie:
+            return False
+
+        try:
+            url = f"{BASE_URL}/licenses/{LICENSE_ID}"
+            response = self.session.get(url, headers=self.headers, timeout=5)
+            return response.status_code == 200
+        except:
+            return False
+
+    def get_new_cookie(self):
+        """Pede novo cookie do usuário"""
+        print("\n🔐 Novo Cookie Necessário")
+
+        csl_cookie = input("\n🔑 Cole aqui seu cookie 'csl': ").strip()
+
+        if not csl_cookie:
+            print("❌ Cookie não fornecido")
+            return False
+
+        xsrf_token = input("\n🔑 Cole aqui seu XSRF-TOKEN (opcional): ").strip()
+
+        self.csl_cookie = csl_cookie
+        self.xsrf_token = xsrf_token if xsrf_token else None
+        self.session.cookies.set('csl', csl_cookie)
+        if self.xsrf_token:
+            self.session.cookies.set('XSRF-TOKEN', self.xsrf_token)
+
+        if self.test_cookie():
+            print("✅ Cookie válido!")
+            self.save_cookie()
+            self.get_new_xsrf_token()
+            return True
+        else:
+            print("❌ Cookie inválido")
+            return False
+
+    def ensure_valid_cookie(self) -> bool:
+        """Garante que temos um cookie válido"""
+        if self.test_cookie():
+            print("✅ Cookie válido")
+            return True
+
+        print("⚠️  Cookie expirado ou inválido")
+        return self.get_new_cookie()
+
+    def get_new_xsrf_token(self) -> bool:
+        """Obtém um novo XSRF token"""
+        url = f"{BASE_URL}/public/csrf"
+
+        try:
+            response = self.session.get(url, headers=self.headers)
+            response.raise_for_status()
+            data = response.json()
+            self.xsrf_token = data.get('token')
+
+            if self.xsrf_token:
+                self.session.cookies.set('XSRF-TOKEN', self.xsrf_token)
+                self.save_cookie()
+                return True
+            return False
+        except:
+            return False
+
+    def get_unit_id(self, unit_number: str) -> Optional[dict]:
+        """Procura o unitId pelo número do apartamento"""
+        url = f"{BASE_URL}/licenses/{LICENSE_ID}/units/options"
+        params = {
+            "page": 0,
+            "blockId": BLOCK_ID,
+            "name": unit_number,
+            "size": 15
+        }
+
+        try:
+            response = self.session.get(url, params=params, headers=self.headers)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('content'):
+                    return data['content'][0]
+        except:
+            pass
+
+        return None
+
+    def get_residents_api(self, unit_id: int) -> Optional[list]:
+        """Procura os moradores de uma unidade na API"""
+        url = f"{BASE_URL}/units/{unit_id}/residents/options"
+        params = {
+            "unitId": unit_id,
+            "name": "",
+            "page": 0
+        }
+
+        try:
+            response = self.session.get(url, params=params, headers=self.headers)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('content'):
+                    return data['content']
+        except:
+            pass
+
+        return None
+
+    def search_credential(self, search_name: str, manufacturer_filter: str = 'hikvision') -> List[dict]:
+        """Procura credentials pelo nome, filtrando por fabricante (padrão: Hikvision)"""
+        url = f"{BASE_URL}/licenses/{LICENSE_ID}/credentials"
+        params = {
+            "block": "",
+            "unit": "",
+            "description": search_name,
+            "identification": "",
+            "manufacturer": "",
+            "page": 0
+        }
+
+        credentials = []
+
+        try:
+            response = self.session.get(url, params=params, headers=self.headers)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('content'):
+                    for credential in data['content']:
+                        manufacturer = credential.get('manufacturer', '')
+
+                        # Aceitar apenas o fabricante desejado
+                        if manufacturer_filter not in manufacturer.lower():
+                            continue
+
+                        # Verificar se unitId é null
+                        if credential.get('unitId') is None:
+                            credentials.append(credential)
+        except:
+            pass
+
+        return credentials
+
+    def link_credential(self, credential: dict, unit: dict, resident: dict) -> bool:
+        """Vincula o credential ao residente"""
+        payload = {
+            "credentialId": credential['id'],
+            "blockId": BLOCK_ID,
+            "blockName": "0",
+            "unitId": unit['id'],
+            "unitNumber": unit['name'],
+            "linkId": resident['id'],
+            "linkTypeName": "MORADOR",
+            "newLink": {
+                "name": "",
+                "serviceType": "",
+                "brand": "",
+                "model": "",
+                "color": "",
+                "plate": ""
+            }
+        }
+
+        headers = self.headers.copy()
+        headers["content-type"] = "application/json"
+        headers["x-xsrf-token"] = self.xsrf_token
+        headers["origin"] = "https://web.condfy.com.br"
+        headers["referer"] = "https://web.condfy.com.br/"
+
+        url = f"{BASE_URL}/credentials/{credential['id']}/link"
+
+        try:
+            response = self.session.post(url, json=payload, headers=headers)
+            return response.status_code in [200, 201, 204]
+        except:
+            return False
+
+    def update_credential_nice(self, credential: dict, resident: dict) -> bool:
+        """Vincula credential Nice Guarita (LINEAR_GUARITA) ao morador via PUT /credentials/{id}"""
+        payload = {
+            "linkTypeName": "MORADOR",
+            "linkId": resident['id'],
+            "equipmentTypeName": "LINEAR_GUARITA",
+            "configurationId": NICE_CONFIGURATION_ID,
+            "name": credential.get('identification') or credential.get('description', ''),
+            "unlimitedPeriod": True,
+            "groups": NICE_GROUPS,
+            "timeOptions": [],
+            "sentToSemParar": False,
+            "replicationEquipmentsIds": [],
+            "readers": NICE_READERS,
+            "valueRead": {
+                "cardId": "",
+                "complementaryCode": "",
+                "credentialCode": "",
+                "finger": {"fingerId": 0, "fingerData": "", "readerType": ""},
+                "face": {"photoUrl": ""}
+            },
+            "enabled": False,
+            "types": []
+        }
+
+        headers = self.headers.copy()
+        headers["content-type"] = "application/json"
+        headers["x-xsrf-token"] = self.xsrf_token
+        headers["origin"] = "https://web.condfy.com.br"
+        headers["referer"] = "https://web.condfy.com.br/"
+
+        url = f"{BASE_URL}/credentials/{credential['id']}"
+
+        try:
+            response = self.session.put(url, json=payload, headers=headers, timeout=15)
+            if response.status_code not in [200, 201, 204]:
+                print(f"\n      ⚠️  HTTP {response.status_code}: {response.text[:200]}")
+                return False
+            return True
+        except requests.RequestException as e:
+            print(f"\n      ⚠️  Erro de rede: {e}")
+            return False
+
+    def link_credential_veiculo(self, credential: dict, unit: dict, vehicle: dict) -> bool:
+        """Vincula o credential Nice Guarita criando um veículo novo"""
+        payload = {
+            "credentialId": credential['id'],
+            "blockId": BLOCK_ID,
+            "blockName": "0",
+            "unitId": unit['id'],
+            "unitNumber": unit['name'],
+            "linkId": 0,
+            "linkTypeName": "VEICULO",
+            "newLink": {
+                "name": vehicle['name'],
+                "serviceType": "",
+                "brand": vehicle.get('brand', 'Outras_marcas'),
+                "model": vehicle.get('model', 'DEFINIR'),
+                "color": vehicle.get('color', 'Branco'),
+                "plate": vehicle['plate']
+            }
+        }
+
+        headers = self.headers.copy()
+        headers["content-type"] = "application/json"
+        headers["x-xsrf-token"] = self.xsrf_token
+        headers["origin"] = "https://web.condfy.com.br"
+        headers["referer"] = "https://web.condfy.com.br/"
+
+        url = f"{BASE_URL}/credentials/{credential['id']}/link"
+
+        try:
+            response = self.session.post(url, json=payload, headers=headers)
+            return response.status_code in [200, 201, 204]
+        except:
+            return False
+
+    def ask_user(self, resident_name: str, credentials: List[dict]) -> Optional[dict]:
+        """Pergunta ao usuário qual credential usar"""
+        print(f"\n❓ Múltiplas opções para '{resident_name}':")
+        print(f"   Encontrados {len(credentials)} credentials:")
+
+        for i, cred in enumerate(credentials, 1):
+            print(f"   {i}. {cred['description']} (ID: {cred['id']}, Ident: {cred['identification']})")
+
+        print(f"   0. Pular")
+
+        while True:
+            try:
+                opcao = input(f"\n   Qual usar? (0-{len(credentials)}): ").strip()
+                opcao_int = int(opcao)
+
+                if opcao_int == 0:
+                    return None
+                elif 1 <= opcao_int <= len(credentials):
+                    return credentials[opcao_int - 1]
+                else:
+                    print(f"   ❌ Opção inválida")
+            except:
+                print(f"   ❌ Digite um número válido")
+
+    def do_link(self, credential: dict, unit: dict, resident: dict, manufacturer: str) -> bool:
+        """Vincula de acordo com o fabricante (morador ou veículo)"""
+        if manufacturer == 'niceguarita':
+            return self.update_credential_nice(credential, resident)
+        return self.link_credential(credential, unit, resident)
+
+    def mass_register(self, unit_number: str = None, manufacturer: str = 'hikvision'):
+        """Faz registro em massa de unidades"""
+        print("\n" + "=" * 60)
+        print(f"🚀 CADASTRO EM MASSA ({'NICE GUARITA' if manufacturer == 'niceguarita' else 'HIKVISION'})")
+        print("=" * 60)
+
+        # Determinar quais unidades processar
+        if unit_number:
+            units_to_process = {unit_number: self.excel_data.get(unit_number, [])}
+        else:
+            units_to_process = self.excel_data
+
+        if not units_to_process:
+            print("❌ Nenhuma unidade para processar")
+            return
+
+        total_units = len(units_to_process)
+        processed_units = 0
+
+        for unit_num, moradores_excel in units_to_process.items():
+            processed_units += 1
+            print(f"\n{'=' * 60}")
+            print(f"📍 [{processed_units}/{total_units}] Unidade {unit_num}")
+            print(f"{'=' * 60}")
+
+            # Buscar unidade na API
+            unit_api = self.get_unit_id(unit_num)
+            if not unit_api:
+                print(f"❌ Unidade não encontrada na API")
+                continue
+
+            # Buscar moradores na API
+            residents_api = self.get_residents_api(unit_api['id'])
+            if not residents_api:
+                print(f"⚠️  Nenhum morador encontrado na API")
+                continue
+
+            # Processar cada morador
+            print(f"👥 Processando {len(residents_api)} moradores...")
+
+            for resident in residents_api:
+                resident_name = resident['name']
+                print(f"\n   👤 {resident_name}...", end=" ")
+
+                # Nice Guarita não tem nome completo na descrição: buscar pelo primeiro nome
+                if manufacturer == 'niceguarita':
+                    search_name = resident_name.split()[0]
+                else:
+                    search_name = resident_name
+
+                # Procurar credential
+                credentials = self.search_credential(search_name, manufacturer_filter=manufacturer)
+
+                if not credentials:
+                    print("⏭️  Sem credential")
+                    self.stats["skip"] += 1
+                    continue
+
+                # Se houver exatamente 1, vincular automaticamente
+                if len(credentials) == 1:
+                    credential = credentials[0]
+                    if self.do_link(credential, unit_api, resident, manufacturer):
+                        print("✅")
+                        self.stats["success"] += 1
+                    else:
+                        print("❌")
+                        self.stats["fail"] += 1
+
+                # Se houver múltiplos, perguntar ao usuário
+                else:
+                    selected_cred = self.ask_user(resident_name, credentials)
+                    if selected_cred:
+                        if self.do_link(selected_cred, unit_api, resident, manufacturer):
+                            print("   ✅ Vinculado")
+                            self.stats["success"] += 1
+                            self.stats["manual"] += 1
+                        else:
+                            print("   ❌ Erro ao vincular")
+                            self.stats["fail"] += 1
+                    else:
+                        print("   ⏭️  Pulado")
+                        self.stats["skip"] += 1
+
+    def show_stats(self):
+        """Mostra estatísticas finais"""
+        print(f"\n" + "=" * 60)
+        print(f"📊 RESULTADO FINAL")
+        print(f"=" * 60)
+        print(f"✅ Sucessos: {self.stats['success']}")
+        print(f"❌ Falhas: {self.stats['fail']}")
+        print(f"⏭️  Pulados: {self.stats['skip']}")
+        print(f"❓ Com intervenção: {self.stats['manual']}")
+        print(f"{'=' * 60}")
+
+    def run(self):
+        """Menu principal"""
+        print("=" * 60)
+        print("🏢 Condfy Mass Register")
+        print("=" * 60)
+
+        if not self.ensure_valid_cookie():
+            print("\n❌ Não foi possível obter cookie válido")
+            return
+
+        while True:
+            print("\n" + "=" * 60)
+            print("📋 MENU")
+            print("=" * 60)
+            print("1. Cadastrar TODAS as unidades")
+            print("2. Cadastrar UMA unidade específica")
+            print("3. Cadastrar Nice Guarita (veículo)")
+            print("4. Renovar cookie")
+            print("5. Sair")
+
+            opcao = input("\nEscolha uma opção (1-5): ").strip()
+
+            if opcao == '1':
+                confirm = input("\n⚠️  Isso vai processar TODAS as unidades do Excel. Confirma? (s/n): ").strip().lower()
+                if confirm == 's':
+                    self.mass_register()
+                    self.show_stats()
+
+            elif opcao == '2':
+                unit_number = input("\n📍 Digite o número da unidade: ").strip()
+                if unit_number in self.excel_data:
+                    self.mass_register(unit_number)
+                    self.show_stats()
+                else:
+                    print(f"❌ Unidade {unit_number} não encontrada no Excel")
+
+            elif opcao == '3':
+                unit_number = input("\n📍 Número da unidade (Enter para TODAS): ").strip()
+                if not unit_number:
+                    confirm = input("\n⚠️  Isso vai processar TODAS as unidades do Excel (Nice Guarita). Confirma? (s/n): ").strip().lower()
+                    if confirm == 's':
+                        self.mass_register(manufacturer='niceguarita')
+                        self.show_stats()
+                elif unit_number in self.excel_data:
+                    self.mass_register(unit_number, manufacturer='niceguarita')
+                    self.show_stats()
+                else:
+                    print(f"❌ Unidade {unit_number} não encontrada no Excel")
+
+            elif opcao == '4':
+                if self.get_new_cookie():
+                    print("✅ Cookie renovado")
+                else:
+                    print("❌ Falha ao renovar")
+
+            elif opcao == '5':
+                print("\n✅ Até logo!")
+                break
+
+            else:
+                print("❌ Opção inválida")
+
+
+def main():
+    finder = CondyMassRegister()
+    finder.run()
+
+
+if __name__ == "__main__":
+    main()
