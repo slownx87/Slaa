@@ -44,5 +44,7 @@ Teste de fora: `http://<IP-WAN>:35555`, `http://<IP-WAN>:5000`, porta `9000`.
 ## Observações
 
 - **DVR (.22), Guarita (.9), ATA FXO (.40) e ATA FXS (.39) precisam estar com IP fixo** nesses endereços. O pool DHCP começa em `.100` justamente para não conflitar.
-- Se a WAN for PPPoE ou outra interface, trocar `wanIf` no topo do script (ex.: `pppoe-out1`).
+- As regras usam `dst-address-type=local` (qualquer IP do próprio MikroTik), então funcionam com WAN DHCP, PPPoE ou outra interface, sem precisar informar o nome dela.
+- A regra `PF: hairpin LAN` (srcnat/masquerade LAN→LAN) permite que aparelhos **da mesma rede** acessem pelo IP público ou nome DNS (DDNS).
+- Acesso de fora só funciona se o IP da WAN for público. Se começar com `10.`, `172.16–31`, `192.168.` ou `100.64–127`, há outro roteador ou CGNAT na frente e nenhuma abertura funciona sem liberar lá.
 - Se o DVR usar mais portas além da 35555 (mídia/RTSP/UDP), é só acrescentar outra linha `/ip firewall nat add ...` no mesmo formato.
