@@ -55,11 +55,13 @@
     dst-address-type=local to-addresses=$ipDvr to-ports=3000 \
     comment="PF: DVR Tolotti RTSP 554 -> 3000"
 
-# Porta 80 e a mesma da pagina do proprio MikroTik (WebFig): dst-address=!10.0.104.1
-# evita que quem esta na LAN e abre http://10.0.104.1 caia no DVR.
+# Porta 80 e a mesma da pagina do proprio MikroTik (WebFig). A primeira regra
+# (accept = sem NAT) deixa http://10.0.104.1 ir para o roteador; a segunda manda
+# o resto da porta 80 (IP publico, nome DNS) para o DVR. A ordem importa.
+/ip firewall nat add chain=dstnat action=accept protocol=tcp dst-port=80 \
+    dst-address=$lanIp comment="PF: roteador web 80 sem NAT"
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=80 \
-    dst-address-type=local dst-address=!10.0.104.1 \
-    to-addresses=$ipDvr to-ports=2000 \
+    dst-address-type=local to-addresses=$ipDvr to-ports=2000 \
     comment="PF: DVR Tolotti web 80 -> 2000"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=5000 \
