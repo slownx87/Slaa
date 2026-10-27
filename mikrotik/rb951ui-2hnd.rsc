@@ -11,6 +11,7 @@
 #     tcp 9000  -> 10.0.104.9:9000     Modulo Guarita
 #     tcp 8888  -> 10.0.104.40:8888    ATA FXO (web)
 #     tcp 7777  -> 10.0.104.39:7777    ATA FXS (web)
+#     tcp 9009  -> 10.0.104.30:9009    Equipamento .30
 #
 # Compativel com RouterOS 6.x e 7.x. Pode ser executado mais de uma vez.
 # Uso:  enviar para /Files e rodar   /import file-name=rb951ui-2hnd.rsc
@@ -30,6 +31,7 @@
 :local ipGuarita  "10.0.104.9"
 :local ipAtaFxo   "10.0.104.40"
 :local ipAtaFxs   "10.0.104.39"
+:local ip30       "10.0.104.30"
 
 :put ("Board: " . [/system resource get board-name])
 
@@ -67,6 +69,10 @@
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=7777 \
     dst-address-type=local to-addresses=$ipAtaFxs to-ports=7777 \
     comment="PF: ATA FXS 7777"
+
+/ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=9009 \
+    dst-address-type=local to-addresses=$ip30 to-ports=9009 \
+    comment="PF: Equip .30 9009"
 
 # Hairpin NAT: acesso de dentro da LAN pelo IP publico / nome DNS
 /ip firewall nat add chain=srcnat action=masquerade \
