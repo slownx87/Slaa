@@ -46,6 +46,7 @@ Teste de fora: `http://<IP-WAN>:35555`, `http://<IP-WAN>:5000`, porta `9000`.
 ## Observações
 
 - **DVR (.22), Guarita (.9), ATA FXO (.40), ATA FXS (.39) e o equipamento .30 precisam estar com IP fixo** nesses endereços. O pool DHCP começa em `.100` justamente para não conflitar.
+- **NAT duplo (visto em campo):** o `/ip cloud print` mostra `your local IP was 192.168.15.2`, ou seja, a WAN do MikroTik (`ether1`) está em `192.168.15.2`, atrás de um modem/roteador da operadora que é quem tem o IP público. De fora, o pedido chega primeiro no modem: cada porta da tabela acima também precisa ser encaminhada **no modem** para `192.168.15.2` (mesma porta), ou o modem precisa estar em DMZ para esse IP, ou em modo bridge com PPPoE no MikroTik. Sem isso a regra do MikroTik existe mas nunca recebe tráfego (confira os contadores em `/ip firewall nat print stats`).
 - As regras usam `dst-address-type=local` (qualquer IP do próprio MikroTik), então funcionam com WAN DHCP, PPPoE ou outra interface, sem precisar informar o nome dela.
 - A regra `PF: hairpin LAN` (srcnat/masquerade LAN→LAN) permite que aparelhos **da mesma rede** acessem pelo IP público ou nome DNS (DDNS).
 - Acesso de fora só funciona se o IP da WAN for público. Se começar com `10.`, `172.16–31`, `192.168.` ou `100.64–127`, há outro roteador ou CGNAT na frente e nenhuma abertura funciona sem liberar lá.
