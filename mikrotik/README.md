@@ -15,8 +15,11 @@ Redirecionamentos de porta (todos TCP, entrando por `ether1`):
 | Porta externa | Destino | Equipamento |
 |---|---|---|
 | 35555 | `10.0.104.22:35555` | DVR Tolotti |
+| 3000 | `10.0.104.22:554` | DVR Tolotti (RTSP) |
 | 5000 | `10.0.104.9:80` | Módulo Guarita (HTTP) |
 | 9000 | `10.0.104.9:9000` | Módulo Guarita |
+| 8888 | `10.0.104.40:8888` | ATA FXO |
+| 7777 | `10.0.104.39:7777` | ATA FXS |
 
 O firewall padrão já libera o tráfego que passou por dstnat (`drop all from WAN not DSTNATed`), por isso não há regra de filter extra.
 
@@ -40,6 +43,6 @@ Teste de fora: `http://<IP-WAN>:35555`, `http://<IP-WAN>:5000`, porta `9000`.
 
 ## Observações
 
-- **DVR (.22) e Guarita (.9) precisam estar com IP fixo** nesses endereços. O pool DHCP começa em `.100` justamente para não conflitar.
+- **DVR (.22), Guarita (.9), ATA FXO (.40) e ATA FXS (.39) precisam estar com IP fixo** nesses endereços. O pool DHCP começa em `.100` justamente para não conflitar.
 - Se a WAN for PPPoE ou outra interface, trocar `wanIf` no topo do script (ex.: `pppoe-out1`).
 - Se o DVR usar mais portas além da 35555 (mídia/RTSP/UDP), é só acrescentar outra linha `/ip firewall nat add ...` no mesmo formato.

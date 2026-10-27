@@ -6,8 +6,11 @@
 #
 #   Redirecionamentos (porta externa -> destino):
 #     tcp 35555 -> 10.0.104.22:35555   DVR Tolotti
+#     tcp 3000  -> 10.0.104.22:554     DVR Tolotti (RTSP)
 #     tcp 5000  -> 10.0.104.9:80       Modulo Guarita (HTTP)
 #     tcp 9000  -> 10.0.104.9:9000     Modulo Guarita
+#     tcp 8888  -> 10.0.104.40:8888    ATA FXO
+#     tcp 7777  -> 10.0.104.39:7777    ATA FXS
 #
 # Compativel com RouterOS 6.x e 7.x. Pode ser executado mais de uma vez.
 # Uso:  enviar para /Files e rodar   /import file-name=rb951ui-2hnd.rsc
@@ -28,6 +31,8 @@
 
 :local ipDvr      "10.0.104.22"
 :local ipGuarita  "10.0.104.9"
+:local ipAtaFxo   "10.0.104.40"
+:local ipAtaFxs   "10.0.104.39"
 
 :put ("Board: " . [/system resource get board-name])
 
@@ -41,6 +46,10 @@
     in-interface=$wanIf to-addresses=$ipDvr to-ports=35555 \
     comment="PF: DVR Tolotti 35555"
 
+/ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=3000 \
+    in-interface=$wanIf to-addresses=$ipDvr to-ports=554 \
+    comment="PF: DVR Tolotti RTSP 3000 -> 554"
+
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=5000 \
     in-interface=$wanIf to-addresses=$ipGuarita to-ports=80 \
     comment="PF: Guarita HTTP 5000 -> 80"
@@ -48,6 +57,14 @@
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=9000 \
     in-interface=$wanIf to-addresses=$ipGuarita to-ports=9000 \
     comment="PF: Guarita 9000"
+
+/ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=8888 \
+    in-interface=$wanIf to-addresses=$ipAtaFxo to-ports=8888 \
+    comment="PF: ATA FXO 8888"
+
+/ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=7777 \
+    in-interface=$wanIf to-addresses=$ipAtaFxs to-ports=7777 \
+    comment="PF: ATA FXS 7777"
 
 # ---------------------------------------------------------------------------
 # 2) DHCP: pool, rede, gateway e DNS na nova faixa
