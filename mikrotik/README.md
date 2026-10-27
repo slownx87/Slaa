@@ -18,8 +18,8 @@ Redirecionamentos de porta (todos TCP, entrando por `ether1`):
 | 554 | `10.0.104.22:3000` | DVR Tolotti (RTSP) |
 | 5000 | `10.0.104.9:80` | Módulo Guarita (HTTP) |
 | 9000 | `10.0.104.9:9000` | Módulo Guarita |
-| 8888 (TCP e UDP) | `10.0.104.40:8888` | ATA FXO |
-| 7777 (TCP e UDP) | `10.0.104.39:7777` | ATA FXS |
+| 8888 | `10.0.104.40:8888` | ATA FXO (web) |
+| 7777 | `10.0.104.39:7777` | ATA FXS (web) |
 
 O firewall padrão já libera o tráfego que passou por dstnat (`drop all from WAN not DSTNATed`), por isso não há regra de filter extra.
 

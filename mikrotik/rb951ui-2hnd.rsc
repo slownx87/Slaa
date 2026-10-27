@@ -9,8 +9,8 @@
 #     tcp 554   -> 10.0.104.22:3000    DVR Tolotti (RTSP)
 #     tcp 5000  -> 10.0.104.9:80       Modulo Guarita (HTTP)
 #     tcp 9000  -> 10.0.104.9:9000     Modulo Guarita
-#     tcp+udp 8888 -> 10.0.104.40:8888 ATA FXO
-#     tcp+udp 7777 -> 10.0.104.39:7777 ATA FXS
+#     tcp 8888  -> 10.0.104.40:8888    ATA FXO (web)
+#     tcp 7777  -> 10.0.104.39:7777    ATA FXS (web)
 #
 # Compativel com RouterOS 6.x e 7.x. Pode ser executado mais de uma vez.
 # Uso:  enviar para /Files e rodar   /import file-name=rb951ui-2hnd.rsc
@@ -60,19 +60,11 @@
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=8888 \
     in-interface=$wanIf to-addresses=$ipAtaFxo to-ports=8888 \
-    comment="PF: ATA FXO 8888 tcp"
-
-/ip firewall nat add chain=dstnat action=dst-nat protocol=udp dst-port=8888 \
-    in-interface=$wanIf to-addresses=$ipAtaFxo to-ports=8888 \
-    comment="PF: ATA FXO 8888 udp"
+    comment="PF: ATA FXO 8888"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=7777 \
     in-interface=$wanIf to-addresses=$ipAtaFxs to-ports=7777 \
-    comment="PF: ATA FXS 7777 tcp"
-
-/ip firewall nat add chain=dstnat action=dst-nat protocol=udp dst-port=7777 \
-    in-interface=$wanIf to-addresses=$ipAtaFxs to-ports=7777 \
-    comment="PF: ATA FXS 7777 udp"
+    comment="PF: ATA FXS 7777"
 
 # ---------------------------------------------------------------------------
 # 2) DHCP: pool, rede, gateway e DNS na nova faixa
