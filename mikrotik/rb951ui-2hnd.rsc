@@ -6,6 +6,7 @@
 #
 #   Redirecionamentos (porta externa -> destino):
 #     tcp 35555 -> 10.0.104.22:35555   DVR Tolotti
+#     tcp 80    -> 10.0.104.22:2000    DVR Tolotti (web)
 #     tcp 554   -> 10.0.104.22:3000    DVR Tolotti (RTSP)
 #     tcp 5000  -> 10.0.104.9:80       Modulo Guarita (HTTP)
 #     tcp 9000  -> 10.0.104.9:9000     Modulo Guarita
@@ -53,6 +54,13 @@
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=554 \
     dst-address-type=local to-addresses=$ipDvr to-ports=3000 \
     comment="PF: DVR Tolotti RTSP 554 -> 3000"
+
+# Porta 80 e a mesma da pagina do proprio MikroTik (WebFig): dst-address=!10.0.104.1
+# evita que quem esta na LAN e abre http://10.0.104.1 caia no DVR.
+/ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=80 \
+    dst-address-type=local dst-address=!10.0.104.1 \
+    to-addresses=$ipDvr to-ports=2000 \
+    comment="PF: DVR Tolotti web 80 -> 2000"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=5000 \
     dst-address-type=local to-addresses=$ipGuarita to-ports=80 \
