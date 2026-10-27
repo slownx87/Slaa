@@ -15,7 +15,7 @@ Redirecionamentos de porta (todos TCP, entrando por `ether1`):
 | Porta externa | Destino | Equipamento |
 |---|---|---|
 | 35555 | `10.0.104.22:35555` | DVR Tolotti |
-| 80 | `10.0.104.22:2000` | DVR Tolotti (web) |
+| 2000 | `10.0.104.22:80` | DVR Tolotti (web) |
 | 554 | `10.0.104.22:3000` | DVR Tolotti (RTSP) |
 | 5000 | `10.0.104.9:80` | Módulo Guarita (HTTP) |
 | 9000 | `10.0.104.9:9000` | Módulo Guarita |
