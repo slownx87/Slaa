@@ -55,22 +55,22 @@ Teste de fora: `http://<IP-WAN>:35555`, `http://<IP-WAN>:5000`, porta `9000`.
 
 Não faz parte do script. Fica bloqueado pelo firewall padrão: `defconf: drop all from WAN` (chain `input`, `in-interface=ether1`) derruba tudo que não é conexão já estabelecida.
 
-No equipamento as portas dos serviços foram alteradas em `/ip service`: **API 18728**, API-SSL 18729, SSH 122, Telnet 123, FTP 121 (www desativado). O **Winbox** segue o mesmo padrão, com o `1` na frente: **18291** (`/ip service set winbox port=18291`).
+No equipamento as portas dos serviços foram alteradas em `/ip service`: **API 18728**, API-SSL 18729, SSH 122, Telnet 123, FTP 121 (www desativado). O **Winbox não muda: continua em 8291**.
 
-Para liberar, é preciso uma regra `accept` **antes** do `drop all from WAN`, e as portas 18291 e 18728 também precisam ser encaminhadas no modem para `192.168.15.2`.
+Para liberar, é preciso uma regra `accept` **antes** do `drop all from WAN`, e as portas 8291 e 18728 também precisam ser encaminhadas no modem para `192.168.15.2`.
 
 Uma linha só, liberada para **qualquer IP**. Só mexe na chain `input` (tráfego para o próprio roteador): não afeta os redirecionamentos, que passam pela chain `forward`.
 
 ```
-/ip firewall filter remove [find where comment="Admin remoto Winbox/API"]; /ip firewall filter add chain=input action=accept protocol=tcp dst-port=18291,18728 in-interface=ether1 comment="Admin remoto Winbox/API"; /ip firewall filter move [find where comment="Admin remoto Winbox/API"] destination=[find where comment="defconf: drop all from WAN"]; /ip service set winbox port=18291
+/ip firewall filter remove [find where comment="Admin remoto Winbox/API"]; /ip firewall filter add chain=input action=accept protocol=tcp dst-port=8291,18728 in-interface=ether1 comment="Admin remoto Winbox/API"; /ip firewall filter move [find where comment="Admin remoto Winbox/API"] destination=[find where comment="defconf: drop all from WAN"]
 ```
 
-A troca da porta do Winbox fica por último na linha (derruba só a sessão Winbox aberta no momento; reconectar em `10.0.104.1:18291`). MAC-Winbox não é afetado.
+Não altera nenhuma porta de serviço (`/ip service`), então não derruba sessão nenhuma. Se uma versão anterior deste comando que trocava o Winbox para 18291 já foi aplicada, voltar com `/ip service set winbox port=8291`.
 
-**Risco:** o RouterOS 6.39.2 tem falha conhecida no Winbox (CVE-2018-14847, corrigida na 6.42.1) que permite ler a senha do admin sem login. Com a porta aberta para qualquer IP, atualizar para a 6.49.x e usar senha forte é o mínimo. Para reduzir a exposição, deixar só `dst-port=18728` (API, não afetada por essa falha) ou acrescentar `src-address=IP-DO-ADMIN` na regra.
+**Risco:** o RouterOS 6.39.2 tem falha conhecida no Winbox (CVE-2018-14847, corrigida na 6.42.1) que permite ler a senha do admin sem login. Com a porta aberta para qualquer IP, atualizar para a 6.49.x e usar senha forte é o mínimo. Para reduzir a exposição, deixar só `dst-port=18728` (tirar o 8291) (API, não afetada por essa falha) ou acrescentar `src-address=IP-DO-ADMIN` na regra.
 
 Desfazer:
 
 ```
-/ip service set winbox port=8291; /ip firewall filter remove [find where comment="Admin remoto Winbox/API"]
+/ip firewall filter remove [find where comment="Admin remoto Winbox/API"]
 ```
