@@ -1,12 +1,16 @@
 # ============================================================================
 # MikroTik RB951Ui-2HnD - configuracao a partir do padrao de fabrica (defconf)
+# RouterOS 6.39.2 (conferido pelo export do equipamento)
 #
 #   LAN : 10.0.104.0/24  (MikroTik = 10.0.104.1)
-#   WAN : ether1 (DHCP client do padrao de fabrica; o script nao depende do nome)
+#   WAN : ether1 (DHCP client do padrao). Hoje recebe 192.168.15.2 de um modem
+#         da operadora (NAT duplo): o modem precisa encaminhar as portas abaixo
+#         para 192.168.15.2 (ou ficar em DMZ / bridge).
 #
 #   Redirecionamentos (porta externa -> destino):
-#     tcp 35555 -> 10.0.104.22:35555   DVR Tolotti
-#     tcp 2000  -> 10.0.104.22:80      DVR Tolotti (web)
+#     tcp 35555 -> 10.0.104.22:35555   DVR Tolotti (app)
+#     tcp 80    -> 10.0.104.22:2000    DVR Tolotti (web)
+#     tcp 2000  -> 10.0.104.22:2000    DVR Tolotti (web, porta externa 2000)
 #     tcp 554   -> 10.0.104.22:3000    DVR Tolotti (RTSP)
 #     tcp 5000  -> 10.0.104.9:80       Modulo Guarita (HTTP)
 #     tcp 9000  -> 10.0.104.9:9000     Modulo Guarita
@@ -28,6 +32,9 @@
 # Pool comeca em .100 para nao colidir com os IPs fixos (.9 guarita, .22 DVR)
 :local poolRange  "10.0.104.100-10.0.104.254"
 
+# Interface de entrada da internet (ligada ao modem)
+:local wanIf      "ether1"
+
 :local ipDvr      "10.0.104.22"
 :local ipGuarita  "10.0.104.9"
 :local ipAtaFxo   "10.0.104.40"
@@ -39,50 +46,46 @@
 # ---------------------------------------------------------------------------
 # 1) Redirecionamento de portas (dstnat)
 #    O firewall padrao ja libera o que foi DSTNATed, nao precisa de filter.
-#
-#    dst-address-type=local casa com qualquer IP do proprio MikroTik (IP da
-#    WAN, mesmo dinamico/PPPoE, e IP da LAN), sem depender do nome da
-#    interface. Junto com a regra de hairpin no fim, funciona tambem para
-#    quem esta na mesma rede acessando pelo IP publico ou nome DNS.
+#    Todas valem so para o que entra pela WAN (in-interface), assim a
+#    navegacao da LAN (ex.: porta 80 para a internet) nao e desviada.
 # ---------------------------------------------------------------------------
 /ip firewall nat remove [find where comment~"^PF:"]
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=35555 \
-    dst-address-type=local to-addresses=$ipDvr to-ports=35555 \
+    in-interface=$wanIf to-addresses=$ipDvr to-ports=35555 \
     comment="PF: DVR Tolotti 35555"
 
-/ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=554 \
-    dst-address-type=local to-addresses=$ipDvr to-ports=3000 \
-    comment="PF: DVR Tolotti RTSP 554 -> 3000"
+/ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=80 \
+    in-interface=$wanIf to-addresses=$ipDvr to-ports=2000 \
+    comment="PF: DVR Tolotti web 80 -> 2000"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=2000 \
-    dst-address-type=local to-addresses=$ipDvr to-ports=80 \
-    comment="PF: DVR Tolotti web 2000 -> 80"
+    in-interface=$wanIf to-addresses=$ipDvr to-ports=2000 \
+    comment="PF: DVR Tolotti web 2000 -> 2000"
+
+/ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=554 \
+    in-interface=$wanIf to-addresses=$ipDvr to-ports=3000 \
+    comment="PF: DVR Tolotti RTSP 554 -> 3000"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=5000 \
-    dst-address-type=local to-addresses=$ipGuarita to-ports=80 \
+    in-interface=$wanIf to-addresses=$ipGuarita to-ports=80 \
     comment="PF: Guarita HTTP 5000 -> 80"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=9000 \
-    dst-address-type=local to-addresses=$ipGuarita to-ports=9000 \
+    in-interface=$wanIf to-addresses=$ipGuarita to-ports=9000 \
     comment="PF: Guarita 9000"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=8888 \
-    dst-address-type=local to-addresses=$ipAtaFxo to-ports=8888 \
+    in-interface=$wanIf to-addresses=$ipAtaFxo to-ports=8888 \
     comment="PF: ATA FXO 8888"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=7777 \
-    dst-address-type=local to-addresses=$ipAtaFxs to-ports=7777 \
+    in-interface=$wanIf to-addresses=$ipAtaFxs to-ports=7777 \
     comment="PF: ATA FXS 7777"
 
 /ip firewall nat add chain=dstnat action=dst-nat protocol=tcp dst-port=9009 \
-    dst-address-type=local to-addresses=$ip30 to-ports=9009 \
+    in-interface=$wanIf to-addresses=$ip30 to-ports=9009 \
     comment="PF: Equip .30 9009"
-
-# Hairpin NAT: acesso de dentro da LAN pelo IP publico / nome DNS
-/ip firewall nat add chain=srcnat action=masquerade \
-    src-address=$lanNetCidr dst-address=$lanNetCidr \
-    comment="PF: hairpin LAN"
 
 # ---------------------------------------------------------------------------
 # 2) DHCP: pool, rede, gateway e DNS na nova faixa
