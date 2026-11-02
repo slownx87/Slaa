@@ -29,6 +29,7 @@ function ensure_cargo_salario(): void
 try { ensure_cargo_salario(); } catch (Throwable $e) { /* idem */ }
 try { ensure_cargo_horarios(); } catch (Throwable $e) { /* idem */ }
 try { ensure_cargo_turnos_table(); } catch (Throwable $e) { /* idem */ }
+try { ensure_feriados_table(); } catch (Throwable $e) { /* idem */ }
 
 /** Lê e valida os campos de horário do formulário de cargo. */
 function admin_horario_do_post(): array
@@ -73,6 +74,15 @@ function admin_horario_do_post(): array
     return [$entrada, $saida, $intervalo, $tolerancia, $antecipacao];
 }
 
+/** "Dia sem batida conta como falta" do formulário: 1/0, ou null se o campo nem veio. */
+function admin_controla_falta_do_post(): ?int
+{
+    if (!array_key_exists('controla_falta', $_POST)) {
+        return null;
+    }
+    return ((string)$_POST['controla_falta'] === '0') ? 0 : 1;
+}
+
 $soSuperAdmin = (admin_nivel() === 'super_admin');
 /* Cargo vale para TODOS os condomínios (a tabela não tem condomínio). Por isso só
  * quem enxerga tudo mexe em cargo/horário/tolerância; antes qualquer admin de um
@@ -111,16 +121,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             if (mb_strlen($nome) < 2) throw new RuntimeException('Informe o nome do cargo.');
 
             [$entrada, $saida, $intervalo, $tolerancia, $antecipacao] = admin_horario_do_post();
+            $controlaFalta = admin_controla_falta_do_post() ?? 1;
             $salario = (string)($_POST['salario'] ?? '');
             $salario = $salario !== '' ? (float)str_replace(',', '.', $salario) : null;
 
             $temSalario = column_exists('ponto_cargos', 'salario_base');
             if ($temSalario) {
-                db()->prepare("INSERT INTO ponto_cargos (nome, salario_base, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, antecipacao_minutos, ativo) VALUES (?, ?, ?, ?, ?, ?, ?, 1)")
-                    ->execute([$nome, $salario, $entrada, $saida, $intervalo, $tolerancia, $antecipacao]);
+                db()->prepare("INSERT INTO ponto_cargos (nome, salario_base, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, antecipacao_minutos, controla_falta, ativo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)")
+                    ->execute([$nome, $salario, $entrada, $saida, $intervalo, $tolerancia, $antecipacao, $controlaFalta]);
             } else {
-                db()->prepare("INSERT INTO ponto_cargos (nome, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, antecipacao_minutos, ativo) VALUES (?, ?, ?, ?, ?, ?, 1)")
-                    ->execute([$nome, $entrada, $saida, $intervalo, $tolerancia, $antecipacao]);
+                db()->prepare("INSERT INTO ponto_cargos (nome, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, antecipacao_minutos, controla_falta, ativo) VALUES (?, ?, ?, ?, ?, ?, ?, 1)")
+                    ->execute([$nome, $entrada, $saida, $intervalo, $tolerancia, $antecipacao, $controlaFalta]);
             }
             log_action('criar_cargo', 'Cadastrou cargo: ' . $nome . ($entrada ? ' (' . $entrada . '-' . $saida . ')' : ''));
             admin_json(['ok' => true, 'mensagem' => $nome . ' cadastrado.']);
@@ -138,11 +149,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
             db()->prepare("UPDATE ponto_cargos SET hora_entrada = ?, hora_saida = ?, minutos_intervalo = ?, tolerancia_minutos = ?, antecipacao_minutos = ? WHERE id = ?")
                 ->execute([$entrada, $saida, $intervalo, $tolerancia, $antecipacao, $id]);
+            $controlaFalta = admin_controla_falta_do_post();
+            if ($controlaFalta !== null) {
+                db()->prepare("UPDATE ponto_cargos SET controla_falta = ? WHERE id = ?")->execute([$controlaFalta, $id]);
+            }
 
             $jornada = ponto_jornada_do_cargo([
                 'hora_entrada' => $entrada, 'hora_saida' => $saida,
                 'minutos_intervalo' => $intervalo, 'tolerancia_minutos' => $tolerancia,
                 'antecipacao_minutos' => $antecipacao,
+                'controla_falta' => $controlaFalta ?? 1,
             ]);
             log_action('horario_cargo', 'Definiu horário do cargo ID ' . $id . ': ' . ($entrada ?: 'sem horário')
                 . ' · ' . ponto_tolerancias_texto($jornada));
@@ -205,6 +221,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             db()->prepare("DELETE FROM ponto_cargo_turnos WHERE id = ?")->execute([$id]);
             log_action('excluir_turno_cargo', 'Removeu horário adicional ID ' . $id);
             admin_json(['ok' => true, 'mensagem' => 'Horário removido.']);
+        }
+
+        /* ------------------------------ feriados ------------------------------ */
+        if ($acao === 'criar_feriado') {
+            if (!$podeCargos) throw new RuntimeException('Só o administrador geral cadastra feriado.');
+            $data = trim((string)($_POST['data'] ?? ''));
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $data) || !strtotime($data)) {
+                throw new RuntimeException('Informe a data do feriado.');
+            }
+            $nome = trim((string)($_POST['nome'] ?? ''));
+            if (mb_strlen($nome) < 3) throw new RuntimeException('Dê um nome ao feriado (ex.: Aniversário de São Paulo).');
+            $anual = ((string)($_POST['anual'] ?? '') === '1') ? 1 : 0;
+
+            $dup = db()->prepare("SELECT COUNT(*) FROM ponto_feriados WHERE data = ?");
+            $dup->execute([$data]);
+            if ((int)$dup->fetchColumn() > 0) throw new RuntimeException('Já existe um feriado cadastrado nessa data.');
+            if (isset(ponto_feriados_nacionais((int)substr($data, 0, 4))[$data])) {
+                throw new RuntimeException('Esse já é feriado nacional e entra sozinho.');
+            }
+
+            db()->prepare("INSERT INTO ponto_feriados (data, nome, anual, criado_em) VALUES (?, ?, ?, ?)")
+                ->execute([$data, mb_substr($nome, 0, 80), $anual, now_sp()]);
+            log_action('criar_feriado', 'Cadastrou feriado ' . $data . ' - ' . $nome . ($anual ? ' (todo ano)' : ''));
+            admin_json(['ok' => true, 'mensagem' => $nome . ' cadastrado. Dia sem batida nessa data deixa de ser falta.']);
+        }
+
+        if ($acao === 'excluir_feriado') {
+            if (!$podeCargos) throw new RuntimeException('Só o administrador geral remove feriado.');
+            $id = (int)($_POST['id'] ?? 0);
+            db()->prepare("DELETE FROM ponto_feriados WHERE id = ?")->execute([$id]);
+            log_action('excluir_feriado', 'Removeu feriado ID ' . $id);
+            admin_json(['ok' => true, 'mensagem' => 'Feriado removido.']);
         }
 
         if ($acao === 'status_cargo') {
@@ -280,6 +328,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
     }
 }
 
+$feriadosExtras = ponto_feriados_extras();
+$feriadosNacionaisAno = ponto_feriados_nacionais((int)date('Y'));
 $condominios = db()->query("SELECT * FROM ponto_condominios ORDER BY ativo DESC, nome")->fetchAll();
 $cargos = db()->query("SELECT * FROM ponto_cargos ORDER BY ativo DESC, nome")->fetchAll();
 $temSalario = column_exists('ponto_cargos', 'salario_base');
@@ -385,6 +435,11 @@ admin_topbar(false);
 </div>
 <p class="font-label-sm text-label-sm text-primary" id="cgPreview"></p>
 
+<label class="flex items-start gap-2 mt-1">
+<input checked class="w-5 h-5 flex-shrink-0" id="cgFalta" type="checkbox"/>
+<span class="font-label-sm text-label-sm text-secondary"><b>Dia sem nenhuma batida conta como falta</b> (domingo e feriado são folga). Desligue para escala 12x36 / revezamento, em que a folga varia.</span>
+</label>
+
 <button class="h-[46px] rounded-full border border-primary text-primary font-label-bold text-label-bold active:scale-95 transition-transform" data-criar="cargo" type="button">Criar cargo</button>
 </div>
 <?php else: ?>
@@ -452,6 +507,10 @@ sem horário — hora extra pelo padrão de 8h
 </div>
 <p class="font-label-sm text-label-sm text-secondary"><b>Atrasado até</b>: minutos depois da entrada que não contam como atraso (passou disso, conta tudo). <b>Antes até</b>: quem bater mais cedo que isso não soma o tempo extra. Em branco = sem tolerância / sem limite. O limite de "antes" só funciona com entrada e saída preenchidas.</p>
 <p class="font-label-sm text-label-sm text-primary" data-preview="<?= (int)$c['id'] ?>"></p>
+<label class="flex items-start gap-2">
+<input <?= (int)($c['controla_falta'] ?? 1) === 1 ? 'checked' : '' ?> class="w-5 h-5 flex-shrink-0" data-campo="falta" type="checkbox"/>
+<span class="font-label-sm text-label-sm text-secondary"><b>Dia sem nenhuma batida conta como falta</b> (domingo e feriado são folga). Desligue para escala 12x36 / revezamento.</span>
+</label>
 <button class="h-[40px] rounded-full bg-primary text-on-primary font-label-bold text-label-bold" data-salvar-horario="<?= (int)$c['id'] ?>" type="button">Salvar horário e tolerâncias</button>
 
 <div class="border-t border-outline-variant/30 pt-2 flex flex-col gap-2">
@@ -484,6 +543,45 @@ sem horário — hora extra pelo padrão de 8h
 <?php endif; ?>
 </div>
 <?php endforeach; ?>
+</div>
+</section>
+
+<!-- -------------------------------- feriados -------------------------------- -->
+<section class="flex flex-col gap-2" id="feriados">
+<h2 class="font-headline-md text-headline-md text-primary">Feriados</h2>
+<p class="font-body-md text-body-md text-secondary">Dia sem nenhuma batida é <b>falta</b>, menos domingo e feriado (folga). Se a pessoa trabalhar no feriado, conta como dia normal.</p>
+<p class="font-label-sm text-label-sm text-secondary">Os feriados nacionais já entram sozinhos em <?= (int)date('Y') ?>: <?= h(implode(' · ', array_map(function ($d, $n) { return date('d/m', strtotime($d)) . ' ' . $n; }, array_keys($feriadosNacionaisAno), $feriadosNacionaisAno))) ?>. Cadastre abaixo os municipais/estaduais (ex.: 25/01 aniversário de São Paulo, 09/07) e os pontos facultativos em que a empresa não trabalha (Carnaval, Corpus Christi).</p>
+
+<?php if ($podeCargos): ?>
+<div class="cartao rounded-xl p-3 flex flex-col gap-2">
+<span class="font-label-bold text-label-bold text-secondary uppercase tracking-wider">Novo feriado</span>
+<input class="campo font-body-lg text-body-lg" id="fdData" type="date"/>
+<input class="campo font-body-lg text-body-lg" id="fdNome" maxlength="80" placeholder="Nome (ex.: Corpus Christi)" type="text"/>
+<label class="flex items-center gap-2">
+<input class="w-5 h-5 flex-shrink-0" id="fdAnual" type="checkbox"/>
+<span class="font-label-sm text-label-sm text-secondary">Repete todo ano na mesma data</span>
+</label>
+<button class="h-[46px] rounded-full bg-primary text-on-primary font-label-bold text-label-bold active:scale-95 transition-transform" data-criar="feriado" type="button">Adicionar feriado</button>
+</div>
+<?php endif; ?>
+
+<div class="flex flex-col gap-2">
+<?php foreach ($feriadosExtras as $fe): ?>
+<div class="cartao rounded-lg p-2.5 flex items-center justify-between gap-2">
+<div class="min-w-0">
+<p class="font-body-lg text-body-lg text-on-surface truncate"><?= h((string)$fe['nome']) ?></p>
+<p class="font-label-sm text-label-sm text-secondary"><?= h(date('d/m/Y', strtotime((string)$fe['data']))) ?><?= (int)$fe['anual'] === 1 ? ' · todo ano' : '' ?></p>
+</div>
+<?php if ($podeCargos): ?>
+<button class="w-8 h-8 rounded-full flex items-center justify-center text-error flex-shrink-0" data-excluir-feriado="<?= (int)$fe['id'] ?>" type="button" aria-label="Remover feriado">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+</button>
+<?php endif; ?>
+</div>
+<?php endforeach; ?>
+<?php if (!$feriadosExtras): ?>
+<p class="font-body-md text-body-md text-secondary text-center py-2">Nenhum feriado extra cadastrado.</p>
+<?php endif; ?>
 </div>
 </section>
 
@@ -604,7 +702,15 @@ sem horário — hora extra pelo padrão de 8h
                     hora_saida: $('#cgSaida').value,
                     minutos_intervalo: $('#cgIntervalo').value,
                     tolerancia_minutos: $('#cgTolerancia').value,
-                    antecipacao_minutos: $('#cgAntecipacao').value
+                    antecipacao_minutos: $('#cgAntecipacao').value,
+                    controla_falta: $('#cgFalta').checked ? 1 : 0
+                }, true);
+            } else if (tipo === 'feriado') {
+                enviar({
+                    acao: 'criar_feriado',
+                    data: $('#fdData').value,
+                    nome: $('#fdNome').value.trim(),
+                    anual: $('#fdAnual').checked ? 1 : 0
                 }, true);
             } else if (tipo === 'advertencia') {
                 enviar({
@@ -630,6 +736,12 @@ sem horário — hora extra pelo padrão de 8h
         const status = evento.target.closest('[data-status]');
         if (status) {
             enviar({ acao: 'status_' + status.dataset.status, id: status.dataset.id }, true);
+            return;
+        }
+
+        const excluirFeriado = evento.target.closest('[data-excluir-feriado]');
+        if (excluirFeriado) {
+            enviar({ acao: 'excluir_feriado', id: excluirFeriado.dataset.excluirFeriado }, true);
             return;
         }
 
@@ -716,7 +828,8 @@ sem horário — hora extra pelo padrão de 8h
                 hora_saida: campo('saida'),
                 minutos_intervalo: campo('intervalo'),
                 tolerancia_minutos: campo('tolerancia'),
-                antecipacao_minutos: campo('antecipacao')
+                antecipacao_minutos: campo('antecipacao'),
+                controla_falta: painel.querySelector('[data-campo="falta"]').checked ? 1 : 0
             }, true);
         }
     });

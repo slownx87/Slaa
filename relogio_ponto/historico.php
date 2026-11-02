@@ -91,6 +91,10 @@ function hist_payload(int $funcionarioId, string $ym): array
     $dias = [];
     $minutosAtrasos = 0;
     $minutosTrabalhados = 0;
+    $qtdFaltas = 0;
+    /* Dia sem nenhuma batida é falta (menos domingo/feriado). */
+    $janelaFunc = ponto_funcionario_janela($funcionarioId);
+    $controlaFalta = !isset($jornadaCargo['controla_falta']) || (int)$jornadaCargo['controla_falta'] === 1;
 
     /* Todas as batidas do mês numa consulta só (antes era uma por dia, 31 idas
      * ao banco para desenhar uma tela de celular). Pega um dia antes e dois
@@ -111,8 +115,29 @@ function hist_payload(int $funcionarioId, string $ym): array
         $data = date('Y-m-d', $ts);
         $ts = strtotime('+1 day', $ts);
 
-        $lista = ponto_registros_do_dia_em_memoria($registrosMes, $data);
-        if (!$lista && empty($pedidos[$data])) {
+        $lista = ponto_registros_do_dia_em_memoria($registrosMes, $data, $funcionarioId);
+        $ehFalta = !$lista && ponto_dia_eh_falta($data, $janelaFunc, $controlaFalta);
+        if (!$lista && empty($pedidos[$data]) && !$ehFalta) {
+            continue;
+        }
+
+        if ($ehFalta) {
+            $qtdFaltas++;
+            $dias[] = [
+                'data' => $data,
+                'data_br' => date('d/m/Y', strtotime($data)),
+                'data_extenso' => hist_dia_semana($data) . ', ' . date('d/m/Y', strtotime($data)),
+                'dia' => date('d', strtotime($data)),
+                'dia_semana' => hist_dia_semana($data),
+                'status' => 'falta',
+                'chip' => 'FALTA',
+                'resumo' => 'Nenhuma batida neste dia',
+                'trabalhado' => 'Sem batidas',
+                'turno' => '',
+                'entrada_esperada' => '',
+                'registros' => [],
+                'pedidos' => $pedidos[$data] ?? [],
+            ];
             continue;
         }
 
@@ -211,6 +236,7 @@ function hist_payload(int $funcionarioId, string $ym): array
         'mes_anterior' => $ym <= date('Y-m', strtotime('-24 months')) ? null : date('Y-m', strtotime($primeiro . ' -1 month')),
         'mes_proximo' => $ym >= date('Y-m') ? null : date('Y-m', strtotime($primeiro . ' +1 month')),
         'atrasos' => $minutosAtrasos > 0 ? ponto_fmt_hm_sinal(-$minutosAtrasos) : '0h 00m',
+        'faltas' => $qtdFaltas,
         'total' => ponto_fmt_hm($minutosTrabalhados),
         'advertencias' => [
             'mes' => count($listaAdv),
@@ -521,6 +547,7 @@ app_mobile_head('Histórico - ' . APP_NAME, 'bg-background text-on-background an
 <div class="glass-card rounded-xl p-3 flex flex-col gap-1 border border-error/20 bg-error/5 shadow-sm">
 <span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider">Atrasos</span>
 <span class="font-headline-md text-headline-md text-error" id="totalAtrasos">--</span>
+<span class="font-label-sm text-label-sm text-error" id="subFaltas"></span>
 </div>
 <button class="glass-card rounded-xl p-3 flex flex-col gap-1 border border-amber-500/20 bg-amber-500/5 shadow-sm text-left active:scale-95 transition-transform" id="cardAdvertencias" type="button">
 <span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider">Advert.</span>
@@ -630,7 +657,8 @@ Faltou uma batida
         ok:       ['text-on-surface', 'bg-primary/10 text-primary border-primary/20',              'check_circle', 'text-secondary'],
         extra:    ['text-primary',    'bg-primary/10 text-primary border-primary/20',              'schedule',     'text-primary'],
         atraso:   ['text-error',      'bg-error/10 text-error border-error/20',                    'warning',      'text-error'],
-        pendente: ['text-on-surface', 'bg-surface-variant text-on-surface-variant border-outline-variant', 'more_horiz', 'text-secondary']
+        pendente: ['text-on-surface', 'bg-surface-variant text-on-surface-variant border-outline-variant', 'more_horiz', 'text-secondary'],
+        falta:    ['text-error',      'bg-error/10 text-error border-error/20',                    'event_busy',   'text-error']
     };
     const CORES_STATUS = {
         pendente: 'bg-amber-500/10 text-amber-500 border-amber-500/30',
@@ -731,6 +759,7 @@ Faltou uma batida
         $('#mesNome').textContent = h.mes_nome;
         $('#totalTrabalhado').textContent = h.total;
         $('#totalAtrasos').textContent = h.atrasos;
+        $('#subFaltas').textContent = h.faltas ? h.faltas + (h.faltas === 1 ? ' falta' : ' faltas') : '';
         $('#mesAnterior').dataset.mes = h.mes_anterior || '';
         $('#mesAnterior').disabled = !h.mes_anterior;
         $('#mesProximo').dataset.mes = h.mes_proximo || '';
@@ -1075,7 +1104,7 @@ Faltou uma batida
         {
             alvo: '#listaDias .history-card',
             titulo: '5. Os dias',
-            texto: 'Cada linha é um dia trabalhado, com as horas e o selo <b>OK</b>, <b>ATRASO</b> ou <b>PEND</b> (pendente, faltou bater algo).<br><br><b>Toque em um dia</b> para abrir os detalhes.'
+            texto: 'Cada linha é um dia, com as horas e o selo <b>OK</b>, <b>ATRASO</b>, <b>PEND</b> (pendente, faltou bater algo) ou <b>FALTA</b> (nenhuma batida no dia; domingo e feriado são folga).<br><br><b>Toque em um dia</b> para abrir os detalhes — se foi engano, dá para pedir a batida ali.'
         },
         {
             alvo: '#modalBatidas',

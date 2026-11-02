@@ -39,13 +39,17 @@ function rel_calcular(string $ini, string $fim, int $condominioId = 0, int $func
         $params[] = $funcionarioId;
     }
 
-    $stmt = db()->prepare("SELECT f.id, f.nome, c.nome AS cargo_nome, co.nome AS condominio_nome
+    /* Funcionário desativado que bateu ponto no período CONTINUA no relatório:
+     * quem saiu no meio do mês tem horas a fechar (antes ele sumia do total). */
+    $stmt = db()->prepare("SELECT f.id, f.nome, f.ativo, c.nome AS cargo_nome, co.nome AS condominio_nome
         FROM ponto_funcionarios f
         LEFT JOIN ponto_cargos c ON c.id = f.cargo_id
         INNER JOIN ponto_condominios co ON co.id = f.condominio_id
-        WHERE f.ativo = 1 {$filtro} {$extra}
+        WHERE (f.ativo = 1 OR EXISTS (SELECT 1 FROM ponto_registros rr
+                                       WHERE rr.funcionario_id = f.id AND rr.data_ponto BETWEEN ? AND ?))
+              {$filtro} {$extra}
         ORDER BY f.nome");
-    $stmt->execute($params);
+    $stmt->execute(array_merge([$ini, $fim], $params));
 
     $linhas = [];
     foreach ($stmt->fetchAll() as $f) {
@@ -57,6 +61,10 @@ function rel_calcular(string $ini, string $fim, int $condominioId = 0, int $func
         $jornadaCargo = ponto_jornada_do_funcionario($id);
         $esperadoTotal = 0;
         $turnosUsados = []; // horário do cargo => quantos dias caíram nele
+        $faltas = 0;
+        $faltasDias = [];
+        $janela = ponto_funcionario_janela($id);
+        $controlaFalta = !isset($jornadaCargo['controla_falta']) || (int)$jornadaCargo['controla_falta'] === 1;
 
         /* Uma consulta por funcionário, não uma por dia: com 50 pessoas num mês
          * o laço antigo disparava mais de mil consultas só para abrir a tela.
@@ -78,8 +86,17 @@ function rel_calcular(string $ini, string $fim, int $condominioId = 0, int $func
             $dia = date('Y-m-d', $ts);
             $ts = strtotime('+1 day', $ts);
 
-            $lista = ponto_registros_do_dia_em_memoria($registrosPeriodo, $dia);
-            if (!$lista) continue;
+            $lista = ponto_registros_do_dia_em_memoria($registrosPeriodo, $dia, $id);
+            if (!$lista) {
+                /* Dia sem nenhuma batida: falta, a não ser domingo/feriado (folga)
+                 * ou fora do período em que a pessoa trabalhou aqui. */
+                if (ponto_dia_eh_falta($dia, $janela, $controlaFalta)) {
+                    $faltas++;
+                    $faltasDias[] = $dia;
+                    $esperadoTotal += ponto_jornada_padrao_min($jornadaCargo);
+                }
+                continue;
+            }
             if (!jornada_fechada($lista) || open_interval($lista)) continue;
 
             /* Atraso = horas que faltaram para fechar a jornada do turno, já com
@@ -106,6 +123,9 @@ function rel_calcular(string $ini, string $fim, int $condominioId = 0, int $func
         $esperado = $esperadoTotal;
         $linhas[] = [
             'id' => $id,
+            'ativo' => (int)$f['ativo'] === 1,
+            'faltas' => $faltas,
+            'faltas_dias' => $faltasDias,
             'nome' => (string)$f['nome'],
             'cargo' => (string)($f['cargo_nome'] ?: 'Sem cargo'),
             'condominio' => (string)$f['condominio_nome'],
@@ -174,13 +194,13 @@ if (isset($_GET['exportar'])) {
 
     $saida = fopen('php://output', 'w');
     fwrite($saida, "\xEF\xBB\xBF"); // BOM para o Excel abrir com acento certo
-    fputcsv($saida, ['Funcionario', 'Cargo', 'Condominio', 'Horarios do cargo', 'Horarios cumpridos', 'Dias com batida', 'Horas trabalhadas', 'Atrasos', 'Dias com atraso', 'Esperado'], ';');
+    fputcsv($saida, ['Funcionario', 'Cargo', 'Condominio', 'Horarios do cargo', 'Horarios cumpridos', 'Dias com batida', 'Horas trabalhadas', 'Atrasos', 'Dias com atraso', 'Faltas (dias)', 'Esperado'], ';');
     foreach ($linhas as $l) {
         fputcsv($saida, [
-            $seguro($l['nome']), $seguro($l['cargo']), $seguro($l['condominio']),
+            $seguro($l['nome'] . ($l['ativo'] ? '' : ' (desativado)')), $seguro($l['cargo']), $seguro($l['condominio']),
             $l['jornada'], $l['turnos_usados'], $l['dias'],
             fmt_minutes($l['trabalho_min']),
-            fmt_minutes($l['atrasos_min']), $l['dias_atrasados'], fmt_minutes($l['esperado_min']),
+            fmt_minutes($l['atrasos_min']), $l['dias_atrasados'], $l['faltas'], fmt_minutes($l['esperado_min']),
         ], ';');
     }
     fclose($saida);
@@ -193,7 +213,7 @@ $condominios = get_condominios(true);
 
 /* Lista do seletor de funcionário. */
 [$filtroF, $paramsF] = admin_filtro_condominio('f');
-$stmt = db()->prepare("SELECT f.id, f.nome FROM ponto_funcionarios f WHERE f.ativo = 1 {$filtroF} ORDER BY f.nome");
+$stmt = db()->prepare("SELECT f.id, f.nome, f.ativo FROM ponto_funcionarios f WHERE 1=1 {$filtroF} ORDER BY f.ativo DESC, f.nome");
 $stmt->execute($paramsF);
 $listaFuncionarios = $stmt->fetchAll();
 
@@ -203,6 +223,7 @@ $espelho = espelho_pdf_dados($ini, $fim, $condominioFiltro, $funcionarioFiltro >
 
 $totalTrabalho = array_sum(array_column($linhas, 'trabalho_min'));
 $totalAtrasos = array_sum(array_column($linhas, 'atrasos_min'));
+$totalFaltas = array_sum(array_column($linhas, 'faltas'));
 
 $csrf = csrf_token();
 app_mobile_head('Relatórios - ' . APP_NAME, 'bg-background text-on-background antialiased min-h-screen', admin_css(), 'manifest-admin.webmanifest');
@@ -242,7 +263,7 @@ admin_topbar();
 <select class="campo font-body-md text-body-md" id="funcionario" name="funcionario">
 <option value="0">Todos os funcionários</option>
 <?php foreach ($listaFuncionarios as $f): ?>
-<option value="<?= (int)$f['id'] ?>" <?= $funcionarioFiltro === (int)$f['id'] ? 'selected' : '' ?>><?= h((string)$f['nome']) ?></option>
+<option value="<?= (int)$f['id'] ?>" <?= $funcionarioFiltro === (int)$f['id'] ? 'selected' : '' ?>><?= h((string)$f['nome']) ?><?= (int)$f['ativo'] === 1 ? '' : ' (desativado)' ?></option>
 <?php endforeach; ?>
 </select>
 </div>
@@ -262,7 +283,7 @@ admin_topbar();
 </form>
 
 <!-- --------------------------------- totais --------------------------------- -->
-<section class="grid grid-cols-2 gap-2 fade-in-up">
+<section class="grid grid-cols-3 gap-2 fade-in-up">
 <div class="cartao rounded-xl p-2.5 flex flex-col gap-0.5">
 <span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider">Trabalhadas</span>
 <span class="font-headline-md text-headline-md text-on-surface"><?= h(fmt_minutes($totalTrabalho)) ?></span>
@@ -270,6 +291,10 @@ admin_topbar();
 <div class="cartao rounded-xl p-2.5 flex flex-col gap-0.5 border-error/25">
 <span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider">Atrasos</span>
 <span class="font-headline-md text-headline-md text-error"><?= h(fmt_minutes($totalAtrasos)) ?></span>
+</div>
+<div class="cartao rounded-xl p-2.5 flex flex-col gap-0.5 border-error/25">
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider">Faltas</span>
+<span class="font-headline-md text-headline-md text-error"><?= (int)$totalFaltas ?> dia(s)</span>
 </div>
 </section>
 
@@ -312,7 +337,7 @@ admin_topbar();
 <?= h(mb_strtoupper(mb_substr($l['nome'], 0, 2))) ?>
 </div>
 <div class="min-w-0">
-<p class="font-body-lg text-body-lg text-on-surface font-medium truncate"><?= h($l['nome']) ?></p>
+<p class="font-body-lg text-body-lg text-on-surface font-medium truncate"><?= h($l['nome']) ?><?= $l['ativo'] ? '' : ' (desativado)' ?></p>
 <p class="font-label-sm text-label-sm text-secondary truncate"><?= h($l['cargo']) ?> · <?= h($l['condominio']) ?></p>
 <p class="font-label-sm text-label-sm <?= $l['jornada'] === 'sem horário no cargo' ? 'text-error' : 'text-primary' ?>"><?= h($l['jornada']) ?></p>
 <?php if ($l['regras'] !== ''): ?>
@@ -324,7 +349,7 @@ admin_topbar();
 </div>
 </div>
 
-<div class="grid grid-cols-2 gap-1 py-2 border-y border-outline-variant/25">
+<div class="grid grid-cols-3 gap-1 py-2 border-y border-outline-variant/25">
 <div class="flex flex-col items-center">
 <span class="font-label-sm text-label-sm text-secondary">Trabalhadas</span>
 <span class="font-headline-md text-headline-md text-on-surface"><?= h(fmt_minutes($l['trabalho_min'])) ?></span>
@@ -333,6 +358,11 @@ admin_topbar();
 <span class="font-label-sm text-label-sm text-secondary">Atrasos</span>
 <span class="font-body-lg text-body-lg font-semibold text-error"><?= h(fmt_minutes($l['atrasos_min'])) ?></span>
 <?php if ($l['dias_atrasados']): ?><span class="font-label-sm text-label-sm text-error"><?= (int)$l['dias_atrasados'] ?> dia(s)</span><?php endif; ?>
+</div>
+<div class="flex flex-col items-center border-l border-outline-variant/25">
+<span class="font-label-sm text-label-sm text-secondary">Faltas</span>
+<span class="font-body-lg text-body-lg font-semibold <?= $l['faltas'] ? 'text-error' : 'text-on-surface' ?>"><?= (int)$l['faltas'] ?></span>
+<?php if ($l['faltas']): ?><span class="font-label-sm text-label-sm text-error truncate" style="max-width:100%"><?= h(implode(', ', array_map(function ($d) { return date('d/m', strtotime($d)); }, array_slice($l['faltas_dias'], 0, 6)))) ?><?= count($l['faltas_dias']) > 6 ? '…' : '' ?></span><?php endif; ?>
 </div>
 </div>
 
@@ -355,13 +385,15 @@ Trabalhar além da jornada não gera crédito.
 Cargo sem horário cai no padrão de <?= (int)(PONTO_JORNADA_PADRAO_MINUTOS / 60) ?>h por dia.
 Cada cargo tem as suas tolerâncias (Configurações &rarr; Cargos): chegar atrasado dentro da tolerância não conta;
 chegar mais cedo do que o limite do cargo não soma horas.
+<b>Falta</b> é dia sem nenhuma batida; domingo e feriado são folga (se trabalhar, conta como dia normal).
+Cargo com "não conta falta" (escala 12x36) fica fora dessa conta.
 Dias em aberto não entram na conta.
 </p>
 </main>
 
 <?php admin_nav('relatorios'); ?>
 <?php app_mobile_footer($csrf); ?>
-<script src="assets/espelho-pdf.js?v=1.1.0"></script>
+<script src="assets/espelho-pdf.js?v=1.3.0"></script>
 <script>
 (() => {
     'use strict';

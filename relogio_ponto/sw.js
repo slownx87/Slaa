@@ -6,7 +6,7 @@
  * errada, ou a tela de outro usuário. Só os arquivos fixos (logo, ícones,
  * scripts) ficam guardados, e é isso que faz o app abrir rápido.
  */
-const CACHE = 'ponto-v3';
+const CACHE = 'ponto-v4';
 
 /* Arquivos fixos do app. */
 const ESTATICOS = [
@@ -16,6 +16,8 @@ const ESTATICOS = [
     'assets/icones/app-512.png',
     'assets/tutorial.js',
     'assets/espelho-pdf.js',
+    'assets/fonts/inter-latin.woff2',
+    'assets/fonts/material-symbols-outlined.woff2',
     'offline.html'
 ];
 

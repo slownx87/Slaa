@@ -187,7 +187,7 @@ function rel_rows_espelho(array $registros, string $dataIni, string $dataFim, ?i
             /* Separa em memória — as batidas do período já vieram todas na
              * consulta de espelho_pdf_dados(). Antes aqui havia uma consulta ao
              * banco por dia e por funcionário. */
-            $listaDia = ponto_registros_do_dia_em_memoria($registros, $diaConsulta);
+            $listaDia = ponto_registros_do_dia_em_memoria($registros, $diaConsulta, $funcionarioId);
             if (!$listaDia) {
                 continue;
             }
@@ -216,11 +216,18 @@ function rel_rows_espelho(array $registros, string $dataIni, string $dataFim, ?i
         ? ponto_jornada_do_funcionario($funcionarioId)
         : null;
 
+    /* Falta/folga: dia sem batida é falta, menos domingo e feriado. */
+    $janela = ($funcionarioId !== null && $funcionarioId > 0) ? ponto_funcionario_janela($funcionarioId) : null;
+    $controlaFalta = $jornadaCargo === null
+        || !isset($jornadaCargo['controla_falta'])
+        || (int)$jornadaCargo['controla_falta'] === 1;
+
     $linhas = [];
     $total = 0;
     $totalProgramado = 0;
     $totalAtraso = 0;
     $totalTolerado = 0;
+    $totalFaltas = 0;
     foreach (rel_periodo_datas($dataIni, $dataFim) as $data) {
         $pontos = [];
         $intervalos = [];
@@ -287,14 +294,32 @@ function rel_rows_espelho(array $registros, string $dataIni, string $dataFim, ?i
             }
         }
 
+        /* Dia sem nenhuma batida: Falta, Folga (domingo) ou Feriado. */
+        $ausenciaTxt = '';
+        if (!$temRegistroNoDia) {
+            $folga = ponto_folga_do_dia($data);
+            if ($janela !== null && $jornadaCargo !== null && ponto_dia_eh_falta($data, $janela, $controlaFalta)) {
+                $ausenciaTxt = 'Falta';
+                $programadoMin = ponto_jornada_padrao_min($jornadaCargo);
+                $programadoTxt = rel_fmt_min($programadoMin);
+                $saldoTxt = rel_fmt_saldo(-$programadoMin);
+                $totalProgramado += $programadoMin;
+                $totalFaltas++;
+            } elseif ($folga !== null) {
+                $ausenciaTxt = $folga === 'Domingo' ? 'Folga' : 'Feriado';
+            } else {
+                $ausenciaTxt = 'Sem registro';
+            }
+        }
+
         $total += $minTrabalho;
         $linhas[] = [
             'data' => $data,
             'dia' => rel_dia_semana($data),
             // Antes ficava sempre "Folga", inclusive nos dias trabalhados.
-            // Agora o PDF não repete "Folga"; dia sem batida aparece como "Sem registro".
+            // Dia sem batida: "Falta", "Folga" (domingo), "Feriado" ou "Sem registro" (fora do período trabalhado).
             'horario' => $horarioTxt,
-            'ausencia' => $temRegistroNoDia ? '' : 'Sem registro',
+            'ausencia' => $ausenciaTxt,
             'pontos' => $pontosTxt,
             'intervalos' => $intervalosTxt,
             'trabalhado' => rel_fmt_min($minTrabalho),
@@ -306,7 +331,7 @@ function rel_rows_espelho(array $registros, string $dataIni, string $dataFim, ?i
         ];
     }
 
-    return [$linhas, $total, ['programado' => $totalProgramado, 'atraso' => $totalAtraso, 'tolerado' => $totalTolerado]];
+    return [$linhas, $total, ['programado' => $totalProgramado, 'atraso' => $totalAtraso, 'tolerado' => $totalTolerado, 'faltas' => $totalFaltas]];
 }
 
 function rel_select_extras(string $tabela, string $alias, string $prefixo, array $cols): string
@@ -459,6 +484,7 @@ function espelho_pdf_dados(string $dataIni, string $dataFim, int $condominioId =
             'total_trab' => rel_fmt_min((int)$espelho['total_min']),
             'total_prog' => rel_fmt_min((int)$espelho['totais']['programado']),
             'total_atraso' => rel_fmt_min((int)$espelho['totais']['atraso']),
+            'total_faltas' => (int)($espelho['totais']['faltas'] ?? 0),
             /* Saldo do período = o que trabalhou menos o que estava programado.
              * Antes era só o total trabalhado repetido com um "+" na frente. */
             'total_saldo' => rel_fmt_saldo((int)$espelho['total_min'] + (int)($espelho['totais']['tolerado'] ?? 0) - (int)$espelho['totais']['programado']),

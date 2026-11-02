@@ -21,9 +21,11 @@ window.EspelhoPDF = (function () {
 
     var estado = { emissao: '', emissaoCompleta: '' };
 
-    var CDN_JSPDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    var CDN_AUTOTABLE = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
-    var CDN_JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    /* Bibliotecas hospedadas no próprio servidor (assets/vendor): o PDF sai sem
+     * depender de CDN nem de internet externa. */
+    var CDN_JSPDF = 'assets/vendor/jspdf.umd.min.js?v=2.5.1';
+    var CDN_AUTOTABLE = 'assets/vendor/jspdf.plugin.autotable.min.js?v=3.8.2';
+    var CDN_JSZIP = 'assets/vendor/jszip.min.js?v=3.10.1';
 
     function carregarScript(src){
         return new Promise(function(resolve, reject){
@@ -32,7 +34,7 @@ window.EspelhoPDF = (function () {
             s.src = src;
             s.setAttribute('data-cdn', src);
             s.onload = function(){ resolve(); };
-            s.onerror = function(){ reject(new Error('Falha ao carregar biblioteca (precisa de internet).')); };
+            s.onerror = function(){ reject(new Error('Não foi possível carregar a biblioteca do PDF. Atualize a página e tente de novo.')); };
             document.head.appendChild(s);
         });
     }
@@ -125,7 +127,7 @@ window.EspelhoPDF = (function () {
             startY: startY,
             head: [['DATA', 'HORÁRIO', 'AUSÊNCIA', 'PONTOS', 'INTERVALOS', 'HORAS TRAB.', 'HORAS PROG.', 'ATRASOS', 'SALDO']],
             body: esp.rows,
-            foot: [['TOTAL', '', '', '', '', esp.total_trab, esp.total_prog || '00:00', esp.total_atraso || '00:00', esp.total_saldo]],
+            foot: [['TOTAL', '', (esp.total_faltas ? esp.total_faltas + ' falta(s)' : ''), '', '', esp.total_trab, esp.total_prog || '00:00', esp.total_atraso || '00:00', esp.total_saldo]],
             theme: 'grid',
             styles: { fontSize: fontSize, cellPadding: cellPadding, overflow: 'linebreak', textColor: [43, 53, 80], lineWidth: 0.1, valign: 'middle' },
             headStyles: { fillColor: [241, 244, 249], textColor: [43, 53, 80], fontStyle: 'bold' },

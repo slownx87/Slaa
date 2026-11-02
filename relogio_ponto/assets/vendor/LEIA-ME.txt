@@ -1,0 +1,9 @@
+Bibliotecas do espelho em PDF, hospedadas aqui para o PDF sair sem depender de internet/CDN.
+
+  jspdf.umd.min.js                  jsPDF 2.5.1               (MIT)  https://github.com/parallax/jsPDF
+  jspdf.plugin.autotable.min.js     jsPDF-AutoTable 3.8.2     (MIT)  https://github.com/simonbengtsson/jsPDF-AutoTable
+  jszip.min.js                      JSZip 3.10.1              (MIT ou GPL-3.0)  https://github.com/Stuk/jszip
+
+Fontes (assets/fonts): Inter (SIL OFL 1.1) e Material Symbols Outlined (Apache 2.0), do Google Fonts.
+O arquivo de ícones é um SUBCONJUNTO só com os ícones usados pelo sistema. Se criar uma tela com
+ícone novo, o nome dele precisa entrar no subconjunto (ver RELATORIO-VARREDURA.md).

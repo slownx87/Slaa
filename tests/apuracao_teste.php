@@ -119,5 +119,53 @@ confere('coordenada válida', ponto_coordenada('-23.5505199', 90), '-23.5505199'
 confere('coordenada com lixo vira nulo', ponto_coordenada('abc', 90), null);
 confere('coordenada fora da faixa vira nulo', ponto_coordenada('123', 90), null);
 
+echo "Páscoa e feriados\n";
+confere('Páscoa 2024', ponto_pascoa(2024), '2024-03-31');
+confere('Páscoa 2025', ponto_pascoa(2025), '2025-04-20');
+confere('Páscoa 2026', ponto_pascoa(2026), '2026-04-05');
+confere('Páscoa 2027', ponto_pascoa(2027), '2027-03-28');
+confere('Sexta-feira Santa 2026 é feriado', ponto_feriados_nacionais(2026)['2026-04-03'] ?? null, 'Sexta-feira Santa');
+confere('Consciência Negra só a partir de 2024', [isset(ponto_feriados_nacionais(2023)['2023-11-20']), isset(ponto_feriados_nacionais(2024)['2024-11-20'])], [false, true]);
+confere('2026 tem 10 feriados nacionais', count(ponto_feriados_nacionais(2026)), 10);
+confere('domingo é folga', ponto_folga_do_dia('2026-10-04'), 'Domingo');
+confere('sábado comum NÃO é folga', ponto_folga_do_dia('2026-10-03'), null);
+confere('terça comum NÃO é folga', ponto_folga_do_dia('2026-10-06'), null);
+confere('feriado em dia de semana', ponto_folga_do_dia('2026-09-07'), 'Independência do Brasil');
+confere('feriado que cai no domingo mostra o nome do feriado', ponto_folga_do_dia('2026-11-15'), 'Proclamação da República');
+
+echo "Falta (dia sem batida)\n";
+$jan = ['primeiro' => '2026-10-01', 'ultimo' => '2026-10-31', 'ativo' => true];
+$hoje = '2026-11-02';
+confere('terça sem batida = falta', ponto_dia_eh_falta('2026-10-06', $jan, true, $hoje), true);
+confere('sábado sem batida = falta', ponto_dia_eh_falta('2026-10-03', $jan, true, $hoje), true);
+confere('domingo sem batida = folga', ponto_dia_eh_falta('2026-10-04', $jan, true, $hoje), false);
+confere('feriado (12/10) sem batida = folga', ponto_dia_eh_falta('2026-10-12', $jan, true, $hoje), false);
+confere('hoje ainda não é falta', ponto_dia_eh_falta('2026-11-02', $jan, true, $hoje), false);
+confere('antes da primeira batida não é falta', ponto_dia_eh_falta('2026-09-30', $jan, true, $hoje), false);
+confere('sem nenhuma batida na vida: nunca é falta', ponto_dia_eh_falta('2026-10-06', ['primeiro' => null, 'ultimo' => null, 'ativo' => true], true, $hoje), false);
+$sai = ['primeiro' => '2026-10-01', 'ultimo' => '2026-10-20', 'ativo' => false];
+confere('desativado: depois da última batida não é falta', ponto_dia_eh_falta('2026-10-27', $sai, true, $hoje), false);
+confere('desativado: antes da última batida é falta', ponto_dia_eh_falta('2026-10-14', $sai, true, $hoje), true);
+confere('cargo que não controla falta (12x36): nunca', ponto_dia_eh_falta('2026-10-06', $jan, false, $hoje), false);
+confere('jornada perdida na falta = a do turno principal', ponto_jornada_padrao_min(jornada_de($porteiro)), 480);
+confere('  ...sem horário: 8 h', ponto_jornada_padrao_min(jornada_de(['id' => 9])), 480);
+
+echo "Turno da noite pelo cargo\n";
+confere('padrão (sem cargo): 17:00 e 08:00', ponto_janela_noite_da_jornada(null), [1020, 480]);
+confere('18:00-06:00 mantém o padrão', ponto_janela_noite_da_jornada(jornada_de($vigia)), [1020, 480]);
+$cedo = ['id' => 7, 'hora_entrada' => '16:00:00', 'hora_saida' => '02:00:00', 'minutos_intervalo' => 60];
+confere('16:00-02:00 passa a valer desde 14:00', ponto_janela_noite_da_jornada(jornada_de($cedo))[0], 840);
+$longo = ['id' => 8, 'hora_entrada' => '22:00:00', 'hora_saida' => '10:00:00', 'minutos_intervalo' => 60];
+confere('22:00-10:00: a saída vale até 12:00', ponto_janela_noite_da_jornada(jornada_de($longo))[1], 720);
+$diurno = ['id' => 6, 'hora_entrada' => '08:00:00', 'hora_saida' => '17:00:00', 'minutos_intervalo' => 60];
+confere('turno diurno não muda nada', ponto_janela_noite_da_jornada(jornada_de($diurno)), [1020, 480]);
+
+echo "Meta da semana pelo cargo\n";
+confere('8 h/dia = 44 h (como antes)', ponto_meta_semana_min(480, true), 2640);
+confere('6 h/dia = 33 h', ponto_meta_semana_min(360, true), 1980);
+confere('12x36 (11 h líquidas) = 38h30', ponto_meta_semana_min(660, true), 2310);
+confere('cargo sem horário = 44 h', ponto_meta_semana_min(480, false), 2640);
+confere('9 h/dia não passa de 44 h', ponto_meta_semana_min(540, true), 2640);
+
 echo "\n$total verificações, $falhas falha(s).\n";
 exit($falhas ? 1 : 0);

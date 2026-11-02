@@ -83,6 +83,8 @@ function ponto_funcionario_payload(array $funcionario): array
     $jornadaMinHoje = max(1, (int)($turnoHoje['jornada_min'] ?? $jornadaCargo['jornada_min']));
     $minutosHoje = ponto_minutos_trabalhados_dia($id, $dataPonto);
     $minutosSemana = ponto_minutos_trabalhados_semana($id);
+    /* A barra da semana mede contra a jornada do cargo (antes: 44 h para todo mundo). */
+    $metaSemanaMin = max(1, ponto_meta_semana_min($jornadaMinHoje, !empty($turnoHoje['definido'])));
 
     $acoes = [];
     foreach (allowed_ponto_actions($id, $dataPonto) as $tipo => $rotulo) {
@@ -134,7 +136,8 @@ function ponto_funcionario_payload(array $funcionario): array
         ],
         'semana' => [
             'texto' => ponto_fmt_hm($minutosSemana),
-            'percentual' => min(100, (int)round($minutosSemana / PONTO_SEMANA_PADRAO_MINUTOS * 100)),
+            'percentual' => min(100, (int)round($minutosSemana / $metaSemanaMin * 100)),
+            'meta' => ponto_fmt_hm($metaSemanaMin),
         ],
         'horarios' => [
             'almoco' => sprintf('%02d:00', PONTO_ALMOCO_HORA_INICIO),

@@ -396,6 +396,59 @@ function registros_do_dia(int $funcionarioId, string $data): array
     return $stmt->fetchAll();
 }
 
+/**
+ * Janela do turno que vira a noite, a partir do horário do cargo.
+ *
+ * Antes valiam dois números fixos para todo mundo: entrada a partir das 17:00 e
+ * saída até as 08:00 da manhã seguinte. Escala que vira a noite começando mais
+ * cedo (16:00-02:00) ou terminando mais tarde (22:00-10:00) não era reconhecida
+ * e a saída ficava "antes da entrada". Agora, se o cargo tem horário que vira a
+ * meia-noite (saída <= entrada), a janela se adapta a ele — com os 17:00/08:00 de
+ * sempre como mínimo, então nada muda para quem já funcionava.
+ *
+ * @return array{0:int,1:int} [a partir de que minuto a entrada é "da noite",
+ *                              até que minuto da madrugada a saída ainda é deste turno]
+ */
+function ponto_janela_noite_da_jornada(?array $jornada): array
+{
+    $limiar = 17 * 60;
+    $fim = 8 * 60;
+    foreach ((array)($jornada['turnos'] ?? []) as $t) {
+        if (empty($t['definido']) || !isset($t['entrada_min'], $t['saida_min'])) continue;
+        if ((int)$t['saida_min'] > (int)$t['entrada_min']) continue; // não vira a noite
+        /* Só baixa o limiar quando o turno que vira a noite começa ANTES das 17h
+         * (com 2 h de folga para quem chega adiantado); a partir das 17h o padrão
+         * de sempre já cobre, e nada muda para quem já funcionava. */
+        if ((int)$t['entrada_min'] < $limiar) {
+            $limiar = max(0, (int)$t['entrada_min'] - 120);
+        }
+        $fim = max($fim, min(1439, (int)$t['saida_min'] + 120));
+    }
+    return [$limiar, $fim];
+}
+
+function ponto_janela_noite(?int $funcionarioId): array
+{
+    static $cache = [];
+    if (!$funcionarioId) {
+        return ponto_janela_noite_da_jornada(null);
+    }
+    if (!isset($cache[$funcionarioId])) {
+        try {
+            $cache[$funcionarioId] = ponto_janela_noite_da_jornada(ponto_jornada_do_funcionario($funcionarioId));
+        } catch (Throwable $e) {
+            $cache[$funcionarioId] = ponto_janela_noite_da_jornada(null);
+        }
+    }
+    return $cache[$funcionarioId];
+}
+
+function ponto_min_para_hms(int $min): string
+{
+    $min = max(0, min(1439, $min));
+    return sprintf('%02d:%02d:59', intdiv($min, 60), $min % 60);
+}
+
 function registros_jornada_dia_com_turno_noite(int $funcionarioId, string $data): array
 {
     // Puxa as batidas do dia da jornada/PDF e também saídas da madrugada do dia seguinte.
@@ -406,7 +459,7 @@ function registros_jornada_dia_com_turno_noite(int $funcionarioId, string $data)
 
     $proximoDia = date('Y-m-d', strtotime($data . ' +1 day'));
     $iniMadrugada = $proximoDia . ' 00:00:00';
-    $fimMadrugada = $proximoDia . ' 08:00:59';
+    $fimMadrugada = $proximoDia . ' ' . ponto_min_para_hms(ponto_janela_noite($funcionarioId)[1]);
 
     $stmt = db()->prepare("
         SELECT * FROM ponto_registros
@@ -422,7 +475,7 @@ function registros_jornada_dia_com_turno_noite(int $funcionarioId, string $data)
 
     $temEntradaNoite = false;
     foreach ($rows as $r) {
-        if ((string)($r['data_ponto'] ?? '') === $data && (string)($r['tipo'] ?? '') === 'entrada' && ponto_eh_entrada_noite((string)($r['data_hora'] ?? ''))) {
+        if ((string)($r['data_ponto'] ?? '') === $data && (string)($r['tipo'] ?? '') === 'entrada' && ponto_eh_entrada_noite((string)($r['data_hora'] ?? ''), $funcionarioId)) {
             $temEntradaNoite = true;
             break;
         }
@@ -463,15 +516,22 @@ function registros_jornada_dia_com_turno_noite(int $funcionarioId, string $data)
  *
  * @param array $registros Batidas do funcionário no período (com data_ponto e data_hora).
  */
-function ponto_registros_do_dia_em_memoria(array $registros, string $data): array
+function ponto_registros_do_dia_em_memoria(array $registros, string $data, ?int $funcionarioId = null): array
 {
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $data)) {
         return [];
     }
 
+    /* A janela da noite é do cargo do funcionário. Sem o id explícito, pega da
+     * primeira batida (quem chama sempre passa as batidas de uma pessoa só). */
+    if ($funcionarioId === null && $registros) {
+        $primeira = reset($registros);
+        $funcionarioId = (int)($primeira['funcionario_id'] ?? 0) ?: null;
+    }
+
     $proximoDia = date('Y-m-d', strtotime($data . ' +1 day'));
     $iniMadrugada = $proximoDia . ' 00:00:00';
-    $fimMadrugada = $proximoDia . ' 08:00:59';
+    $fimMadrugada = $proximoDia . ' ' . ponto_min_para_hms(ponto_janela_noite($funcionarioId)[1]);
 
     $doDia = [];
     $madrugadaSeguinte = [];
@@ -484,7 +544,7 @@ function ponto_registros_do_dia_em_memoria(array $registros, string $data): arra
 
         if ($dataPonto === $data) {
             $doDia[] = $r;
-            if ($tipo === 'entrada' && ponto_eh_entrada_noite($dataHora)) {
+            if ($tipo === 'entrada' && ponto_eh_entrada_noite($dataHora, $funcionarioId)) {
                 $temEntradaNoite = true;
             }
             continue;
@@ -579,7 +639,7 @@ function ponto_normalizar_turno_noite_registros(array $registros): array
         $dataPonto = (string)($r['data_ponto'] ?? ponto_data_hora((string)($r['data_hora'] ?? '')));
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dataPonto)) continue;
         $min = ponto_minutos_hora((string)($r['data_hora'] ?? ''));
-        if ($min !== null && $min >= (17 * 60)) {
+        if ($min !== null && $min >= ponto_janela_noite((int)($r['funcionario_id'] ?? 0) ?: null)[0]) {
             $entradaNoitePorData[$chave($r)] = true;
         }
     }
@@ -595,8 +655,8 @@ function ponto_normalizar_turno_noite_registros(array $registros): array
         if (ponto_data_hora($dataHora) !== $dataPonto) continue;
 
         $min = ponto_minutos_hora($dataHora);
-        // Janela da madrugada para fechamento do turno noturno. Cobre 05:50 até 06:00 e também pequenos atrasos.
-        if ($min !== null && $min >= 0 && $min <= (8 * 60)) {
+        // Janela da madrugada para fechamento do turno noturno (do cargo; mínimo até 08:00).
+        if ($min !== null && $min >= 0 && $min <= ponto_janela_noite((int)($r['funcionario_id'] ?? 0) ?: null)[1]) {
             $ts = strtotime($dataHora . ' +1 day');
             if ($ts) {
                 $r['data_hora'] = date('Y-m-d H:i:s', $ts);
@@ -637,10 +697,10 @@ function ponto_ordem_jornada_label(int $numero): string
     return $numero . 'ª jornada';
 }
 
-function ponto_eh_entrada_noite(?string $dt): bool
+function ponto_eh_entrada_noite(?string $dt, ?int $funcionarioId = null): bool
 {
     $min = ponto_minutos_hora($dt);
-    return $min !== null && $min >= (17 * 60);
+    return $min !== null && $min >= ponto_janela_noite($funcionarioId)[0];
 }
 
 function ponto_eh_saida_madrugada_turno_noite(?string $dt): bool
@@ -1305,7 +1365,7 @@ const PONTO_WHATSAPP_ADMIN = '5511963331767';
  * do app. Não existe jornada contratual cadastrada por funcionário no banco;
  * quando isso for criado, troque estas constantes pela carga do cargo. */
 const PONTO_JORNADA_PADRAO_MINUTOS = 480;   // 8h por dia trabalhado
-const PONTO_SEMANA_PADRAO_MINUTOS = 2640;   // 44h por semana
+const PONTO_SEMANA_PADRAO_MINUTOS = 2640;   // 44h por semana (cargo sem horário)
 
 /* Trava de força bruta do PIN: o PIN tem só 4 dígitos, então sem isso dá para
  * varrer as 10 mil combinações em minutos. */
@@ -1791,6 +1851,9 @@ function ensure_cargo_horarios(): void
         'tolerancia_minutos' => "ADD COLUMN tolerancia_minutos INT NOT NULL DEFAULT 15",
         /* NULL = sem limite de chegada antecipada (não controla). */
         'antecipacao_minutos' => "ADD COLUMN antecipacao_minutos INT NULL",
+        /* 1 = dia sem nenhuma batida conta como falta (exceto domingo/feriado).
+         * 0 = não controla (escala 12x36 / revezamento, em que o dia de folga varia). */
+        'controla_falta' => "ADD COLUMN controla_falta TINYINT(1) NOT NULL DEFAULT 1",
     ];
     foreach ($novas as $coluna => $sql) {
         try {
@@ -1829,11 +1892,15 @@ function ponto_jornada_do_cargo(?array $cargo): array
         'intervalo_min' => 60,
         'tolerancia' => PONTO_TOLERANCIA_ATRASO_MIN,
         'antecipacao' => null,
+        'controla_falta' => 1,
         'entrada' => '',
         'saida' => '',
     ];
     if (!$cargo) {
         return $padrao;
+    }
+    if (isset($cargo['controla_falta']) && $cargo['controla_falta'] !== '') {
+        $padrao['controla_falta'] = (int)$cargo['controla_falta'] ? 1 : 0;
     }
 
     /* Sem horário cadastrado o sistema deduz 08:00/18:00 pela batida, mas a
@@ -1868,6 +1935,7 @@ function ponto_jornada_do_cargo(?array $cargo): array
         'intervalo_min' => $intervalo,
         'tolerancia' => $tolerancia,
         'antecipacao' => $antecipacao,
+        'controla_falta' => $padrao['controla_falta'],
         'entrada' => sprintf('%02d:%02d', intdiv($entradaMin, 60), $entradaMin % 60),
         'saida' => sprintf('%02d:%02d', intdiv($saidaMin, 60), $saidaMin % 60),
     ];
@@ -2027,6 +2095,10 @@ function ponto_jornada_do_funcionario(int $funcionarioId): array
      * ponto_turno_do_dia(); 'turnos_texto' é o rótulo para a tela. */
     $jornada['multi'] = count($turnos) > 1;
     $jornada['turnos_texto'] = $turnos ? ponto_turnos_texto($turnos) : '';
+    /* Se controla falta é do cargo (não dos horários extras, que não têm a flag). */
+    $jornada['controla_falta'] = ($cargo && isset($cargo['controla_falta']) && $cargo['controla_falta'] !== '')
+        ? ((int)$cargo['controla_falta'] ? 1 : 0)
+        : 1;
 
     return $cache[$funcionarioId] = $jornada;
 }
@@ -2332,6 +2404,9 @@ function ponto_tolerancias_texto(array $jornada): string
     } elseif (!empty($jornada['definido'])) {
         $partes[] = 'chegada antecipada sem limite';
     }
+    if (isset($jornada['controla_falta']) && !$jornada['controla_falta']) {
+        $partes[] = 'não conta falta';
+    }
     return implode(' · ', $partes);
 }
 
@@ -2424,4 +2499,186 @@ function ponto_fmt_hm_sinal(int $minutos): string
     $sinal = $minutos < 0 ? '-' : '+';
     $abs = abs($minutos);
     return $sinal . sprintf('%dh %02dm', intdiv($abs, 60), $abs % 60);
+}
+
+
+/**
+ * Meta da semana (para a barra "Semana" do app) a partir da jornada do cargo.
+ *
+ * Antes era sempre 44 h. Agora: jornada longa (10 h ou mais, típica de 12x36)
+ * conta 3,5 dias por semana (média da escala); jornada normal conta 5,5 dias,
+ * que dá as mesmas 44 h para quem faz 8 h por dia e ajusta quem faz 6 h ou 7 h.
+ * Cargo sem horário cadastrado continua com as 44 h.
+ */
+function ponto_meta_semana_min(int $jornadaMin, bool $horarioDefinido): int
+{
+    if (!$horarioDefinido || $jornadaMin <= 0) {
+        return PONTO_SEMANA_PADRAO_MINUTOS;
+    }
+    if ($jornadaMin >= 600) {
+        return (int)round($jornadaMin * 3.5);
+    }
+    return min(PONTO_SEMANA_PADRAO_MINUTOS, (int)round($jornadaMin * 5.5));
+}
+
+/* =============================================================================
+ * Folgas, feriados e FALTAS
+ *
+ * Regra do administrador: dia SEM NENHUMA batida é falta, menos domingo e
+ * feriado (que são folga). Se a pessoa trabalhar no domingo/feriado, o dia
+ * conta como dia normal (tem batida, então nunca é tratado como folga/falta).
+ *
+ * Feriados nacionais entram sozinhos. Municipais/estaduais e pontos facultativos
+ * (Carnaval, Corpus Christi...) o administrador cadastra em Configurações.
+ * ========================================================================== */
+
+/** Data da Páscoa (calendário gregoriano) em "Y-m-d". */
+function ponto_pascoa(int $ano): string
+{
+    $a = $ano % 19;
+    $b = intdiv($ano, 100);
+    $c = $ano % 100;
+    $d = intdiv($b, 4);
+    $e = $b % 4;
+    $f = intdiv($b + 8, 25);
+    $g = intdiv($b - $f + 1, 3);
+    $h = (19 * $a + $b - $d - $g + 15) % 30;
+    $i = intdiv($c, 4);
+    $k = $c % 4;
+    $l = (32 + 2 * $e + 2 * $i - $h - $k) % 7;
+    $m = intdiv($a + 11 * $h + 22 * $l, 451);
+    $mes = intdiv($h + $l - 7 * $m + 114, 31);
+    $dia = (($h + $l - 7 * $m + 114) % 31) + 1;
+    return sprintf('%04d-%02d-%02d', $ano, $mes, $dia);
+}
+
+/** @return array<string,string> data => nome */
+function ponto_feriados_nacionais(int $ano): array
+{
+    $f = [
+        "$ano-01-01" => 'Confraternização Universal',
+        date('Y-m-d', strtotime(ponto_pascoa($ano) . ' -2 days')) => 'Sexta-feira Santa',
+        "$ano-04-21" => 'Tiradentes',
+        "$ano-05-01" => 'Dia do Trabalho',
+        "$ano-09-07" => 'Independência do Brasil',
+        "$ano-10-12" => 'Nossa Senhora Aparecida',
+        "$ano-11-02" => 'Finados',
+        "$ano-11-15" => 'Proclamação da República',
+        "$ano-12-25" => 'Natal',
+    ];
+    if ($ano >= 2024) {
+        $f["$ano-11-20"] = 'Consciência Negra';
+    }
+    ksort($f);
+    return $f;
+}
+
+function ensure_feriados_table(): void
+{
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    db()->exec("CREATE TABLE IF NOT EXISTS ponto_feriados (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        data DATE NOT NULL,
+        nome VARCHAR(80) NOT NULL,
+        anual TINYINT(1) NOT NULL DEFAULT 0,
+        criado_em DATETIME NOT NULL,
+        KEY idx_fer_data (data)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+/** Feriados cadastrados pelo administrador (linhas cruas da tabela). */
+function ponto_feriados_extras(): array
+{
+    try {
+        ensure_feriados_table();
+        return db()->query("SELECT * FROM ponto_feriados ORDER BY data, id")->fetchAll();
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+/** Todos os feriados de um ano: nacionais + cadastrados. @return array<string,string> */
+function ponto_feriados_do_ano(int $ano): array
+{
+    static $cache = [];
+    if (isset($cache[$ano])) {
+        return $cache[$ano];
+    }
+    $f = ponto_feriados_nacionais($ano);
+    foreach (ponto_feriados_extras() as $e) {
+        $data = (string)$e['data'];
+        if (!preg_match('/^(\d{4})-(\d{2}-\d{2})$/', $data, $m)) continue;
+        if ((int)$m[1] === $ano) {
+            $f[$data] = (string)$e['nome'];
+        } elseif ((int)$e['anual'] === 1 && (int)$m[1] < $ano) {
+            $f[$ano . '-' . $m[2]] = (string)$e['nome'];
+        }
+    }
+    ksort($f);
+    return $cache[$ano] = $f;
+}
+
+/**
+ * Motivo da folga do dia, ou null se é dia de trabalho normal.
+ * Feriado tem preferência sobre domingo na hora de dar o nome.
+ */
+function ponto_folga_do_dia(string $data): ?string
+{
+    $ts = strtotime($data);
+    if (!$ts) return null;
+    $feriados = ponto_feriados_do_ano((int)date('Y', $ts));
+    if (isset($feriados[$data])) {
+        return $feriados[$data];
+    }
+    return (int)date('N', $ts) === 7 ? 'Domingo' : null;
+}
+
+/**
+ * Primeira e última batida do funcionário e se ele está ativo. Serve para não
+ * cobrar falta antes de ele começar nem depois de ele sair.
+ *
+ * @return array{primeiro:?string, ultimo:?string, ativo:bool}
+ */
+function ponto_funcionario_janela(int $funcionarioId): array
+{
+    static $cache = [];
+    if (isset($cache[$funcionarioId])) {
+        return $cache[$funcionarioId];
+    }
+    $stmt = db()->prepare("SELECT f.ativo, MIN(r.data_ponto) AS primeiro, MAX(r.data_ponto) AS ultimo
+        FROM ponto_funcionarios f
+        LEFT JOIN ponto_registros r ON r.funcionario_id = f.id
+        WHERE f.id = ?
+        GROUP BY f.id, f.ativo");
+    $stmt->execute([$funcionarioId]);
+    $row = $stmt->fetch();
+    return $cache[$funcionarioId] = [
+        'primeiro' => $row && $row['primeiro'] ? (string)$row['primeiro'] : null,
+        'ultimo' => $row && $row['ultimo'] ? (string)$row['ultimo'] : null,
+        'ativo' => !$row || (int)$row['ativo'] === 1,
+    ];
+}
+
+/**
+ * Esse dia SEM batida é falta? Só se: o cargo controla falta; o dia já acabou
+ * (hoje ainda dá tempo de bater); o funcionário já tinha começado (a partir da
+ * primeira batida dele) e, se foi desativado, ainda não tinha saído; e não é
+ * domingo nem feriado.
+ */
+function ponto_dia_eh_falta(string $dia, array $janela, bool $controlaFalta, ?string $hoje = null): bool
+{
+    if (!$controlaFalta) return false;
+    if ($dia >= ($hoje ?: today_sp())) return false;
+    if ($janela['primeiro'] === null || $dia < $janela['primeiro']) return false;
+    if (empty($janela['ativo']) && $janela['ultimo'] !== null && $dia > $janela['ultimo']) return false;
+    return ponto_folga_do_dia($dia) === null;
+}
+
+/** Jornada que se perde num dia de falta: a do turno principal do cargo (ou 8 h). */
+function ponto_jornada_padrao_min(array $jornada): int
+{
+    $turno = !empty($jornada['turnos']) ? ponto_turno_padrao($jornada['turnos']) : null;
+    return (int)($turno['jornada_min'] ?? $jornada['jornada_min'] ?? PONTO_JORNADA_PADRAO_MINUTOS);
 }

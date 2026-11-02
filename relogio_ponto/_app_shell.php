@@ -35,22 +35,32 @@ function app_mobile_head(string $title, string $bodyClass, string $extraCss = ''
 <meta content="black-translucent" name="apple-mobile-web-app-status-bar-style"/>
 <meta content="Ponto ACJ e VSS" name="apple-mobile-web-app-title"/>
 <?php endif; ?>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Fontes hospedadas aqui (assets/fonts): antes vinham do Google e, sem internet
+     ou com o Google bloqueado, os ícones viravam palavras e a letra mudava. -->
+<link as="font" crossorigin href="assets/fonts/material-symbols-outlined.woff2" rel="preload" type="font/woff2"/>
 <!-- CSS local. Antes isto era https://cdn.tailwindcss.com carregado em tempo
      de execução: nos celulares onde a CDN não abria (sem dados, wi-fi que
      bloqueia, navegador antigo) o app aparecia sem layout e sem conteúdo.
      Para regerar depois de criar classes novas, veja README-css.md. -->
 <link href="assets/tailwind.css?v=1.0.1" rel="stylesheet"/>
 <style>
+        @font-face {
+            font-family: "Inter"; font-style: normal; font-weight: 400 700; font-display: swap;
+            src: url(assets/fonts/inter-latin.woff2) format("woff2");
+        }
+        /* Subconjunto só com os ícones usados (22 KB). Ícone novo = incluir o nome
+           no arquivo (ver assets/vendor/LEIA-ME.txt). */
+        @font-face {
+            font-family: "Material Symbols Outlined"; font-style: normal; font-weight: 100 700; font-display: block;
+            src: url(assets/fonts/material-symbols-outlined.woff2) format("woff2");
+        }
         * { -webkit-tap-highlight-color: transparent; }
 
-        /* Os ícones vêm da fonte "Material Symbols" do Google. Esta regra fica
-           aqui (e não só no CSS do Google) por dois motivos:
+        /* Os ícones vêm da fonte "Material Symbols" (hospedada em assets/fonts).
+           Esta regra de tamanho/ligadura fica aqui por dois motivos:
            1. o tamanho e a ligadura funcionam mesmo se só o arquivo da fonte
               chegar;
-           2. se a fonte não carregar — celular sem dados, wi-fi que bloqueia o
-              Google — o navegador mostraria a palavra inteira ("calendar_month",
+           2. se a fonte não carregar, o navegador mostraria a palavra inteira ("calendar_month",
               "check_circle") e isso esticava e quebrava a tela. Com o limite de
               largura a palavra fica presa no espaço de um ícone e o layout se
               mantém. */

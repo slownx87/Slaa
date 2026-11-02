@@ -38,6 +38,15 @@ Tudo abaixo foi conferido lendo o código inteiro e **rodando o sistema de verda
 | 19 | Textos fixos ("8 horas"), classe CSS inexistente (`active:scale-98`) | Corrigidos |
 | 20 | Erros do PHP eram totalmente apagados (erro 500 sem pista) | Vão para o log de erros da Hostinger |
 
+### Rodada 2 (a pedido)
+| # | Problema | Situação |
+|---|----------|----------|
+| 21 | **Dia sem batida não era falta** (o relatório só ignorava o dia) | Agora é falta; **domingo e feriado = folga**; se trabalhar, conta como dia normal (seção 2b) |
+| 22 | Funcionário desativado **sumia do relatório** (quem saiu no meio do mês perdia as horas) | Continua no relatório e no CSV, marcado "(desativado)", se bateu ponto no período |
+| 23 | Turno da noite: regra fixa "entrada ≥ 17:00 / saída até 08:00" | Segue o horário do cargo (ex.: 16:00-02:00 e 22:00-10:00 passam a funcionar); o padrão antigo é o mínimo, então nada muda para quem já funcionava |
+| 24 | Barra "Semana" do app: 44 h para todo mundo | Meta pelo cargo (8 h/dia = 44 h como antes; 6 h/dia = 33 h; 12x36 = 38h30) |
+| 25 | **PDF e ícones dependiam de internet** (cdnjs e Google Fonts) | Bibliotecas do PDF, fonte Inter e ícones hospedados em `assets/` (testado com a internet bloqueada: PDF e ZIP saem, ícones aparecem) |
+
 ### Segurança menor
 CSV podia executar fórmula do Excel (nome começando com `=`) · sorteio de PIN usava `Math.random` ·
 JSON dentro de `<script>` sem escape de `</script>` · `diagnostico.php` agora confere as colunas novas e a proteção das fotos.
@@ -57,6 +66,17 @@ JSON dentro de `<script>` sem escape de `</script>` · `diagnostico.php` agora c
 - Cargo novo já vem com "Atrasado até 15" (o comportamento que existia); para não ter tolerância, apague o número.
 - O limite "Antes até" só funciona com entrada e saída preenchidas (precisa de um horário para medir).
 
+## 2b. Falta, folga e feriado
+
+Regra aplicada no relatório, CSV, PDF do espelho e no Histórico do funcionário (selo **FALTA**):
+
+- Dia **sem nenhuma batida** = **falta** (perde a jornada do cargo no "esperado" e no saldo do PDF).
+- **Domingo** e **feriado** sem batida = **folga** (não é falta). Se a pessoa **trabalhar**, o dia conta como dia normal.
+- Hoje ainda não é falta (dá tempo de bater). Antes da **primeira batida** do funcionário não é falta, e **desativado** não tem falta depois da última batida.
+- **Feriados nacionais entram sozinhos** (inclui Sexta-feira Santa, e Consciência Negra desde 2024). Em **Configurações → Feriados** cadastre os municipais/estaduais e pontos facultativos (ex.: 25/01 e 09/07 de São Paulo, Carnaval, Corpus Christi), com a opção "repete todo ano".
+- **Escala 12x36 / revezamento:** o dia de folga varia, então contar falta daria errado. Em **Cargos** há a caixinha *"Dia sem nenhuma batida conta como falta"* — **desligue nos cargos de escala**. Vem ligada em todos os cargos.
+- Não há cadastro de férias/atestado/abono: dia desses aparece como falta até alguém lançar a batida (ou desligar o cargo).
+
 ## 3. Como atualizar no servidor (ordem importa)
 
 1. **Faça backup** dos arquivos e do banco.
@@ -66,24 +86,28 @@ JSON dentro de `<script>` sem escape de `</script>` · `diagnostico.php` agora c
    ```sql
    ALTER TABLE ponto_cargos ADD COLUMN antecipacao_minutos INT NULL;
    ALTER TABLE ponto_cargo_turnos ADD COLUMN antecipacao_minutos INT NULL AFTER tolerancia_minutos;
+   ALTER TABLE ponto_cargos ADD COLUMN controla_falta TINYINT(1) NOT NULL DEFAULT 1;
    ```
+   (A tabela `ponto_feriados` também é criada sozinha.)
 5. Abra `diagnostico.php` e confira se está tudo verde.
 6. (Opcional) A senha do banco já circulou no .zip original; se um dia quiser trocar, é em hPanel → Bancos de dados.
 7. Teste: abra no navegador, **sem login**, o endereço direto de uma foto antiga (`/uploads/ponto_fotos/...`). Tem que dar **403/negado**.
 8. No celular, limpe/atualize o app (o service worker guarda arquivos fixos).
 
-## 4. O que NÃO foi mexido (decisão sua ou risco maior)
+## 4. O que NÃO foi mexido (por decisão sua)
 
-- **PIN de 4 dígitos é o único identificador.** A trava de tentativas é por IP e zera quando alguém acerta (quem tem o próprio PIN consegue testar PINs alheios em lotes). Recomendação: PIN + escolher o nome na tela, ou PIN maior.
-- Turno da noite: as regras "entrada ≥ 17:00" e "saída entre 00:00 e 08:00" estão fixas no código (`ponto_normalizar_turno_noite_registros`). Escala que vira a noite começando antes das 17h não é reconhecida.
-- Barra "Semana" do app usa 44 h fixas, não o cargo.
-- O PDF imprime **"Certificado digitalmente por Vss E Acj"**, mas não há assinatura digital de verdade — vale trocar o texto (risco jurídico).
-- O PDF baixa jsPDF/JSZip do cdnjs sem hash de integridade e os ícones vêm do Google Fonts: sem internet não exporta PDF/ícones viram texto. Ideal: hospedar localmente.
-- O relatório só lista funcionário **ativo** (quem saiu no meio do mês some do total) e não conta **faltas** (dia sem batida) — falta cadastrar escala/dias de trabalho por cargo.
-- "Excluir batida" apaga o histórico de ajustes dessa batida (fica só o texto no log).
-- O zip não trazia o **esquema do banco** (CREATE TABLE) nem o `ferramentas/gerar-css.py` citado no `README-css.md`. Classes novas do Tailwind não funcionam sem regerar o CSS; por isso as telas novas só usam classes que já existiam (+2 utilitários em `admin_css()`).
-- Pasta `app-android/` só tem ícones (não é um projeto Android).
+- **PIN**: identificação só por PIN e a trava de tentativas por IP ficam como estão.
+- **PDF "Certificado digitalmente por Vss E Acj"**: texto mantido.
+- **Logs**: "Excluir batida" continua apagando o histórico de ajustes dessa batida (fica só a linha no log).
+
+## 4b. Limites conhecidos
+
+- O limite de "Antes até" só funciona com entrada e saída preenchidas no cargo.
+- Ícone novo em alguma tela precisa entrar no subconjunto de `assets/fonts/material-symbols-outlined.woff2` (veja `assets/vendor/LEIA-ME.txt`); sem isso aparece o nome do ícone cortado.
+- Classes novas do Tailwind não funcionam sem regerar o CSS (o `gerar-css.py` não veio no zip).
+- O zip não trazia o esquema do banco; o pacote foi testado com um esquema reconstruído a partir das consultas.
+- `app-android/` só tem ícones (não é um projeto Android).
 
 ## 5. Testes
 
-`php tests/apuracao_teste.php` — 31 verificações da conta (tolerância, antecipação, turno da noite, virada de meia-noite). Não usa banco.
+`php tests/apuracao_teste.php` — 65 verificações da conta (tolerância, antecipação, turno da noite, virada de meia-noite, Páscoa/feriados, regra de falta, meta da semana). Não usa banco.
