@@ -1,0 +1,11 @@
+# Segredos locais — nunca versionar
+relogio_ponto/_config.local.php
+
+# Fotos das batidas (dado pessoal) ficam só no servidor
+relogio_ponto/uploads/ponto_fotos/*
+!relogio_ponto/uploads/ponto_fotos/.htaccess
+!relogio_ponto/uploads/ponto_fotos/.gitkeep
+
+# Lixo de editor / sistema
+.DS_Store
+*.swp

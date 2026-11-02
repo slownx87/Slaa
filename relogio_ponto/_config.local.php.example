@@ -1,0 +1,17 @@
+<?php
+/*
+ * Configuração local — COPIE este arquivo para "_config.local.php" e preencha.
+ *
+ * O _config.local.php NÃO é versionado (.gitignore) e NÃO deve ser enviado para
+ * nenhum repositório. Na Hostinger, crie-o direto no Gerenciador de Arquivos,
+ * dentro da mesma pasta do _config.php.
+ */
+
+define('DB_HOST', 'localhost');
+define('DB_NAME', 'nome_do_banco');
+define('DB_USER', 'usuario_do_banco');
+define('DB_PASS', 'senha_do_banco');
+
+/* Chave da página de emergência checar.php (erro 500). Sem esta linha a página
+ * fica desligada. Use algo longo e único; apague o checar.php quando não precisar. */
+// define('CHECAR_CHAVE', 'troque-por-uma-chave-longa-e-aleatoria');

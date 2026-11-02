@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<meta name="theme-color" content="#050810"/>
+<title>Sem conexão - ACJ e VSS</title>
+<style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 24px;
+        text-align: center;
+        font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: #fff;
+        background:
+            radial-gradient(circle at 15% 5%, rgba(59, 130, 246, .28), transparent 30%),
+            radial-gradient(circle at 90% 20%, rgba(0, 174, 239, .18), transparent 28%),
+            linear-gradient(135deg, #050810, #0a1322);
+    }
+    img { width: 96px; height: auto; filter: drop-shadow(0 0 3px rgba(255,255,255,.5)); }
+    h1 { font-size: 19px; margin: 0; }
+    p { font-size: 13px; line-height: 19px; color: #cbd5e1; margin: 0; max-width: 320px; }
+    button {
+        margin-top: 6px;
+        height: 48px;
+        padding: 0 28px;
+        border: 0;
+        border-radius: 999px;
+        background: #3b82f6;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    button:active { transform: scale(.96); }
+</style>
+</head>
+<body>
+<img alt="ACJ e VSS" src="assets/logo-vss-acj.png"/>
+<h1>Sem conexão com a internet</h1>
+<p>O aplicativo precisa de internet para registrar e consultar o ponto, porque os horários ficam guardados no servidor.</p>
+<p>Confira o wi-fi ou os dados móveis e tente de novo.</p>
+<button onclick="location.reload()" type="button">Tentar de novo</button>
+</body>
+</html>
