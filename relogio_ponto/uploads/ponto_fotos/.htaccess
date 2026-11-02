@@ -1,4 +1,11 @@
+# As fotos das batidas (rostos) NUNCA são servidas direto: o administrador as
+# abre por foto.php, que confere login e condomínio. O PHP lê o arquivo do disco
+# por dentro, então isto não atrapalha.
 Options -Indexes
-<FilesMatch "\.(php|phtml|php[0-9]|phar|cgi|pl|asp|aspx|jsp)$">
-Require all denied
-</FilesMatch>
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

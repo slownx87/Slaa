@@ -14,13 +14,20 @@
  * (precisa funcionar justamente quando o login está quebrado), então o acesso é
  * por chave no endereço:
  *
- *     https://seusite.com.br/checar.php?chave=A_CHAVE_ABAIXO
+ *     https://seusite.com.br/checar.php?chave=A_CHAVE_DO_CONFIG_LOCAL
  *
- * Troque a chave abaixo por outra qualquer se algum dia ela vazar.
+ * Troque a chave no _config.local.php se algum dia ela vazar.
  */
-const CHECAR_CHAVE = 'vss-acj-2026-checar';
+/* A chave NÃO fica mais escrita aqui (este arquivo vai para o git e qualquer um
+ * que o visse abriria a página). Ela vem do _config.local.php:
+ *     define('CHECAR_CHAVE', 'uma-chave-longa-e-unica');
+ * Sem essa linha a página fica desligada e responde "Não encontrado". */
+if (is_file(__DIR__ . '/_config.local.php')) {
+    require_once __DIR__ . '/_config.local.php';
+}
 
-if (!isset($_GET['chave']) || !hash_equals(CHECAR_CHAVE, (string)$_GET['chave'])) {
+if (!defined('CHECAR_CHAVE') || strlen((string)CHECAR_CHAVE) < 12
+    || !isset($_GET['chave']) || !hash_equals((string)CHECAR_CHAVE, (string)$_GET['chave'])) {
     http_response_code(404);
     header('Content-Type: text/plain; charset=utf-8');
     echo "Não encontrado.\n";

@@ -220,6 +220,7 @@ function rel_rows_espelho(array $registros, string $dataIni, string $dataFim, ?i
     $total = 0;
     $totalProgramado = 0;
     $totalAtraso = 0;
+    $totalTolerado = 0;
     foreach (rel_periodo_datas($dataIni, $dataFim) as $data) {
         $pontos = [];
         $intervalos = [];
@@ -271,11 +272,18 @@ function rel_rows_espelho(array $registros, string $dataIni, string $dataFim, ?i
                 $atrasoTxt = '--';
                 $saldoTxt = '--';
             } else {
-                $atrasoMin = max(0, $programadoMin - $minTrabalho);
+                /* Mesma apuração das telas (tolerância de atraso e limite de
+                 * chegada antecipada do cargo). O trabalhado bruto já inclui a
+                 * saída noturna estimada, quando houver. */
+                $ap = ponto_apurar_dia($eventosDia, $jornadaCargo, $minTrabalho);
+                $minTrabalho = (int)$ap['trabalho_min'];
+                $atrasoMin = (int)$ap['falta_min'];
                 $atrasoTxt = rel_fmt_min($atrasoMin);
-                $saldoTxt = rel_fmt_saldo($minTrabalho - $programadoMin);
+                /* Saldo: atraso tolerado não é dívida, então entra como cumprido. */
+                $saldoTxt = rel_fmt_saldo($minTrabalho + (int)$ap['atraso_tolerado_min'] - $programadoMin);
                 $totalProgramado += $programadoMin;
                 $totalAtraso += $atrasoMin;
+                $totalTolerado += (int)$ap['atraso_tolerado_min'];
             }
         }
 
@@ -298,7 +306,7 @@ function rel_rows_espelho(array $registros, string $dataIni, string $dataFim, ?i
         ];
     }
 
-    return [$linhas, $total, ['programado' => $totalProgramado, 'atraso' => $totalAtraso]];
+    return [$linhas, $total, ['programado' => $totalProgramado, 'atraso' => $totalAtraso, 'tolerado' => $totalTolerado]];
 }
 
 function rel_select_extras(string $tabela, string $alias, string $prefixo, array $cols): string
@@ -453,7 +461,7 @@ function espelho_pdf_dados(string $dataIni, string $dataFim, int $condominioId =
             'total_atraso' => rel_fmt_min((int)$espelho['totais']['atraso']),
             /* Saldo do período = o que trabalhou menos o que estava programado.
              * Antes era só o total trabalhado repetido com um "+" na frente. */
-            'total_saldo' => rel_fmt_saldo((int)$espelho['total_min'] - (int)$espelho['totais']['programado']),
+            'total_saldo' => rel_fmt_saldo((int)$espelho['total_min'] + (int)($espelho['totais']['tolerado'] ?? 0) - (int)$espelho['totais']['programado']),
         ];
     }
 

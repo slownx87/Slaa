@@ -15,9 +15,13 @@ if (VN_DEBUG) {
     ini_set('display_startup_errors', '1');
     error_reporting(E_ALL);
 } else {
+    /* Nada aparece na tela do visitante, mas os erros passam a ir para o log do
+     * servidor (antes error_reporting(0) apagava tudo e um erro 500 ficava sem
+     * pista nenhuma). Na Hostinger: hPanel > Avançado > Logs de erro do PHP. */
     ini_set('display_errors', '0');
     ini_set('display_startup_errors', '0');
-    error_reporting(0);
+    ini_set('log_errors', '1');
+    error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING);
 }
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -25,6 +29,10 @@ if (session_status() === PHP_SESSION_NONE) {
      * segurança, para não compartilhar login com outros sistemas no domínio. */
     $vnSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
     session_name('VNPONTOSESS');
+    /* O padrão do PHP apaga a sessão após ~24 min sem uso. Num celular/tablet de
+     * portaria que fica com a tela de ponto aberta o dia todo isso derrubava o
+     * token e a próxima batida dava "Sessão expirada". 12 h cobre qualquer turno. */
+    @ini_set('session.gc_maxlifetime', '43200');
     if (PHP_VERSION_ID >= 70300) {
         session_set_cookie_params([
             'lifetime' => 0,
@@ -111,6 +119,15 @@ function csrf_token(): string
     return $_SESSION['csrf_token'];
 }
 
+/* A tela pede um token novo quando recebe "Sessão expirada" e repete a ação
+ * sozinha (ver app_mobile_footer). Só devolve o token da PRÓPRIA sessão. */
+if (PHP_SAPI !== 'cli' && isset($_GET['novo_token']) && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode(['token' => csrf_token()]);
+    exit;
+}
+
 function check_csrf(): void
 {
     $token = $_POST['csrf_token'] ?? '';
@@ -161,6 +178,12 @@ function require_admin_or_first_install(): void
     if (ponto_admins_count() > 0) {
         require_admin();
     }
+}
+
+/** Admin que enxerga tudo: super admin ou sem condomínio vinculado. */
+function admin_eh_global(): bool
+{
+    return admin_nivel() === 'super_admin' || admin_condominio_id() === null;
 }
 
 function admin_condominio_id(): ?int
@@ -981,6 +1004,45 @@ function save_photo_base64(string $base64, int $funcionarioId, string $tipo): ar
     return [$pathRel, 'image/' . ($ext === 'jpg' ? 'jpeg' : $ext), strlen($bin)];
 }
 
+/**
+ * Troca só o horário de uma batida, escolhendo o DIA certo: entre ontem, o dia
+ * dela e amanhã, vale o mais próximo do horário antigo.
+ *
+ * Antes o dia ficava sempre o da batida antiga. Corrigir uma entrada de 23:50
+ * para 00:10 gravava 00:10 do MESMO dia (23h40 antes), e a saída da madrugada
+ * do turno noturno não podia ser corrigida para o outro lado da meia-noite.
+ *
+ * @param string $hora  "HH:MM"
+ * @param string $atual data_hora gravada hoje ("Y-m-d H:i:s")
+ */
+function ponto_data_hora_mais_proxima(string $hora, string $atual): string
+{
+    $tsAtual = strtotime($atual);
+    $base = date('Y-m-d', $tsAtual);
+    $melhor = $base . ' ' . $hora . ':00';
+    $menor = abs(strtotime($melhor) - $tsAtual);
+    foreach (['-1 day', '+1 day'] as $desloc) {
+        $cand = date('Y-m-d', strtotime($base . ' ' . $desloc)) . ' ' . $hora . ':00';
+        $dist = abs(strtotime($cand) - $tsAtual);
+        if ($dist < $menor) {
+            $menor = $dist;
+            $melhor = $cand;
+        }
+    }
+    return $melhor;
+}
+
+/** Latitude/longitude só entram no banco se forem números de verdade. */
+function ponto_coordenada($valor, float $limite): ?string
+{
+    $valor = trim((string)$valor);
+    if ($valor === '' || !is_numeric($valor)) {
+        return null;
+    }
+    $n = (float)$valor;
+    return abs($n) <= $limite ? rtrim(rtrim(number_format($n, 7, '.', ''), '0'), '.') : null;
+}
+
 function diff_minutes(?string $start, ?string $end): int
 {
     if (!$start || !$end) return 0;
@@ -1485,6 +1547,15 @@ function ponto_solicitacao_aprovar(int $solicitacaoId, ?int $adminId = null, str
 
     db()->beginTransaction();
     try {
+        /* Trava o pedido e confere de novo: se dois administradores tocassem em
+         * "Autorizar" ao mesmo tempo, os dois passavam pela checagem lá de cima
+         * e a batida era criada duas vezes. */
+        $trava = db()->prepare("SELECT status FROM ponto_solicitacoes WHERE id = ? FOR UPDATE");
+        $trava->execute([$solicitacaoId]);
+        if ((string)$trava->fetchColumn() !== 'pendente') {
+            throw new RuntimeException('Essa solicitação já foi respondida.');
+        }
+
         if ((string)($s['tipo_solicitacao'] ?? 'criar') === 'criar' || empty($s['registro_id'])) {
             $tipo = (string)($s['tipo_registro'] ?? '');
             if ($tipo === '' || tipo_ponto_label($tipo) === $tipo) {
@@ -1605,8 +1676,11 @@ function ponto_solicitacao_recusar(int $solicitacaoId, ?int $adminId = null, str
         throw new RuntimeException('Essa solicitação já foi respondida.');
     }
 
-    db()->prepare("UPDATE ponto_solicitacoes SET status = 'recusado', admin_id = ?, resposta_admin = ?, respondido_em = ? WHERE id = ?")
-        ->execute([$adminId, $resposta !== '' ? $resposta : null, now_sp(), $solicitacaoId]);
+    $upd = db()->prepare("UPDATE ponto_solicitacoes SET status = 'recusado', admin_id = ?, resposta_admin = ?, respondido_em = ? WHERE id = ? AND status = 'pendente'");
+    $upd->execute([$adminId, $resposta !== '' ? $resposta : null, now_sp(), $solicitacaoId]);
+    if ($upd->rowCount() < 1) {
+        throw new RuntimeException('Essa solicitação já foi respondida.');
+    }
 
     log_action('recusar_solicitacao', 'Recusou o pedido #' . str_pad((string)$s['id'], 5, '0', STR_PAD_LEFT), (int)$s['funcionario_id'], (int)$s['condominio_id']);
 }
@@ -1715,6 +1789,8 @@ function ensure_cargo_horarios(): void
         'hora_saida' => "ADD COLUMN hora_saida TIME NULL",
         'minutos_intervalo' => "ADD COLUMN minutos_intervalo INT NOT NULL DEFAULT 60",
         'tolerancia_minutos' => "ADD COLUMN tolerancia_minutos INT NOT NULL DEFAULT 15",
+        /* NULL = sem limite de chegada antecipada (não controla). */
+        'antecipacao_minutos' => "ADD COLUMN antecipacao_minutos INT NULL",
     ];
     foreach ($novas as $coluna => $sql) {
         try {
@@ -1752,6 +1828,7 @@ function ponto_jornada_do_cargo(?array $cargo): array
         'jornada_min' => PONTO_JORNADA_PADRAO_MINUTOS,
         'intervalo_min' => 60,
         'tolerancia' => PONTO_TOLERANCIA_ATRASO_MIN,
+        'antecipacao' => null,
         'entrada' => '',
         'saida' => '',
     ];
@@ -1768,7 +1845,12 @@ function ponto_jornada_do_cargo(?array $cargo): array
     /* Saída menor que a entrada = turno que vira a noite (18:00 → 06:00). */
     $bruto = $saidaMin > $entradaMin ? ($saidaMin - $entradaMin) : ((1440 - $entradaMin) + $saidaMin);
     $intervalo = max(0, (int)($cargo['minutos_intervalo'] ?? 60));
+    /* Atraso tolerado: 0 = sem tolerância (todo minuto de atraso conta). */
     $tolerancia = max(0, (int)($cargo['tolerancia_minutos'] ?? PONTO_TOLERANCIA_ATRASO_MIN));
+    /* Chegada antecipada tolerada: NULL/vazio = sem limite (não controla). */
+    $antecipacao = (isset($cargo['antecipacao_minutos']) && $cargo['antecipacao_minutos'] !== '')
+        ? max(0, (int)$cargo['antecipacao_minutos'])
+        : null;
 
     return [
         'definido' => true,
@@ -1777,6 +1859,7 @@ function ponto_jornada_do_cargo(?array $cargo): array
         'jornada_min' => max(0, $bruto - $intervalo),
         'intervalo_min' => $intervalo,
         'tolerancia' => $tolerancia,
+        'antecipacao' => $antecipacao,
         'entrada' => sprintf('%02d:%02d', intdiv($entradaMin, 60), $entradaMin % 60),
         'saida' => sprintf('%02d:%02d', intdiv($saidaMin, 60), $saidaMin % 60),
     ];
@@ -1796,10 +1879,20 @@ function ensure_cargo_turnos_table(): void
         hora_saida TIME NOT NULL,
         minutos_intervalo INT NOT NULL DEFAULT 60,
         tolerancia_minutos INT NOT NULL DEFAULT 15,
+        antecipacao_minutos INT NULL,
         descricao VARCHAR(60) NULL,
         criado_em DATETIME NOT NULL,
         KEY idx_turno_cargo (cargo_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    /* Tabela criada na versão anterior: ganha a coluna nova sozinha. */
+    try {
+        if (!column_exists('ponto_cargo_turnos', 'antecipacao_minutos')) {
+            db()->exec("ALTER TABLE ponto_cargo_turnos ADD COLUMN antecipacao_minutos INT NULL AFTER tolerancia_minutos");
+        }
+    } catch (Throwable $e) {
+        // segue sem a coluna: o turno extra usa a regra do cargo
+    }
 }
 
 /**
@@ -2070,45 +2163,168 @@ function ponto_turno_label(?string $dataHora): string
 }
 
 /**
- * Minutos de atraso de uma entrada. Zero quando chegou dentro da tolerância.
- * O atraso é contado a partir do horário esperado, não da tolerância: quem
- * bate 08:20 tem 20 minutos de atraso, não 5.
+ * Diferença, medida NO RELÓGIO, entre a batida e o horário esperado:
+ * de -720 (bem adiantado) a +720 (bem atrasado), dando a volta na meia-noite.
  *
- * A diferença é medida NO RELÓGIO, dando a volta na meia-noite. A subtração
- * direta quebrava justamente nos turnos que viram o dia — os mesmos que os
- * cargos de escala usam: entrada esperada 23:00 e batida às 00:05 dava
- * 5 - 1380 = negativo, o teste passava e o atraso de 1h05 sumia; ao contrário,
- * turno das 00:30 com batida às 23:00 (adiantado) virava 22h de "atraso".
+ * A subtração direta quebrava nos turnos que viram o dia: entrada esperada
+ * 23:00 e batida às 00:05 dava 5 - 1380 = negativo e o atraso de 1h05 sumia;
+ * ao contrário, turno das 00:30 com batida às 23:00 (adiantado) virava 22h de
+ * "atraso".
  */
-function ponto_atraso_entrada_minutos(?string $dataHora, ?array $jornada = null): int
+function ponto_diferenca_entrada_min(?string $dataHora, int $esperadoMin): ?int
 {
     $min = ponto_minutos_hora($dataHora);
     if ($min === null) {
-        return 0;
+        return null;
     }
-    $esperado = ponto_entrada_esperada_min($dataHora, $jornada);
-    $tolerancia = ($jornada && isset($jornada['tolerancia']))
-        ? (int)$jornada['tolerancia']
-        : PONTO_TOLERANCIA_ATRASO_MIN;
-
-    /* Menor diferença no relógio, de -12h (adiantado) a +12h (atrasado). */
-    $diferenca = $min - $esperado;
+    $diferenca = $min - $esperadoMin;
     if ($diferenca > 720) {
         $diferenca -= 1440;
     } elseif ($diferenca < -720) {
         $diferenca += 1440;
     }
+    return $diferenca;
+}
 
-    /* Adiantado (diferença negativa) nunca é atraso. */
+/**
+ * Minutos de atraso de uma entrada. Zero quando chegou dentro da tolerância
+ * do cargo. O atraso é contado a partir do horário esperado, não da tolerância:
+ * quem bate 08:20 (tolerância 15) tem 20 minutos de atraso, não 5.
+ * Adiantado nunca é atraso.
+ */
+function ponto_atraso_entrada_minutos(?string $dataHora, ?array $jornada = null): int
+{
+    $esperado = ponto_entrada_esperada_min($dataHora, $jornada);
+    $diferenca = ponto_diferenca_entrada_min($dataHora, $esperado);
+    if ($diferenca === null) {
+        return 0;
+    }
+    $tolerancia = ($jornada && isset($jornada['tolerancia']))
+        ? (int)$jornada['tolerancia']
+        : PONTO_TOLERANCIA_ATRASO_MIN;
+
     return $diferenca > $tolerancia ? $diferenca : 0;
 }
 
 /**
- * Atraso do dia: olha a primeira entrada da jornada. As entradas seguintes
- * (volta de intervalo, 2ª jornada) não contam como atraso de chegada.
- *
- * @return array{minutos:int, entrada:?string, esperado:string, turno:string}
+ * Chegada ANTECIPADA além do que o cargo permite. Devolve quantos minutos
+ * antes do horário a pessoa bateu, mas só quando passou do limite do cargo;
+ * zero se o cargo não tem limite (campo vazio) ou se ela chegou dentro dele.
  */
+function ponto_antecipacao_entrada_minutos(?string $dataHora, ?array $jornada = null): int
+{
+    if (!$jornada || !isset($jornada['antecipacao']) || $jornada['antecipacao'] === null) {
+        return 0;
+    }
+    $esperado = ponto_entrada_esperada_min($dataHora, $jornada);
+    $diferenca = ponto_diferenca_entrada_min($dataHora, $esperado);
+    if ($diferenca === null || $diferenca >= 0) {
+        return 0;
+    }
+    return (-$diferenca) > (int)$jornada['antecipacao'] ? -$diferenca : 0;
+}
+
+/**
+ * APURAÇÃO DO DIA — a conta que vale para telas, relatório e PDF.
+ *
+ * Parte do que a pessoa trabalhou de verdade e aplica as duas regras do cargo
+ * (Configurações > Cargos):
+ *
+ *  - Atraso tolerado: chegar até N min depois da entrada não conta como falta.
+ *    Passou de N, o atraso inteiro conta (08:20 com tolerância 15 = 20 min).
+ *    Tolerância 0/vazia = todo minuto conta.
+ *  - Chegada antecipada tolerada: chegar até N min antes é aceito. O que passar
+ *    disso (ex.: bater 07:20 para entrar 08:00 com limite de 10) NÃO conta como
+ *    trabalhado — só vale a partir de (entrada - N). Campo vazio = sem limite.
+ *
+ * Continua valendo a escolha do administrador: trabalhar além da jornada não
+ * gera crédito, então a falta nunca é negativa.
+ *
+ * @param int|null $trabalhoBruto Minutos já contados por quem chama (ex.: o PDF
+ *                                 inclui a saída noturna estimada). Null = conta aqui.
+ * @return array{turno:array, jornada_min:int, trabalho_bruto_min:int,
+ *               trabalho_min:int, atraso_chegada_min:int, atraso_tolerado_min:int,
+ *               antecipacao_min:int, antecipacao_excedida_min:int, falta_min:int,
+ *               entrada:?string, esperado_min:int}
+ */
+function ponto_apurar_dia(array $registros, ?array $jornada = null, ?int $trabalhoBruto = null): array
+{
+    $turno = ponto_turno_efetivo($registros, $jornada);
+    $jornadaMin = (int)($turno['jornada_min'] ?? PONTO_JORNADA_PADRAO_MINUTOS);
+
+    if ($trabalhoBruto === null) {
+        $trabalhoBruto = 0;
+        foreach (ponto_jornadas_from_registros($registros) as $j) {
+            $trabalhoBruto += trabalho_minutos_em_eventos($j['eventos'] ?? []);
+        }
+    }
+
+    /* Primeira entrada do dia (a mais cedo). */
+    $entradaDt = null;
+    foreach ($registros as $r) {
+        if ((string)($r['tipo'] ?? '') !== 'entrada') continue;
+        $dt = (string)($r['data_hora'] ?? '');
+        if ($dt !== '' && ($entradaDt === null || strcmp($dt, $entradaDt) < 0)) {
+            $entradaDt = $dt;
+        }
+    }
+
+    $esperadoMin = $entradaDt !== null
+        ? ponto_entrada_esperada_min($entradaDt, $turno)
+        : (int)($turno['entrada_min'] ?? PONTO_ENTRADA_COMERCIAL_MIN);
+
+    $atrasoChegada = 0;
+    $atrasoTolerado = 0;
+    $antecipacao = 0;
+    $antecipacaoExcedida = 0;
+
+    if ($entradaDt !== null) {
+        $diferenca = ponto_diferenca_entrada_min($entradaDt, $esperadoMin);
+        if ($diferenca !== null) {
+            $tolerancia = isset($turno['tolerancia']) ? (int)$turno['tolerancia'] : PONTO_TOLERANCIA_ATRASO_MIN;
+            if ($diferenca > 0) {
+                $atrasoChegada = $diferenca;
+                if ($diferenca <= $tolerancia) {
+                    $atrasoTolerado = $diferenca;
+                }
+            } elseif ($diferenca < 0) {
+                $antecipacao = -$diferenca;
+                $limite = $turno['antecipacao'] ?? null;
+                if ($limite !== null && $antecipacao > (int)$limite) {
+                    $antecipacaoExcedida = min($antecipacao - (int)$limite, $trabalhoBruto);
+                }
+            }
+        }
+    }
+
+    $trabalho = $trabalhoBruto - $antecipacaoExcedida;
+
+    return [
+        'turno' => $turno,
+        'jornada_min' => $jornadaMin,
+        'trabalho_bruto_min' => $trabalhoBruto,
+        'trabalho_min' => $trabalho,
+        'atraso_chegada_min' => $atrasoChegada,
+        'atraso_tolerado_min' => $atrasoTolerado,
+        'antecipacao_min' => $antecipacao,
+        'antecipacao_excedida_min' => $antecipacaoExcedida,
+        'falta_min' => max(0, $jornadaMin - ($trabalho + $atrasoTolerado)),
+        'entrada' => $entradaDt,
+        'esperado_min' => $esperadoMin,
+    ];
+}
+
+/** "atraso até 15 min · chegada até 10 min antes" — as regras do cargo em uma linha. */
+function ponto_tolerancias_texto(array $jornada): string
+{
+    $atraso = (int)($jornada['tolerancia'] ?? 0);
+    $partes = [$atraso > 0 ? 'atraso até ' . $atraso . ' min' : 'sem tolerância de atraso'];
+    if (isset($jornada['antecipacao']) && $jornada['antecipacao'] !== null) {
+        $partes[] = 'chegada até ' . (int)$jornada['antecipacao'] . ' min antes';
+    }
+    return implode(' · ', $partes);
+}
+
 /**
  * ATRASO DO DIA = quanto faltou para fechar a jornada.
  *
@@ -2117,44 +2333,37 @@ function ponto_atraso_entrada_minutos(?string $dataHora, ?array $jornada = null)
  * Trabalhar além da jornada NÃO gera crédito e não passa para outro dia — o
  * excedente é descartado, por isso o mínimo é sempre zero.
  *
+ * Desde a tolerância por cargo, o atraso de chegada que couber na tolerância é
+ * perdoado e a chegada antecipada acima do limite do cargo não é contada (ver
+ * ponto_apurar_dia).
+ *
  * @return array{minutos:int, trabalhado:int, jornada_min:int, entrada:?string,
- *               esperado:string, turno:string}
+ *               esperado:string, turno:string, atraso_tolerado:int,
+ *               antecipacao_excedida:int, atraso_chegada:int, antecipacao:int}
  */
-function ponto_falta_horas_do_dia(array $registros, ?array $jornada = null): array
+function ponto_falta_horas_do_dia(array $registros, ?array $jornada = null, ?int $trabalhoBruto = null): array
 {
-    $turno = ponto_turno_efetivo($registros, $jornada);
-    $jornadaMin = (int)($turno['jornada_min'] ?? PONTO_JORNADA_PADRAO_MINUTOS);
-
-    $trabalho = 0;
-    foreach (ponto_jornadas_from_registros($registros) as $j) {
-        $trabalho += trabalho_minutos_em_eventos($j['eventos'] ?? []);
-    }
-
-    $entradaDt = null;
-    foreach ($registros as $r) {
-        if ((string)($r['tipo'] ?? '') === 'entrada') {
-            $entradaDt = (string)($r['data_hora'] ?? '');
-            break;
-        }
-    }
-
-    $esperadoMin = $entradaDt !== null
-        ? ponto_entrada_esperada_min($entradaDt, $turno)
-        : (int)($turno['entrada_min'] ?? PONTO_ENTRADA_COMERCIAL_MIN);
+    $ap = ponto_apurar_dia($registros, $jornada, $trabalhoBruto);
+    $turno = $ap['turno'];
+    $esperadoMin = $ap['esperado_min'];
 
     return [
-        'minutos' => max(0, $jornadaMin - $trabalho),
-        'trabalhado' => $trabalho,
-        'jornada_min' => $jornadaMin,
-        'entrada' => $entradaDt ? date('H:i', strtotime($entradaDt)) : null,
+        'minutos' => $ap['falta_min'],
+        'trabalhado' => $ap['trabalho_min'],
+        'jornada_min' => $ap['jornada_min'],
+        'entrada' => $ap['entrada'] ? date('H:i', strtotime($ap['entrada'])) : null,
         'esperado' => sprintf('%02d:%02d', intdiv($esperadoMin, 60), $esperadoMin % 60),
         /* Horário do cargo que valeu neste dia — sem isto, um cargo de escala
          * mostra "atrasou" sem dizer contra qual dos horários. */
         'turno' => !empty($turno['definido'])
             ? ((string)($turno['horario'] ?? '') ?: (string)($turno['descricao'] ?? ''))
-            : ponto_turno_label($entradaDt),
+            : ponto_turno_label($ap['entrada']),
         'turno_horario' => (string)($turno['horario'] ?? ''),
         'turno_descricao' => (string)($turno['descricao'] ?? ''),
+        'atraso_chegada' => $ap['atraso_chegada_min'],
+        'atraso_tolerado' => $ap['atraso_tolerado_min'],
+        'antecipacao' => $ap['antecipacao_min'],
+        'antecipacao_excedida' => $ap['antecipacao_excedida_min'],
     ];
 }
 

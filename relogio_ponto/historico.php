@@ -24,8 +24,6 @@ function hist_time(?string $dt): string
     return $dt ? date('H:i', strtotime($dt)) : '--:--';
 }
 
-const HIST_TOLERANCIA_MINUTOS = 10; // abaixo disso o dia continua como "OK"
-
 function hist_dia_semana(string $data): string
 {
     $nomes = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
@@ -122,14 +120,11 @@ function hist_payload(int $funcionarioId, string $ym): array
         $fechado = $lista ? jornada_fechada($lista) : false;
         $intervaloAberto = open_interval($lista) !== null;
 
-        $trabalho = 0;
-        foreach ($jornadas as $jornada) {
-            $trabalho += trabalho_minutos_em_eventos($jornada['eventos'] ?? []);
-        }
-
-        /* Atraso = horas que faltaram para fechar a jornada do turno cumprido.
+        /* Atraso = horas que faltaram para fechar a jornada do turno cumprido,
+         * já com as tolerâncias do cargo (atraso tolerado e chegada antecipada).
          * Pega quem chegou tarde e quem saiu mais cedo, no mesmo número. */
         $falta = ponto_falta_horas_do_dia($lista, $jornadaCargo);
+        $trabalho = $falta['trabalhado'];
 
         if (!$fechado || $intervaloAberto) {
             $status = 'pendente';
@@ -144,6 +139,14 @@ function hist_payload(int $funcionarioId, string $ym): array
             $status = 'ok';
             $chip = 'OK';
             $resumo = 'Jornada cumprida' . ($falta['entrada'] ? ' · entrou ' . $falta['entrada'] : '');
+            if ($falta['atraso_tolerado'] > 0) {
+                $resumo .= ' (' . $falta['atraso_tolerado'] . ' min de atraso tolerado)';
+            }
+        }
+
+        /* Chegou antes do que o cargo permite: avisa que esse tempo não conta. */
+        if ($fechado && !$intervaloAberto && $falta['antecipacao_excedida'] > 0) {
+            $resumo .= ' · ' . $falta['antecipacao_excedida'] . ' min antes do permitido não contam';
         }
 
         /* Cargo de escala: dizer contra QUAL horário a conta foi feita. Sem
@@ -225,6 +228,8 @@ function hist_payload(int $funcionarioId, string $ym): array
             'texto' => ponto_fmt_hm($jornadaCargo['jornada_min']),
             'horarios' => (string)($jornadaCargo['turnos_texto'] ?? ''),
             'tolerancia' => $jornadaCargo['tolerancia'],
+            'antecipacao' => $jornadaCargo['antecipacao'] ?? null,
+            'regras' => ponto_tolerancias_texto($jornadaCargo),
         ],
         'dias' => $dias,
     ];
@@ -289,9 +294,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
                 $tipoSolicitacao = 'alterar';
                 $tipoRegistro = (string)$registro['tipo'];
                 $dataPonto = (string)$registro['data_ponto'];
-                $dataBase = date('Y-m-d', strtotime((string)$registro['data_hora']));
-                $novaDataHora = $dataBase . ' ' . $hora . ':00';
                 $dataHoraAtual = (string)$registro['data_hora'];
+                /* Dia mais próximo da batida atual: 23:50 -> 00:10 vira o dia seguinte. */
+                $novaDataHora = ponto_data_hora_mais_proxima($hora, $dataHoraAtual);
 
                 if ($novaDataHora === $dataHoraAtual) {
                     throw new RuntimeException('O horário informado é igual ao que já está registrado.');
@@ -448,7 +453,7 @@ $cssTela = <<<'CSS'
 </style>
 CSS;
 
-app_mobile_head('Histórico - ' . APP_NAME, 'bg-background text-on-background antialiased min-h-screen font-body-lg', $cssTela);
+app_mobile_head('Histórico - ' . APP_NAME, 'bg-background text-on-background antialiased min-h-screen font-body-lg', $cssTela, 'manifest.webmanifest');
 ?>
 <div id="app" data-csrf="<?= h($csrf) ?>">
 
@@ -1060,7 +1065,7 @@ Faltou uma batida
         {
             alvo: '#totalAtrasos',
             titulo: '3. Atrasos',
-            texto: 'É <b>o que faltou para fechar a jornada</b> do seu cargo em cada dia.<br><br>Pega tanto <b>chegar tarde</b> quanto <b>sair mais cedo</b>. Se você fez a jornada completa, não deve nada — mesmo tendo chegado um pouco depois.<br><br>Trabalhar além da jornada não gera hora extra.'
+            texto: 'É <b>o que faltou para fechar a jornada</b> do seu cargo em cada dia.<br><br>Pega tanto <b>chegar tarde</b> quanto <b>sair mais cedo</b>. Se você fez a jornada completa, não deve nada — mesmo tendo chegado um pouco depois.<br><br>Cada cargo tem uma <b>tolerância</b>: chegar dentro dela não conta como atraso.<br><br>Trabalhar além da jornada não gera hora extra.'
         },
         {
             alvo: '#cardAdvertencias',

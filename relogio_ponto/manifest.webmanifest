@@ -1,0 +1,23 @@
+{
+  "name": "Ponto - ACJ e VSS",
+  "short_name": "Ponto",
+  "description": "Relógio de ponto do funcionário: bater ponto, ver histórico e pedir correção.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "bater-ponto.php",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#050810",
+  "theme_color": "#050810",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "assets/icones/app-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icones/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icones/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Histórico", "short_name": "Histórico", "url": "historico.php" },
+    { "name": "Meus pedidos", "short_name": "Pedidos", "url": "solicitar-ajuste.php" }
+  ]
+}

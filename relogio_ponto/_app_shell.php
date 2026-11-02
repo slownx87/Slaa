@@ -380,7 +380,7 @@ function app_mobile_footer(string $csrf): void
     ?>
 <script>
     window.PontoApp = (function () {
-        const csrf = <?= json_encode($csrf, JSON_UNESCAPED_SLASHES) ?>;
+        let csrf = <?= json_encode($csrf, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
         const toastEl = document.getElementById('app-toast');
         let toastTimer = null;
 
@@ -395,7 +395,20 @@ function app_mobile_footer(string $csrf): void
             toastTimer = setTimeout(() => toastEl.classList.remove('show'), 4200);
         }
 
-        async function post(dados) {
+        /* Tela de ponto que fica aberta o dia todo: se o servidor esqueceu a
+           sessão, o token que a página trouxe não vale mais. Em vez de mandar a
+           pessoa "atualizar a página", pede um token novo e repete a ação uma vez. */
+        async function renovarToken() {
+            try {
+                const r = await fetch(window.location.pathname + '?novo_token=1', {
+                    credentials: 'same-origin', cache: 'no-store'
+                });
+                const j = await r.json();
+                if (j && j.token) csrf = j.token;
+            } catch (e) { /* sem rede: a repetição vai falhar com a mensagem normal */ }
+        }
+
+        async function post(dados, jaRepetiu) {
             const corpo = new URLSearchParams(Object.assign({ ajax: '1', csrf_token: csrf }, dados));
             const resposta = await fetch(window.location.pathname, {
                 method: 'POST',
@@ -405,7 +418,12 @@ function app_mobile_footer(string $csrf): void
             let json = null;
             try { json = await resposta.json(); } catch (e) { json = null; }
             if (!resposta.ok || !json || json.ok === false) {
-                throw new Error(json && json.error ? json.error : 'Não foi possível concluir. Tente novamente.');
+                const msg = json && json.error ? json.error : 'Não foi possível concluir. Tente novamente.';
+                if (!jaRepetiu && /Sess[ãa]o expirada/i.test(msg)) {
+                    await renovarToken();
+                    return post(dados, true);
+                }
+                throw new Error(msg);
             }
             return json;
         }

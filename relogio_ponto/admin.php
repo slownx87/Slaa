@@ -127,6 +127,7 @@ foreach ($batidas as $b) {
     $batidasPorFuncionario[(int)$b['funcionario_id']][] = $b;
 }
 $atrasoPorBatida = [];
+$cedoPorBatida = [];
 foreach ($batidasPorFuncionario as $fid => $regs) {
     usort($regs, function (array $a, array $b) {
         return strcmp((string)$a['data_hora'], (string)$b['data_hora']);
@@ -136,6 +137,8 @@ foreach ($batidasPorFuncionario as $fid => $regs) {
         if ((string)$r['tipo'] !== 'entrada') continue;
         /* Só a chegada conta: entrada de 2ª jornada não é atraso de chegada. */
         $atrasoPorBatida[(int)$r['id']] = ponto_atraso_entrada_minutos((string)$r['data_hora'], $turnoDoDia);
+        /* Chegou antes do limite que o cargo permite (só se o cargo tem limite). */
+        $cedoPorBatida[(int)$r['id']] = ponto_antecipacao_entrada_minutos((string)$r['data_hora'], $turnoDoDia);
         break;
     }
 }
@@ -258,7 +261,7 @@ Cargo
 <div class="flex gap-1" id="filtros">
 <button class="px-2 py-1 rounded-full bg-primary text-on-primary font-label-sm text-label-sm" data-filtro="" type="button">Todas</button>
 <button class="px-2 py-1 rounded-full bg-surface-container text-secondary font-label-sm text-label-sm" data-filtro="entrada" type="button">Entrada</button>
-<button class="px-2 py-1 rounded-full bg-surface-container text-secondary font-label-sm text-label-sm" data-filtro="almoco" type="button">Almoço</button>
+<button class="px-2 py-1 rounded-full bg-surface-container text-secondary font-label-sm text-label-sm" data-filtro="intervalo" type="button">Intervalos</button>
 <button class="px-2 py-1 rounded-full bg-surface-container text-secondary font-label-sm text-label-sm" data-filtro="saida" type="button">Saída</button>
 </div>
 </div>
@@ -273,7 +276,8 @@ Cargo
 <?php foreach ($batidas as $b):
     $tipo = (string)$b['tipo'];
     /* Só a chegada é avaliada quanto a atraso, e contra o horário do cargo. */
-    $atrasoMin = (int)($atrasoPorBatida[(int)$b['id']] ?? 0); ?>
+    $atrasoMin = (int)($atrasoPorBatida[(int)$b['id']] ?? 0);
+    $cedoMin = (int)($cedoPorBatida[(int)$b['id']] ?? 0); ?>
 <div class="cartao rounded-lg p-2.5 flex items-center justify-between gap-2 <?= $atrasoMin > 0 ? 'border-error/40' : '' ?>" data-tipo="<?= h($tipo) ?>">
 <div class="flex items-center gap-2 min-w-0">
 <div class="w-8 h-8 rounded-full <?= $atrasoMin > 0 ? 'bg-error/15 text-error' : 'bg-primary/10 text-primary' ?> flex items-center justify-center flex-shrink-0">
@@ -287,10 +291,12 @@ Cargo
 <div class="flex items-center gap-2 flex-shrink-0">
 <?php if ($atrasoMin > 0): ?>
 <span class="px-1.5 py-0.5 rounded-full bg-error/10 text-error border border-error/30 font-label-sm text-label-sm">+<?= (int)$atrasoMin ?>min</span>
+<?php elseif ($cedoMin > 0): ?>
+<span class="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/30 font-label-sm text-label-sm" title="Chegou antes do limite do cargo">-<?= (int)$cedoMin ?>min cedo</span>
 <?php endif; ?>
 <span class="font-body-md text-body-md <?= $atrasoMin > 0 ? 'text-error' : 'text-on-surface' ?> font-bold tabular-nums"><?= h(date('H:i', strtotime((string)$b['data_hora']))) ?></span>
 <?php if (!empty($b['foto_path'])): ?>
-<a class="w-7 h-7 rounded-full flex items-center justify-center text-secondary hover:text-primary" href="<?= h((string)$b['foto_path']) ?>" target="_blank" rel="noopener" aria-label="Ver foto">
+<a class="w-7 h-7 rounded-full flex items-center justify-center text-secondary hover:text-primary" href="foto.php?id=<?= (int)$b['id'] ?>" target="_blank" rel="noopener" aria-label="Ver foto">
 <span class="material-symbols-outlined text-[16px]">photo_camera</span>
 </a>
 <?php endif; ?>
@@ -477,7 +483,7 @@ Como usar o painel
         {
             alvo: '#listaBatidas',
             titulo: '2. Batidas de hoje',
-            texto: 'Tudo que foi batido hoje, em tempo real. Entradas <b>atrasadas ficam em vermelho</b> com os minutos.<br><br>O ícone de câmera abre a <b>foto</b> tirada na hora da batida.'
+            texto: 'Tudo que foi batido hoje, em tempo real. Entradas <b>atrasadas ficam em vermelho</b> com os minutos (já descontada a tolerância do cargo).<br><br>O ícone de câmera abre a <b>foto</b> tirada na hora da batida.'
         },
         {
             alvo: 'nav a[href="admin-funcionarios.php"]',
@@ -521,7 +527,7 @@ Como usar o painel
             let mostra = true;
             if (filtro === 'entrada') mostra = tipo === 'entrada';
             else if (filtro === 'saida') mostra = tipo === 'saida';
-            else if (filtro === 'almoco') mostra = tipo.indexOf('almoco') !== -1;
+            else if (filtro === 'intervalo') mostra = /almoco|janta|descanso/.test(tipo);
             linha.style.display = mostra ? '' : 'none';
         });
     });

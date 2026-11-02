@@ -82,18 +82,16 @@ function rel_calcular(string $ini, string $fim, int $condominioId = 0, int $func
             if (!$lista) continue;
             if (!jornada_fechada($lista) || open_interval($lista)) continue;
 
-            $minutos = 0;
-            foreach (ponto_jornadas_from_registros($lista) as $j) {
-                $minutos += trabalho_minutos_em_eventos($j['eventos'] ?? []);
-            }
-
-            $diasComBatida++;
-            $trabalho += $minutos;
-            /* Atraso = horas que faltaram para fechar a jornada do turno.
+            /* Atraso = horas que faltaram para fechar a jornada do turno, já com
+             * as tolerâncias do cargo (atraso tolerado e chegada antecipada).
              * Cargo de escala: o turno é escolhido dia a dia pela batida, e o
              * esperado do período soma o de cada dia — usar o horário
              * principal para o mês inteiro é o que quebrava a conta. */
             $falta = ponto_falta_horas_do_dia($lista, $jornadaCargo);
+            $minutos = (int)$falta['trabalhado'];
+
+            $diasComBatida++;
+            $trabalho += $minutos;
             $esperadoTotal += (int)$falta['jornada_min'];
             if ($falta['turno_horario'] !== '') {
                 $turnosUsados[$falta['turno_horario']] = ($turnosUsados[$falta['turno_horario']] ?? 0) + 1;
@@ -125,6 +123,8 @@ function rel_calcular(string $ini, string $fim, int $condominioId = 0, int $func
                 : 'sem horário no cargo',
             /* E quais deles a pessoa realmente cumpriu no período. */
             'turnos_usados' => rel_turnos_usados_texto($turnosUsados),
+            /* Tolerâncias do cargo, para quem lê o relatório entender o número. */
+            'regras' => !empty($jornadaCargo['definido']) ? ponto_tolerancias_texto($jornadaCargo) : '',
         ];
     }
     return $linhas;
@@ -308,6 +308,9 @@ admin_topbar();
 <p class="font-body-lg text-body-lg text-on-surface font-medium truncate"><?= h($l['nome']) ?></p>
 <p class="font-label-sm text-label-sm text-secondary truncate"><?= h($l['cargo']) ?> · <?= h($l['condominio']) ?></p>
 <p class="font-label-sm text-label-sm <?= $l['jornada'] === 'sem horário no cargo' ? 'text-error' : 'text-primary' ?>"><?= h($l['jornada']) ?></p>
+<?php if ($l['regras'] !== ''): ?>
+<p class="font-label-sm text-label-sm text-secondary truncate"><?= h($l['regras']) ?></p>
+<?php endif; ?>
 <?php if ($l['turnos_usados'] !== ''): ?>
 <p class="font-label-sm text-label-sm text-secondary truncate">cumpriu: <?= h($l['turnos_usados']) ?></p>
 <?php endif; ?>
@@ -343,8 +346,8 @@ admin_topbar();
 Atraso é <b>o que faltou para fechar a jornada</b> do cargo (pega chegar tarde e sair mais cedo).
 Trabalhar além da jornada não gera crédito.
 Cargo sem horário cai no padrão de <?= (int)(PONTO_JORNADA_PADRAO_MINUTOS / 60) ?>h por dia.
-Atraso é pelo horário da entrada: comercial até <?= h(sprintf('%02d:%02d', intdiv(PONTO_ENTRADA_COMERCIAL_MIN + PONTO_TOLERANCIA_ATRASO_MIN, 60), (PONTO_ENTRADA_COMERCIAL_MIN + PONTO_TOLERANCIA_ATRASO_MIN) % 60)) ?>
-e noturno até <?= h(sprintf('%02d:%02d', intdiv(PONTO_ENTRADA_NOTURNO_MIN + PONTO_TOLERANCIA_ATRASO_MIN, 60), (PONTO_ENTRADA_NOTURNO_MIN + PONTO_TOLERANCIA_ATRASO_MIN) % 60)) ?>.
+Cada cargo tem as suas tolerâncias (Configurações &rarr; Cargos): chegar atrasado dentro da tolerância não conta;
+chegar mais cedo do que o limite do cargo não soma horas.
 Dias em aberto não entram na conta.
 </p>
 </main>
@@ -358,7 +361,7 @@ Dias em aberto não entram na conta.
     const { toast } = window.PontoApp;
 
     /* O espelho já vem montado com a página, então o PDF sai na hora. */
-    const ESPELHO = <?= json_encode($espelho, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+    const ESPELHO = <?= json_encode($espelho, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
     const EMISSAO = <?= json_encode(date('d/m/Y H:i')) ?>;
     const EMISSAO_COMPLETA = <?= json_encode(date('d/m/Y H:i:s')) ?>;
 

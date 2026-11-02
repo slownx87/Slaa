@@ -149,7 +149,7 @@ $cssTela = <<<'CSS'
 </style>
 CSS;
 
-app_mobile_head('Meus pedidos - ' . APP_NAME, 'bg-background text-on-background antialiased min-h-screen', $cssTela);
+app_mobile_head('Meus pedidos - ' . APP_NAME, 'bg-background text-on-background antialiased min-h-screen', $cssTela, 'manifest.webmanifest');
 ?>
 <div id="app" data-csrf="<?= h($csrf) ?>" data-token="<?= h($funcionarioToken !== null ? $tokenUrl : '') ?>">
 

@@ -233,10 +233,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
                 throw new RuntimeException('Esse tipo de batida não está disponível agora. Confira a sequência do seu ponto.');
             }
 
+            /* Toque duplo / reenvio por internet lenta: a mesma batida chegava
+             * duas vezes e o dia ficava com "Entrada" repetida. Barra a mesma
+             * batida do mesmo funcionário dentro de 60 segundos. */
+            $stmtRep = db()->prepare("SELECT COUNT(*) FROM ponto_registros
+                WHERE funcionario_id = ? AND tipo = ? AND data_hora >= ?");
+            $stmtRep->execute([(int)$funcionario['id'], $tipo, date('Y-m-d H:i:s', time() - 60)]);
+            if ((int)$stmtRep->fetchColumn() > 0) {
+                throw new RuntimeException('Essa batida já foi registrada agora há pouco. Confira o seu histórico antes de bater de novo.');
+            }
+
             [$fotoPath, $fotoMime, $fotoSize] = save_photo_base64((string)($_POST['foto_base64'] ?? ''), (int)$funcionario['id'], $tipo);
 
-            $latPost = $_POST['latitude'] ?? '';
-            $lngPost = $_POST['longitude'] ?? '';
+            /* Só número de verdade vai para o banco (antes qualquer texto era gravado). */
+            $latPost = ponto_coordenada($_POST['latitude'] ?? '', 90.0);
+            $lngPost = ponto_coordenada($_POST['longitude'] ?? '', 180.0);
 
             $stmt = db()->prepare("INSERT INTO ponto_registros
                 (funcionario_id, condominio_id, tipo, data_ponto, data_hora, observacao, foto_path, foto_mime, foto_tamanho, latitude, longitude, ip, user_agent)
@@ -251,8 +262,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
                 $fotoPath,
                 $fotoMime,
                 $fotoSize,
-                $latPost !== '' ? $latPost : null,
-                $lngPost !== '' ? $lngPost : null,
+                $latPost,
+                $lngPost,
                 $_SERVER['REMOTE_ADDR'] ?? '',
                 $_SERVER['HTTP_USER_AGENT'] ?? '',
             ]);
@@ -380,7 +391,7 @@ $cssTela = <<<'CSS'
 </style>
 CSS;
 
-app_mobile_head(APP_NAME, 'bg-background text-on-background antialiased min-h-screen', $cssTela);
+app_mobile_head(APP_NAME, 'bg-background text-on-background antialiased min-h-screen', $cssTela, 'manifest.webmanifest');
 ?>
 <div id="app" data-csrf="<?= h($csrf) ?>">
 
@@ -845,7 +856,7 @@ Abrindo a câmera...
             </div>`;
             }
             return `
-            <button class="w-full flex items-center justify-between gap-2 rounded-xl border border-error/40 bg-surface-container-lowest p-2.5 text-left active:scale-98 transition-transform"
+            <button class="w-full flex items-center justify-between gap-2 rounded-xl border border-error/40 bg-surface-container-lowest p-2.5 text-left active:scale-95 transition-transform"
                     data-fechar-dia="${d.data}" data-dia-br="${d.data_br}" data-entrada="${d.entrada}" type="button">
                 <div class="min-w-0">
                     <p class="font-body-lg text-body-lg text-on-surface font-medium">${d.data_br}</p>
@@ -1276,7 +1287,7 @@ Abrindo a câmera...
         {
             alvo: '#horasHoje',
             titulo: '4. Horas de hoje',
-            texto: 'Mostra <b>quanto tempo você já trabalhou hoje</b>, descontando almoço e janta.<br><br>A barrinha azul embaixo enche conforme você chega perto das 8 horas do dia.'
+            texto: 'Mostra <b>quanto tempo você já trabalhou hoje</b>, descontando almoço e janta.<br><br>A barrinha azul embaixo enche conforme você chega perto da jornada do seu cargo.'
         },
         {
             alvo: '#horasSemana',
