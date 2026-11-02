@@ -50,11 +50,34 @@ function admin_horario_do_post(): array
     }
 
     $intervalo = max(0, min(480, (int)($_POST['minutos_intervalo'] ?? 60)));
-    $tolerancia = max(0, min(120, (int)($_POST['tolerancia_minutos'] ?? 15)));
-    return [$entrada, $saida, $intervalo, $tolerancia];
+
+    /* Atraso tolerado: campo vazio = SEM tolerância (0). Só cai no padrão de 15
+     * quando o campo nem veio no envio. */
+    if (!array_key_exists('tolerancia_minutos', $_POST)) {
+        $tolerancia = 15;
+    } else {
+        $bruto = trim((string)$_POST['tolerancia_minutos']);
+        if ($bruto !== '' && !ctype_digit($bruto)) {
+            throw new RuntimeException('Atraso tolerado: use só números (minutos), ou deixe em branco para não ter tolerância.');
+        }
+        $tolerancia = $bruto === '' ? 0 : min(180, (int)$bruto);
+    }
+
+    /* Chegada antecipada tolerada: campo vazio = SEM limite (NULL). */
+    $brutoAnt = trim((string)($_POST['antecipacao_minutos'] ?? ''));
+    if ($brutoAnt !== '' && !ctype_digit($brutoAnt)) {
+        throw new RuntimeException('Chegada antecipada: use só números (minutos), ou deixe em branco para não ter limite.');
+    }
+    $antecipacao = $brutoAnt === '' ? null : min(240, (int)$brutoAnt);
+
+    return [$entrada, $saida, $intervalo, $tolerancia, $antecipacao];
 }
 
 $soSuperAdmin = (admin_nivel() === 'super_admin');
+/* Cargo vale para TODOS os condomínios (a tabela não tem condomínio). Por isso só
+ * quem enxerga tudo mexe em cargo/horário/tolerância; antes qualquer admin de um
+ * condomínio podia mudar o horário de todos os outros. */
+$podeCargos = admin_eh_global();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
     try {
@@ -82,21 +105,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
         /* ------------------------------- cargos ------------------------------- */
         if ($acao === 'criar_cargo') {
+            if (!$podeCargos) throw new RuntimeException('Só o administrador geral cadastra cargo.');
             ensure_cargo_horarios();
             $nome = trim((string)($_POST['nome'] ?? ''));
             if (mb_strlen($nome) < 2) throw new RuntimeException('Informe o nome do cargo.');
 
-            [$entrada, $saida, $intervalo, $tolerancia] = admin_horario_do_post();
+            [$entrada, $saida, $intervalo, $tolerancia, $antecipacao] = admin_horario_do_post();
             $salario = (string)($_POST['salario'] ?? '');
             $salario = $salario !== '' ? (float)str_replace(',', '.', $salario) : null;
 
             $temSalario = column_exists('ponto_cargos', 'salario_base');
             if ($temSalario) {
-                db()->prepare("INSERT INTO ponto_cargos (nome, salario_base, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, ativo) VALUES (?, ?, ?, ?, ?, ?, 1)")
-                    ->execute([$nome, $salario, $entrada, $saida, $intervalo, $tolerancia]);
+                db()->prepare("INSERT INTO ponto_cargos (nome, salario_base, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, antecipacao_minutos, ativo) VALUES (?, ?, ?, ?, ?, ?, ?, 1)")
+                    ->execute([$nome, $salario, $entrada, $saida, $intervalo, $tolerancia, $antecipacao]);
             } else {
-                db()->prepare("INSERT INTO ponto_cargos (nome, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, ativo) VALUES (?, ?, ?, ?, ?, 1)")
-                    ->execute([$nome, $entrada, $saida, $intervalo, $tolerancia]);
+                db()->prepare("INSERT INTO ponto_cargos (nome, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, antecipacao_minutos, ativo) VALUES (?, ?, ?, ?, ?, ?, 1)")
+                    ->execute([$nome, $entrada, $saida, $intervalo, $tolerancia, $antecipacao]);
             }
             log_action('criar_cargo', 'Cadastrou cargo: ' . $nome . ($entrada ? ' (' . $entrada . '-' . $saida . ')' : ''));
             admin_json(['ok' => true, 'mensagem' => $nome . ' cadastrado.']);
@@ -104,22 +128,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
         /* Salva o horário de um cargo que já existe. */
         if ($acao === 'horario_cargo') {
+            if (!$podeCargos) throw new RuntimeException('Só o administrador geral altera o horário de um cargo.');
             ensure_cargo_horarios();
             $id = (int)($_POST['id'] ?? 0);
-            [$entrada, $saida, $intervalo, $tolerancia] = admin_horario_do_post();
+            $existe = db()->prepare("SELECT COUNT(*) FROM ponto_cargos WHERE id = ?");
+            $existe->execute([$id]);
+            if ((int)$existe->fetchColumn() < 1) throw new RuntimeException('Cargo não encontrado.');
+            [$entrada, $saida, $intervalo, $tolerancia, $antecipacao] = admin_horario_do_post();
 
-            db()->prepare("UPDATE ponto_cargos SET hora_entrada = ?, hora_saida = ?, minutos_intervalo = ?, tolerancia_minutos = ? WHERE id = ?")
-                ->execute([$entrada, $saida, $intervalo, $tolerancia, $id]);
+            db()->prepare("UPDATE ponto_cargos SET hora_entrada = ?, hora_saida = ?, minutos_intervalo = ?, tolerancia_minutos = ?, antecipacao_minutos = ? WHERE id = ?")
+                ->execute([$entrada, $saida, $intervalo, $tolerancia, $antecipacao, $id]);
 
             $jornada = ponto_jornada_do_cargo([
                 'hora_entrada' => $entrada, 'hora_saida' => $saida,
                 'minutos_intervalo' => $intervalo, 'tolerancia_minutos' => $tolerancia,
+                'antecipacao_minutos' => $antecipacao,
             ]);
-            log_action('horario_cargo', 'Definiu horário do cargo ID ' . $id . ': ' . ($entrada ?: 'sem horário'));
+            log_action('horario_cargo', 'Definiu horário do cargo ID ' . $id . ': ' . ($entrada ?: 'sem horário')
+                . ' · ' . ponto_tolerancias_texto($jornada));
             admin_json([
                 'ok' => true,
                 'mensagem' => $jornada['definido']
-                    ? 'Horário salvo. Jornada de ' . ponto_fmt_hm($jornada['jornada_min']) . ' por dia.'
+                    ? 'Horário salvo. Jornada de ' . ponto_fmt_hm($jornada['jornada_min']) . ' por dia (' . ponto_tolerancias_texto($jornada) . ').'
                     : 'Horário removido: esse cargo volta para a regra automática.',
             ]);
         }
@@ -127,23 +157,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
         /* Horário adicional: o cargo aceita entrar nesse horário também, sem
          * contar atraso. Serve para escala e revezamento. */
         if ($acao === 'criar_turno') {
+            if (!$podeCargos) throw new RuntimeException('Só o administrador geral altera o horário de um cargo.');
+            ensure_cargo_horarios();
             ensure_cargo_turnos_table();
             $cargoId = (int)($_POST['cargo_id'] ?? 0);
             if ($cargoId <= 0) throw new RuntimeException('Cargo inválido.');
 
-            [$entrada, $saida, $intervalo, $tolerancia] = admin_horario_do_post();
+            $stmtCargo = db()->prepare("SELECT * FROM ponto_cargos WHERE id = ?");
+            $stmtCargo->execute([$cargoId]);
+            $cargoRow = $stmtCargo->fetch();
+            if (!$cargoRow) throw new RuntimeException('Cargo não encontrado.');
+
+            /* O horário adicional segue as mesmas tolerâncias do cargo, a menos
+             * que o formulário mande outras. Antes era sempre 15 fixo. */
+            if (!array_key_exists('tolerancia_minutos', $_POST)) {
+                $_POST['tolerancia_minutos'] = (string)(int)($cargoRow['tolerancia_minutos'] ?? 15);
+            }
+            if (!array_key_exists('antecipacao_minutos', $_POST) && isset($cargoRow['antecipacao_minutos'])) {
+                $_POST['antecipacao_minutos'] = (string)$cargoRow['antecipacao_minutos'];
+            }
+            [$entrada, $saida, $intervalo, $tolerancia, $antecipacao] = admin_horario_do_post();
             if ($entrada === null) {
                 throw new RuntimeException('Preencha a entrada e a saída do horário adicional.');
             }
 
+            /* Não vale repetir a entrada de outro horário — inclusive a do principal. */
             $stmtDup = db()->prepare("SELECT COUNT(*) FROM ponto_cargo_turnos WHERE cargo_id = ? AND hora_entrada = ?");
             $stmtDup->execute([$cargoId, $entrada]);
-            if ((int)$stmtDup->fetchColumn() > 0) {
+            $principal = ponto_hhmm_para_min((string)($cargoRow['hora_entrada'] ?? ''));
+            if ((int)$stmtDup->fetchColumn() > 0 || $principal === ponto_hhmm_para_min($entrada)) {
                 throw new RuntimeException('Esse cargo já tem um horário começando às ' . $entrada . '.');
             }
 
-            db()->prepare("INSERT INTO ponto_cargo_turnos (cargo_id, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, descricao, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)")
-                ->execute([$cargoId, $entrada, $saida, $intervalo, $tolerancia,
+            db()->prepare("INSERT INTO ponto_cargo_turnos (cargo_id, hora_entrada, hora_saida, minutos_intervalo, tolerancia_minutos, antecipacao_minutos, descricao, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                ->execute([$cargoId, $entrada, $saida, $intervalo, $tolerancia, $antecipacao,
                     mb_substr(trim((string)($_POST['descricao'] ?? '')), 0, 60) ?: null, now_sp()]);
 
             $j = ponto_jornada_do_cargo(['hora_entrada' => $entrada, 'hora_saida' => $saida, 'minutos_intervalo' => $intervalo]);
@@ -152,6 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
         }
 
         if ($acao === 'excluir_turno') {
+            if (!$podeCargos) throw new RuntimeException('Só o administrador geral altera o horário de um cargo.');
             ensure_cargo_turnos_table();
             $id = (int)($_POST['id'] ?? 0);
             db()->prepare("DELETE FROM ponto_cargo_turnos WHERE id = ?")->execute([$id]);
@@ -160,6 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
         }
 
         if ($acao === 'status_cargo') {
+            if (!$podeCargos) throw new RuntimeException('Só o administrador geral ativa ou desativa um cargo.');
             $id = (int)($_POST['id'] ?? 0);
             db()->prepare("UPDATE ponto_cargos SET ativo = IF(ativo = 1, 0, 1) WHERE id = ?")->execute([$id]);
             log_action('alterar_status_cargo', 'Alterou status do cargo ID ' . $id);
@@ -297,6 +346,7 @@ admin_topbar(false);
 <section class="flex flex-col gap-2" id="cargos">
 <h2 class="font-headline-md text-headline-md text-primary">Cargos</h2>
 
+<?php if ($podeCargos): ?>
 <div class="cartao rounded-xl p-3 flex flex-col gap-2">
 <span class="font-label-bold text-label-bold text-secondary uppercase tracking-wider">Novo cargo</span>
 <input class="campo font-body-lg text-body-lg" id="cgNome" maxlength="80" placeholder="Ex: Porteiro" type="text"/>
@@ -315,19 +365,31 @@ admin_topbar(false);
 <label class="font-label-sm text-label-sm text-secondary" for="cgSaida">Saída</label>
 <input class="campo font-body-lg text-body-lg text-center tabular-nums" id="cgSaida" type="time"/>
 </div>
-<div class="flex flex-col gap-1">
+<div class="flex flex-col gap-1 col-span-2">
 <label class="font-label-sm text-label-sm text-secondary" for="cgIntervalo">Intervalo (min)</label>
 <input class="campo font-body-md text-body-md text-center" id="cgIntervalo" max="480" min="0" type="number" value="60"/>
 </div>
+</div>
+
+<span class="font-label-bold text-label-bold text-primary uppercase tracking-wider mt-1">Tolerâncias de chegada</span>
+<p class="font-label-sm text-label-sm text-secondary">Opcional. <b>Pode chegar atrasado até</b>: depois da entrada, esses minutos não contam como atraso (passou disso, conta tudo). <b>Pode chegar antes até</b>: quem bater mais cedo que isso não soma o tempo extra. Em branco = sem tolerância / sem limite.</p>
+<div class="grid grid-cols-2 gap-2">
 <div class="flex flex-col gap-1">
-<label class="font-label-sm text-label-sm text-secondary" for="cgTolerancia">Tolerância (min)</label>
-<input class="campo font-body-md text-body-md text-center" id="cgTolerancia" max="120" min="0" type="number" value="15"/>
+<label class="font-label-sm text-label-sm text-secondary" for="cgTolerancia">Atrasado até (min)</label>
+<input class="campo font-body-md text-body-md text-center" id="cgTolerancia" inputmode="numeric" max="180" min="0" placeholder="sem tolerância" type="number" value="15"/>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-sm text-label-sm text-secondary" for="cgAntecipacao">Antes até (min)</label>
+<input class="campo font-body-md text-body-md text-center" id="cgAntecipacao" inputmode="numeric" max="240" min="0" placeholder="sem limite" type="number"/>
 </div>
 </div>
 <p class="font-label-sm text-label-sm text-primary" id="cgPreview"></p>
 
 <button class="h-[46px] rounded-full border border-primary text-primary font-label-bold text-label-bold active:scale-95 transition-transform" data-criar="cargo" type="button">Criar cargo</button>
 </div>
+<?php else: ?>
+<p class="font-label-sm text-label-sm text-secondary">Os cargos, horários e tolerâncias valem para todos os condomínios, por isso só o administrador geral altera. Aqui você só consulta.</p>
+<?php endif; ?>
 
 <div class="flex flex-col gap-2">
 <?php foreach ($cargos as $c):
@@ -346,21 +408,25 @@ admin_topbar(false);
 sem horário — hora extra pelo padrão de 8h
 <?php endif; ?>
 </p>
+<p class="font-label-sm text-label-sm text-secondary"><?= h(ponto_tolerancias_texto($j)) ?></p>
 <?php if ($temSalario && !empty($c['salario_base'])): ?>
 <p class="font-label-sm text-label-sm text-secondary">R$ <?= h(number_format((float)$c['salario_base'], 2, ',', '.')) ?></p>
 <?php endif; ?>
 </div>
 </div>
+<?php if ($podeCargos): ?>
 <div class="flex gap-1 flex-shrink-0">
-<button class="w-8 h-8 rounded-full flex items-center justify-center text-primary" data-horario="<?= (int)$c['id'] ?>" type="button" aria-label="Definir horário">
+<button class="w-8 h-8 rounded-full flex items-center justify-center text-primary" data-horario="<?= (int)$c['id'] ?>" type="button" aria-label="Definir horário e tolerâncias">
 <span class="material-symbols-outlined text-[18px]">schedule</span>
 </button>
 <button class="w-8 h-8 rounded-full flex items-center justify-center <?= $on ? 'text-amber-500' : 'text-green-500' ?>" data-status="cargo" data-id="<?= (int)$c['id'] ?>" type="button" aria-label="Ativar ou desativar">
 <span class="material-symbols-outlined text-[18px]"><?= $on ? 'toggle_on' : 'toggle_off' ?></span>
 </button>
 </div>
+<?php endif; ?>
 </div>
 
+<?php if ($podeCargos): ?>
 <div class="hidden flex-col gap-2 border-t border-outline-variant/30 pt-2" data-painel-horario="<?= (int)$c['id'] ?>">
 <div class="grid grid-cols-2 gap-2">
 <div class="flex flex-col gap-1">
@@ -371,26 +437,33 @@ sem horário — hora extra pelo padrão de 8h
 <label class="font-label-sm text-label-sm text-secondary">Saída</label>
 <input class="campo font-body-md text-body-md text-center tabular-nums" data-campo="saida" type="time" value="<?= h($j['saida']) ?>"/>
 </div>
-<div class="flex flex-col gap-1">
+<div class="flex flex-col gap-1 col-span-2">
 <label class="font-label-sm text-label-sm text-secondary">Intervalo (min)</label>
 <input class="campo font-body-md text-body-md text-center" data-campo="intervalo" max="480" min="0" type="number" value="<?= (int)$j['intervalo_min'] ?>"/>
 </div>
 <div class="flex flex-col gap-1">
-<label class="font-label-sm text-label-sm text-secondary">Tolerância (min)</label>
-<input class="campo font-body-md text-body-md text-center" data-campo="tolerancia" max="120" min="0" type="number" value="<?= (int)$j['tolerancia'] ?>"/>
+<label class="font-label-sm text-label-sm text-secondary">Atrasado até (min)</label>
+<input class="campo font-body-md text-body-md text-center" data-campo="tolerancia" inputmode="numeric" max="180" min="0" placeholder="sem tolerância" type="number" value="<?= (int)($c['tolerancia_minutos'] ?? 15) > 0 ? (int)$c['tolerancia_minutos'] : '' ?>"/>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-sm text-label-sm text-secondary">Antes até (min)</label>
+<input class="campo font-body-md text-body-md text-center" data-campo="antecipacao" inputmode="numeric" max="240" min="0" placeholder="sem limite" type="number" value="<?= isset($c['antecipacao_minutos']) && $c['antecipacao_minutos'] !== null ? (int)$c['antecipacao_minutos'] : '' ?>"/>
 </div>
 </div>
-<button class="h-[40px] rounded-full bg-primary text-on-primary font-label-bold text-label-bold" data-salvar-horario="<?= (int)$c['id'] ?>" type="button">Salvar horário</button>
+<p class="font-label-sm text-label-sm text-secondary"><b>Atrasado até</b>: minutos depois da entrada que não contam como atraso (passou disso, conta tudo). <b>Antes até</b>: quem bater mais cedo que isso não soma o tempo extra. Em branco = sem tolerância / sem limite. O limite de "antes" só funciona com entrada e saída preenchidas.</p>
+<p class="font-label-sm text-label-sm text-primary" data-preview="<?= (int)$c['id'] ?>"></p>
+<button class="h-[40px] rounded-full bg-primary text-on-primary font-label-bold text-label-bold" data-salvar-horario="<?= (int)$c['id'] ?>" type="button">Salvar horário e tolerâncias</button>
 
 <div class="border-t border-outline-variant/30 pt-2 flex flex-col gap-2">
 <span class="font-label-bold text-label-bold text-secondary uppercase tracking-wider">Outros horários aceitos</span>
-<p class="font-label-sm text-label-sm text-secondary">Quem faz escala pode entrar em qualquer um destes sem contar atraso.</p>
+<p class="font-label-sm text-label-sm text-secondary">Quem faz escala pode entrar em qualquer um destes sem contar atraso. Cada horário novo segue as tolerâncias do cargo.</p>
 
 <?php $extras = ponto_turnos_extras_do_cargo((int)$c['id']); ?>
 <?php foreach ($extras as $t): $je = ponto_jornada_do_cargo($t); ?>
 <div class="flex items-center justify-between gap-2 rounded-lg border border-outline-variant/40 p-2">
 <div class="min-w-0">
 <p class="font-body-md text-body-md text-on-surface"><?= h($je['entrada']) ?> às <?= h($je['saida']) ?> · <?= h(ponto_fmt_hm($je['jornada_min'])) ?></p>
+<p class="font-label-sm text-label-sm text-secondary"><?= h(ponto_tolerancias_texto($je)) ?></p>
 <?php if (!empty($t['descricao'])): ?><p class="font-label-sm text-label-sm text-secondary"><?= h((string)$t['descricao']) ?></p><?php endif; ?>
 </div>
 <button class="w-7 h-7 rounded-full flex items-center justify-center text-error flex-shrink-0" data-excluir-turno="<?= (int)$t['id'] ?>" type="button" aria-label="Remover">
@@ -408,6 +481,7 @@ sem horário — hora extra pelo padrão de 8h
 <button class="h-[38px] rounded-full border border-primary text-primary font-label-bold text-label-bold" data-add-turno="<?= (int)$c['id'] ?>" type="button">+ Adicionar horário</button>
 </div>
 </div>
+<?php endif; ?>
 </div>
 <?php endforeach; ?>
 </div>
@@ -529,7 +603,8 @@ sem horário — hora extra pelo padrão de 8h
                     hora_entrada: $('#cgEntrada').value,
                     hora_saida: $('#cgSaida').value,
                     minutos_intervalo: $('#cgIntervalo').value,
-                    tolerancia_minutos: $('#cgTolerancia').value
+                    tolerancia_minutos: $('#cgTolerancia').value,
+                    antecipacao_minutos: $('#cgAntecipacao').value
                 }, true);
             } else if (tipo === 'advertencia') {
                 enviar({
@@ -577,15 +652,47 @@ sem horário — hora extra pelo padrão de 8h
              + String(liquido % 60).padStart(2, '0') + 'm';
     }
 
+    /* "HH:MM" mais/menos N minutos, dando a volta na meia-noite. */
+    function somarMin(hhmm, delta) {
+        const t = ((Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5)) + delta) % 1440 + 1440) % 1440;
+        return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0');
+    }
+
+    /* Frase que mostra o que as tolerâncias significam na prática. */
+    function descreverJanela(entrada, atraso, antes) {
+        if (!entrada) return '';
+        const a = atraso === '' ? 0 : Number(atraso);
+        const fim = somarMin(entrada, a);
+        if (antes === '') {
+            return a > 0
+                ? 'Chegando até ' + fim + ' não conta atraso. Chegar antes não tem limite.'
+                : 'Sem tolerância: qualquer minuto depois de ' + entrada + ' conta atraso. Chegar antes não tem limite.';
+        }
+        const ini = somarMin(entrada, -Number(antes));
+        return 'Chegando entre ' + ini + ' e ' + fim + ': sem atraso e sem desconto. Antes de ' + ini + ' o tempo extra não conta.';
+    }
+
     function atualizarPreview() {
         const j = calcularJornada($('#cgEntrada').value, $('#cgSaida').value, $('#cgIntervalo').value);
-        $('#cgPreview').textContent = j
-            ? 'Jornada de ' + j + ' por dia. O que passar disso vira hora extra.'
-            : '';
+        const janela = descreverJanela($('#cgEntrada').value, $('#cgTolerancia').value, $('#cgAntecipacao').value);
+        $('#cgPreview').textContent = (j ? 'Jornada de ' + j + ' por dia. O que passar disso não gera crédito. ' : '') + janela;
     }
-    ['#cgEntrada', '#cgSaida', '#cgIntervalo'].forEach((sel) => {
+    ['#cgEntrada', '#cgSaida', '#cgIntervalo', '#cgTolerancia', '#cgAntecipacao'].forEach((sel) => {
         const el = $(sel);
         if (el) el.addEventListener('input', atualizarPreview);
+    });
+    atualizarPreview();
+
+    /* Prévia de cada cargo já cadastrado, dentro do painel dele. */
+    document.querySelectorAll('[data-painel-horario]').forEach((painel) => {
+        const id = painel.dataset.painelHorario;
+        const alvo = painel.querySelector('[data-preview="' + id + '"]');
+        const campo = (nome) => painel.querySelector('[data-campo="' + nome + '"]');
+        const atualizar = () => {
+            if (alvo) alvo.textContent = descreverJanela(campo('entrada').value, campo('tolerancia').value, campo('antecipacao').value);
+        };
+        ['entrada', 'tolerancia', 'antecipacao'].forEach((n) => campo(n).addEventListener('input', atualizar));
+        atualizar();
     });
 
     document.addEventListener('click', (evento) => {
@@ -608,7 +715,8 @@ sem horário — hora extra pelo padrão de 8h
                 hora_entrada: campo('entrada'),
                 hora_saida: campo('saida'),
                 minutos_intervalo: campo('intervalo'),
-                tolerancia_minutos: campo('tolerancia')
+                tolerancia_minutos: campo('tolerancia'),
+                antecipacao_minutos: campo('antecipacao')
             }, true);
         }
     });
@@ -625,7 +733,6 @@ sem horário — hora extra pelo padrão de 8h
                 hora_entrada: campo('entrada'),
                 hora_saida: campo('saida'),
                 minutos_intervalo: campo('intervalo'),
-                tolerancia_minutos: 15,
                 descricao: campo('descricao')
             }, true);
             return;

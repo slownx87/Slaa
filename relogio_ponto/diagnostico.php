@@ -63,6 +63,24 @@ foreach (['registro_id', 'tipo_solicitacao', 'data_hora_atual'] as $c) {
     }
 }
 
+/* Tolerâncias por cargo (criadas sozinhas na primeira vez que a tela de cargos abre). */
+try { ensure_cargo_horarios(); ensure_cargo_turnos_table(); } catch (Throwable $e) { /* aparece na lista */ }
+foreach (['tolerancia_minutos', 'antecipacao_minutos'] as $c) {
+    try {
+        $ok = column_exists('ponto_cargos', $c);
+        diag_item('Coluna ponto_cargos.' . $c, $ok, $ok ? 'Existe' : 'Não existe — abra Configurações > Cargos uma vez, ou rode o ALTER TABLE do LEIA-ME');
+    } catch (Throwable $e) {
+        diag_item('Coluna ponto_cargos.' . $c, false, $e->getMessage());
+    }
+}
+
+/* As fotos (rostos) só podem sair por foto.php. Confere se a pasta está fechada. */
+$htFotos = __DIR__ . '/uploads/ponto_fotos/.htaccess';
+$fechada = is_file($htFotos) && strpos((string)file_get_contents($htFotos), 'Require all denied') !== false;
+diag_item('Pasta de fotos fechada', $fechada,
+    $fechada ? 'uploads/ponto_fotos/.htaccess bloqueia o acesso direto (as fotos abrem só por foto.php, com login)'
+             : 'Falta o .htaccess em uploads/ponto_fotos — sem ele as fotos abrem para quem tiver o link');
+
 /* Pedidos antigos que não guardam qual batida é. */
 try {
     if (table_exists('ponto_solicitacoes') && column_exists('ponto_solicitacoes', 'tipo_registro')) {

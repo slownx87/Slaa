@@ -165,12 +165,19 @@ if (isset($_GET['exportar'])) {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $nome . '"');
 
+    /* Excel/LibreOffice executam célula que começa com = + - @ : um nome de
+     * funcionário assim viraria fórmula. O apóstrofo na frente a torna texto. */
+    $seguro = function ($v) {
+        $v = (string)$v;
+        return ($v !== '' && strpos("=+-@\t\r", $v[0]) !== false) ? "'" . $v : $v;
+    };
+
     $saida = fopen('php://output', 'w');
     fwrite($saida, "\xEF\xBB\xBF"); // BOM para o Excel abrir com acento certo
     fputcsv($saida, ['Funcionario', 'Cargo', 'Condominio', 'Horarios do cargo', 'Horarios cumpridos', 'Dias com batida', 'Horas trabalhadas', 'Atrasos', 'Dias com atraso', 'Esperado'], ';');
     foreach ($linhas as $l) {
         fputcsv($saida, [
-            $l['nome'], $l['cargo'], $l['condominio'],
+            $seguro($l['nome']), $seguro($l['cargo']), $seguro($l['condominio']),
             $l['jornada'], $l['turnos_usados'], $l['dias'],
             fmt_minutes($l['trabalho_min']),
             fmt_minutes($l['atrasos_min']), $l['dias_atrasados'], fmt_minutes($l['esperado_min']),

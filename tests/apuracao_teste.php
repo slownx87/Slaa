@@ -108,7 +108,7 @@ $sem = jornada_de(['id' => 3]);
 $a = ponto_apurar_dia(dia($D, '08:10', '12:00', '13:00', '17:10'), $sem);
 confere('sem horário cadastrado: regra automática de 8h, 08:10 é tolerado', $a['falta_min'], 0);
 confere('textos', ponto_tolerancias_texto(jornada_de($comLimite)), 'atraso até 15 min · chegada até 10 min antes');
-confere('textos (sem nada)', ponto_tolerancias_texto(jornada_de($semTol)), 'sem tolerância de atraso');
+confere('textos (sem tolerância, sem limite)', ponto_tolerancias_texto(jornada_de($semTol)), 'sem tolerância de atraso · chegada antecipada sem limite');
 
 echo "Troca de horário de uma batida\n";
 confere('23:50 -> 00:10 passa para o dia seguinte', ponto_data_hora_mais_proxima('00:10', '2026-08-03 23:50:00'), '2026-08-04 00:10:00');

@@ -1836,6 +1836,14 @@ function ponto_jornada_do_cargo(?array $cargo): array
         return $padrao;
     }
 
+    /* Sem horário cadastrado o sistema deduz 08:00/18:00 pela batida, mas a
+     * tolerância de atraso que o administrador escolheu para o cargo continua
+     * valendo. (O limite de chegada antecipada precisa de um horário fixo para
+     * ter contra o que medir, então só funciona com entrada/saída preenchidas.) */
+    if (isset($cargo['tolerancia_minutos']) && $cargo['tolerancia_minutos'] !== '') {
+        $padrao['tolerancia'] = max(0, (int)$cargo['tolerancia_minutos']);
+    }
+
     $entradaMin = ponto_hhmm_para_min((string)($cargo['hora_entrada'] ?? ''));
     $saidaMin = ponto_hhmm_para_min((string)($cargo['hora_saida'] ?? ''));
     if ($entradaMin === null || $saidaMin === null) {
@@ -2321,6 +2329,8 @@ function ponto_tolerancias_texto(array $jornada): string
     $partes = [$atraso > 0 ? 'atraso até ' . $atraso . ' min' : 'sem tolerância de atraso'];
     if (isset($jornada['antecipacao']) && $jornada['antecipacao'] !== null) {
         $partes[] = 'chegada até ' . (int)$jornada['antecipacao'] . ' min antes';
+    } elseif (!empty($jornada['definido'])) {
+        $partes[] = 'chegada antecipada sem limite';
     }
     return implode(' · ', $partes);
 }

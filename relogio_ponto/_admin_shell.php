@@ -117,6 +117,10 @@ function admin_css(): string
     .sheet-folha.aberto { transform: translateY(0); }
 
     .cartao { background: rgba(17,24,39,.86); border:1px solid rgba(148,163,184,.18); }
+    /* Utilitários que o tailwind.css compilado não tem (ele só traz as classes que
+       existiam quando foi gerado — ver README-css.md). */
+    .items-stretch { align-items: stretch; }
+    .w-11 { width: 2.75rem; }
     .linha-toque { transition: background-color .2s ease, transform .12s ease; }
     .linha-toque:active { background-color: rgba(59,130,246,.12); transform: scale(.99); }
 </style>

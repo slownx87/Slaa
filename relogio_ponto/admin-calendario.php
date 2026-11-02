@@ -61,7 +61,8 @@ function cal_dia(int $funcionarioId, string $data): array
                 'label' => (count($jornadas) > 1 ? 'J' . ($indice + 1) . ' · ' : '') . tipo_ponto_label((string)$r['tipo']),
                 'hora' => date('H:i', strtotime((string)$r['data_hora'])),
                 'ajustado' => (stripos($obs, '[Ajustado') !== false || stripos($obs, 'manualmente') !== false),
-                'foto' => (string)($r['foto_path'] ?? ''),
+                /* A foto abre por foto.php (só admin logado); aqui só avisa que existe. */
+                'tem_foto' => !empty($r['foto_path']),
             ];
         }
     }
@@ -171,7 +172,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             $r = $stmt->fetch();
             if (!$r) throw new RuntimeException('Batida não encontrada.');
 
-            $novaDataHora = date('Y-m-d', strtotime((string)$r['data_hora'])) . ' ' . $hora . ':00';
+            /* Escolhe o dia mais próximo da batida atual: corrigir 23:50 para 00:10
+             * (ou a saída da madrugada) cruza a meia-noite e o dia tem que acompanhar. */
+            $novaDataHora = ponto_data_hora_mais_proxima($hora, (string)$r['data_hora']);
             if ($novaDataHora === (string)$r['data_hora']) {
                 throw new RuntimeException('O horário é igual ao que já está gravado.');
             }
@@ -201,6 +204,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             if ($tipo === '' || tipo_ponto_label($tipo) === $tipo) throw new RuntimeException('Escolha o tipo da batida.');
 
             $dataHora = $data . ' ' . $hora . ':00';
+
+            /* Saída/volta com horário ANTERIOR à entrada do dia só pode ser depois
+             * da meia-noite (turno que vira o dia): grava no dia seguinte, como o
+             * funcionário teria batido. Antes ficava 06:00 do mesmo dia, antes da
+             * entrada, e o sistema precisava "adivinhar" nos relatórios. */
+            if ($tipo !== 'entrada') {
+                $stmtEnt = db()->prepare("SELECT MIN(data_hora) FROM ponto_registros WHERE funcionario_id = ? AND data_ponto = ? AND tipo = 'entrada'");
+                $stmtEnt->execute([$funcionarioId, $data]);
+                $entradaDoDia = (string)$stmtEnt->fetchColumn();
+                if ($entradaDoDia !== '' && $dataHora < $entradaDoDia) {
+                    $dataHora = date('Y-m-d', strtotime($data . ' +1 day')) . ' ' . $hora . ':00';
+                }
+            }
+            if (strtotime($dataHora) > time() + 300) {
+                throw new RuntimeException('Não dá para lançar uma batida em um horário que ainda não aconteceu.');
+            }
+
             db()->beginTransaction();
             try {
                 db()->prepare("INSERT INTO ponto_registros (funcionario_id, condominio_id, tipo, data_ponto, data_hora, observacao, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, '', 'admin-calendario')")
@@ -545,7 +565,13 @@ admin_topbar();
     };
     const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-    const hojeYm = new Date().toISOString().slice(0, 7);
+    /* Datas pelo relógio LOCAL. toISOString() devolve UTC: depois das 21h no
+       Brasil já era "amanhã" (e no último dia do mês, o mês seguinte). */
+    const doisDig = (n) => String(n).padStart(2, '0');
+    const dataLocal = (d) => d.getFullYear() + '-' + doisDig(d.getMonth() + 1) + '-' + doisDig(d.getDate());
+    const mesLocal = (ano, indiceMes) => dataLocal(new Date(ano, indiceMes, 1)).slice(0, 7);
+    const hojeStr = dataLocal(new Date());
+    const hojeYm = hojeStr.slice(0, 7);
     let funcionarioId = 0;
     let mes = hojeYm;
     let diaSelecionado = '';
@@ -599,8 +625,6 @@ admin_topbar();
         let html = '';
         for (let i = 0; i < primeiroDiaSemana; i++) html += '<div></div>';
 
-        const hojeStr = new Date().toISOString().slice(0, 10);
-
         for (let d = 1; d <= totalDias; d++) {
             const data = `${mes}-${String(d).padStart(2, '0')}`;
             const info = marcados[data];
@@ -636,20 +660,28 @@ admin_topbar();
             return;
         }
 
+        /* Cada linha = botão de editar + (se houver) link da foto, lado a lado.
+           Link dentro de <button> é HTML inválido e falha em alguns navegadores. */
         $('#listaBatidas').innerHTML = batidas.map((b) => `
-            <button class="linha-toque cartao rounded-xl p-3 flex items-center justify-between gap-2 text-left w-full ${b.ajustado ? 'border-amber-500/40' : ''}"
-                    data-registro="${b.id}" data-hora="${b.hora}" data-label="${escapar(b.label)}" type="button">
-                <div class="flex items-center gap-3 min-w-0">
-                    <div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary flex-shrink-0">
-                        <span class="material-symbols-outlined text-[18px]">${ICONES[b.tipo] || 'schedule'}</span>
+            <div class="flex items-stretch gap-1">
+                <button class="linha-toque cartao rounded-xl p-3 flex items-center justify-between gap-2 text-left flex-1 min-w-0 ${b.ajustado ? 'border-amber-500/40' : ''}"
+                        data-registro="${b.id}" data-hora="${b.hora}" data-label="${escapar(b.label)}" type="button">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary flex-shrink-0">
+                            <span class="material-symbols-outlined text-[18px]">${ICONES[b.tipo] || 'schedule'}</span>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="font-body-lg text-body-lg text-on-surface font-medium tabular-nums">${b.hora}</p>
+                            <p class="font-label-sm text-label-sm text-secondary truncate">${escapar(b.label)}${b.ajustado ? ' · ajustado' : ''}</p>
+                        </div>
                     </div>
-                    <div class="min-w-0">
-                        <p class="font-body-lg text-body-lg text-on-surface font-medium tabular-nums">${b.hora}</p>
-                        <p class="font-label-sm text-label-sm text-secondary truncate">${escapar(b.label)}${b.ajustado ? ' · ajustado' : ''}</p>
-                    </div>
-                </div>
-                <span class="material-symbols-outlined text-primary text-[18px] flex-shrink-0">edit</span>
-            </button>`).join('');
+                    <span class="material-symbols-outlined text-primary text-[18px] flex-shrink-0">edit</span>
+                </button>
+                ${b.tem_foto ? `<a class="cartao rounded-xl w-11 flex items-center justify-center text-secondary hover:text-primary flex-shrink-0"
+                        href="foto.php?id=${b.id}" target="_blank" rel="noopener" aria-label="Ver foto da batida">
+                    <span class="material-symbols-outlined text-[20px]">photo_camera</span>
+                </a>` : ''}
+            </div>`).join('');
     }
 
     /* ------------------------------ folha ------------------------------ */
@@ -681,6 +713,9 @@ admin_topbar();
             vibrar(40);
             fecharFolha();
             desenharBatidas(r.batidas);
+            /* Libera ANTES de recarregar: carregar() recusa quando 'ocupado' está
+               ligado, e os pontinhos (falta saída / ajustado) ficavam velhos. */
+            ocupado = false;
             await carregar(diaSelecionado);
         } catch (erro) {
             toast(erro.message, 'error');
@@ -846,7 +881,6 @@ admin_topbar();
     $('#loteSemana').addEventListener('click', () => {
         const partes = mes.split('-').map(Number);
         const total = new Date(partes[0], partes[1], 0).getDate();
-        const hojeStr = new Date().toISOString().slice(0, 10);
         for (let d = 1; d <= total; d++) {
             const data = mes + '-' + String(d).padStart(2, '0');
             const semana = new Date(partes[0], partes[1] - 1, d).getDay();
@@ -894,13 +928,13 @@ admin_topbar();
 
     $('#mesAnterior').addEventListener('click', () => {
         const [a, m] = mes.split('-').map(Number);
-        irParaMes(new Date(a, m - 2, 1).toISOString().slice(0, 7));
+        irParaMes(mesLocal(a, m - 2));
     });
 
     $('#mesProximo').addEventListener('click', () => {
         if (mes >= hojeYm) return;
         const [a, m] = mes.split('-').map(Number);
-        irParaMes(new Date(a, m, 1).toISOString().slice(0, 7));
+        irParaMes(mesLocal(a, m));
     });
 
     $('#gradeDias').addEventListener('click', (evento) => {

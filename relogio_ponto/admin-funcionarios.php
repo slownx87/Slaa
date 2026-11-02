@@ -393,8 +393,15 @@ admin_topbar();
     $('#formCancelar').addEventListener('click', fecharForm);
     $('#formFundo').addEventListener('click', fecharForm);
 
+    /* Sorteio com o gerador seguro do navegador (Math.random é previsível). */
+    function pinAleatorio() {
+        const n = new Uint32Array(1);
+        window.crypto.getRandomValues(n);
+        return String(n[0] % 10000).padStart(4, '0');
+    }
+
     $('#btnSortear').addEventListener('click', () => {
-        $('#fPin').value = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+        $('#fPin').value = pinAleatorio();
     });
 
     $('#formSalvar').addEventListener('click', async () => {
@@ -503,7 +510,7 @@ admin_topbar();
     $('#pinCancelar').addEventListener('click', fecharPin);
     $('#pinFundo').addEventListener('click', fecharPin);
     $('#pinSortear').addEventListener('click', () => {
-        $('#pinNovo').value = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+        $('#pinNovo').value = pinAleatorio();
     });
     $('#pinNovo').addEventListener('input', (evento) => {
         evento.target.value = evento.target.value.replace(/\D/g, '').slice(0, 4);
@@ -515,8 +522,11 @@ admin_topbar();
             return;
         }
         const id = idPin;
+        const cartaoPin = document.querySelector(`[data-id="${id}"]`);
         fecharPin();
-        await enviar({ acao: 'trocar_pin', id, pin: novo }, false);
+        /* O nome vai junto só para a tela mostrar "PIN de Fulano" (antes saía
+           "PIN de funcionário"); o servidor ignora este campo. */
+        await enviar({ acao: 'trocar_pin', id, pin: novo, nome: cartaoPin ? cartaoPin.dataset.nome : '' }, false);
     });
 
     document.addEventListener('click', (evento) => {
