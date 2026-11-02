@@ -9,7 +9,7 @@ Tudo abaixo foi conferido lendo o código inteiro e **rodando o sistema de verda
 ### Crítico
 | # | Problema | Situação |
 |---|----------|----------|
-| 1 | **Senha do banco escrita em texto no `_config.php`** (e dentro do .zip) | Corrigido no código: agora vem de `_config.local.php` (fora do git). **Troque a senha do banco no painel da Hostinger** — ela já circulou. |
+| 1 | **Senha do banco escrita em texto no `_config.php`** | No repositório (público) ela não entra: vem de `_config.local.php`. O pacote para subir já leva a senha dentro do `_config.php`, a seu pedido. |
 | 2 | **8 páginas davam erro 500** (`painel-admin`, `funcionarios`, `relatorios`, `ajustes-ponto`, `logs-ponto`, `cargos`, `condominios`, `admins`): chamavam `app_header()`/`app_footer()`, que não existem mais | Viraram redirecionamento (301) para as telas novas do admin |
 | 3 | **Fotos dos funcionários (rostos) abriam sem login** por link direto | Pasta fechada no `.htaccess`; admin vê por `foto.php` (confere login **e** condomínio) |
 | 4 | `checar.php` tinha a chave escrita no código | Chave agora vem do `_config.local.php`; sem ela a página fica desligada |
@@ -60,7 +60,7 @@ JSON dentro de `<script>` sem escape de `</script>` · `diagnostico.php` agora c
 ## 3. Como atualizar no servidor (ordem importa)
 
 1. **Faça backup** dos arquivos e do banco.
-2. Na pasta do site, **crie o `_config.local.php`** (copie `_config.local.php.example`) com os dados do banco. *Sem isso o site para de conectar.*
+2. **Use o pacote `relogio_ponto_pronto_para_subir.zip`** entregue na conversa: o `_config.php` dele já vem com os dados do banco, é só subir. *(O repositório no GitHub é público, por isso a senha não está nele: se subir direto do GitHub, crie antes o `_config.local.php` a partir do `_config.local.php.example`, senão o site não conecta.)*
 3. Suba os arquivos de `relogio_ponto/` (**não** apague `uploads/`).
 4. Abra `admin-config.php` uma vez: as colunas novas (`antecipacao_minutos`) são criadas sozinhas. Se preferir na mão:
    ```sql
@@ -68,7 +68,7 @@ JSON dentro de `<script>` sem escape de `</script>` · `diagnostico.php` agora c
    ALTER TABLE ponto_cargo_turnos ADD COLUMN antecipacao_minutos INT NULL AFTER tolerancia_minutos;
    ```
 5. Abra `diagnostico.php` e confira se está tudo verde.
-6. **Troque a senha do banco** (hPanel → Bancos de dados) e atualize no `_config.local.php`.
+6. (Opcional) A senha do banco já circulou no .zip original; se um dia quiser trocar, é em hPanel → Bancos de dados.
 7. Teste: abra no navegador, **sem login**, o endereço direto de uma foto antiga (`/uploads/ponto_fotos/...`). Tem que dar **403/negado**.
 8. No celular, limpe/atualize o app (o service worker guarda arquivos fixos).
 
