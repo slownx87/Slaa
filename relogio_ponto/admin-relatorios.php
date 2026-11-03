@@ -384,7 +384,7 @@ Atraso é <b>o que faltou para fechar a jornada</b> do cargo (pega chegar tarde 
 Trabalhar além da jornada não gera crédito.
 Cargo sem horário cai no padrão de <?= (int)(PONTO_JORNADA_PADRAO_MINUTOS / 60) ?>h por dia.
 Cada cargo tem as suas tolerâncias (Configurações &rarr; Cargos): chegar atrasado dentro da tolerância não conta;
-chegar mais cedo do que o limite do cargo não soma horas.
+o app não deixa bater a entrada antes do limite do cargo (batida lançada à mão antes do limite não soma horas).
 <b>Falta</b> é dia sem nenhuma batida; domingo e feriado são folga (se trabalhar, conta como dia normal).
 Cargo com "não conta falta" (escala 12x36) fica fora dessa conta.
 Dias em aberto não entram na conta.

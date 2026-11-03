@@ -58,13 +58,21 @@ JSON dentro de `<script>` sem escape de `</script>` · `diagnostico.php` agora c
 | Campo | Em branco | Preenchido com N |
 |-------|-----------|------------------|
 | **Atrasado até (min)** | **Sem tolerância**: todo minuto depois da entrada conta | Chegar até N min depois da entrada **não conta atraso**. Passou de N, conta **tudo** (08:20 com N=15 = 20 min) |
-| **Antes até (min)** | **Sem limite**: chegar cedo não é restringido | Chegar até N min antes é aceito. O que passar disso **não soma como trabalhado** (07:30 com N=10 p/ entrada 08:00: 20 min não contam) |
+| **Antes até (min)** | **Sem limite**: chegar cedo não é restringido | Chegar até N min antes é aceito. **Antes disso o app avisa e NÃO deixa bater a entrada** (07:30 com N=10 p/ entrada 08:00: "entrada liberada a partir das 07:50"). A batida nem é gravada. |
 
 - Continua valendo a regra que você já tinha: atraso = o que faltou para fechar a jornada; trabalhar além **não** gera crédito.
 - O atraso tolerado entra como "cumprido" (o saldo do espelho não fica negativo por causa dele).
 - Aparece igual em: histórico do funcionário, painel do admin (`+Xmin` / `-Xmin cedo`), relatório, CSV e PDF do espelho.
 - Cargo novo já vem com "Atrasado até 15" (o comportamento que existia); para não ter tolerância, apague o número.
 - O limite "Antes até" só funciona com entrada e saída preenchidas (precisa de um horário para medir).
+
+### Entrada antes da hora (aviso e bloqueio)
+Se o cargo tem "Antes até" preenchido e a pessoa tenta **bater a entrada** antes de (horário − limite):
+a tela mostra o aviso em vermelho, o botão **Entrada** fica apagado e o toque só repete o aviso; se mesmo assim
+chegar ao servidor, ele **recusa e não grava**. Só vale para a **entrada** (volta de intervalo e saída não),
+nunca bloqueia quem está atrasado, e cargo com vários horários usa o horário mais próximo da hora.
+Batida **lançada à mão** pelo admin ou pedido de correção aprovado **não** é bloqueada (quem decide é o admin);
+se ela ficar antes do limite, o tempo excedente não soma como trabalhado.
 
 ## 2b. Falta, folga e feriado
 
@@ -110,4 +118,4 @@ Regra aplicada no relatório, CSV, PDF do espelho e no Histórico do funcionári
 
 ## 5. Testes
 
-`php tests/apuracao_teste.php` — 65 verificações da conta (tolerância, antecipação, turno da noite, virada de meia-noite, Páscoa/feriados, regra de falta, meta da semana). Não usa banco.
+`php tests/apuracao_teste.php` — 78 verificações da conta (tolerância, antecipação, turno da noite, virada de meia-noite, Páscoa/feriados, regra de falta, meta da semana, bloqueio de entrada antes da hora). Não usa banco.

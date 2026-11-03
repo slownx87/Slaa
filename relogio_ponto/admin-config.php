@@ -422,7 +422,7 @@ admin_topbar(false);
 </div>
 
 <span class="font-label-bold text-label-bold text-primary uppercase tracking-wider mt-1">Tolerâncias de chegada</span>
-<p class="font-label-sm text-label-sm text-secondary">Opcional. <b>Pode chegar atrasado até</b>: depois da entrada, esses minutos não contam como atraso (passou disso, conta tudo). <b>Pode chegar antes até</b>: quem bater mais cedo que isso não soma o tempo extra. Em branco = sem tolerância / sem limite.</p>
+<p class="font-label-sm text-label-sm text-secondary">Opcional. <b>Pode chegar atrasado até</b>: depois da entrada, esses minutos não contam como atraso (passou disso, conta tudo). <b>Pode chegar antes até</b>: quem tentar bater a entrada mais cedo que isso recebe um aviso e o app <b>não deixa</b> bater. Em branco = sem tolerância / sem limite.</p>
 <div class="grid grid-cols-2 gap-2">
 <div class="flex flex-col gap-1">
 <label class="font-label-sm text-label-sm text-secondary" for="cgTolerancia">Atrasado até (min)</label>
@@ -505,7 +505,7 @@ sem horário — hora extra pelo padrão de 8h
 <input class="campo font-body-md text-body-md text-center" data-campo="antecipacao" inputmode="numeric" max="240" min="0" placeholder="sem limite" type="number" value="<?= isset($c['antecipacao_minutos']) && $c['antecipacao_minutos'] !== null ? (int)$c['antecipacao_minutos'] : '' ?>"/>
 </div>
 </div>
-<p class="font-label-sm text-label-sm text-secondary"><b>Atrasado até</b>: minutos depois da entrada que não contam como atraso (passou disso, conta tudo). <b>Antes até</b>: quem bater mais cedo que isso não soma o tempo extra. Em branco = sem tolerância / sem limite. O limite de "antes" só funciona com entrada e saída preenchidas.</p>
+<p class="font-label-sm text-label-sm text-secondary"><b>Atrasado até</b>: minutos depois da entrada que não contam como atraso (passou disso, conta tudo). <b>Antes até</b>: quem tentar bater a entrada mais cedo que isso recebe um aviso e o app <b>não deixa</b> bater. Em branco = sem tolerância / sem limite. O limite de "antes" só funciona com entrada e saída preenchidas.</p>
 <p class="font-label-sm text-label-sm text-primary" data-preview="<?= (int)$c['id'] ?>"></p>
 <label class="flex items-start gap-2">
 <input <?= (int)($c['controla_falta'] ?? 1) === 1 ? 'checked' : '' ?> class="w-5 h-5 flex-shrink-0" data-campo="falta" type="checkbox"/>
@@ -781,7 +781,7 @@ sem horário — hora extra pelo padrão de 8h
                 : 'Sem tolerância: qualquer minuto depois de ' + entrada + ' conta atraso. Chegar antes não tem limite.';
         }
         const ini = somarMin(entrada, -Number(antes));
-        return 'Chegando entre ' + ini + ' e ' + fim + ': sem atraso e sem desconto. Antes de ' + ini + ' o tempo extra não conta.';
+        return 'Chegando entre ' + ini + ' e ' + fim + ': sem atraso. Antes das ' + ini + ' o app avisa e não deixa bater a entrada.';
     }
 
     function atualizarPreview() {

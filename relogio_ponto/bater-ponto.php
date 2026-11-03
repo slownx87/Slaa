@@ -88,7 +88,15 @@ function ponto_funcionario_payload(array $funcionario): array
 
     $acoes = [];
     foreach (allowed_ponto_actions($id, $dataPonto) as $tipo => $rotulo) {
-        $acoes[] = ['tipo' => $tipo, 'label' => $rotulo];
+        $acao = ['tipo' => $tipo, 'label' => $rotulo];
+        /* Entrada antes da hora permitida pelo cargo: a tela mostra o aviso e o
+         * servidor também recusa (ver 'registrar'). */
+        if ($tipo === 'entrada' && ($bloqueio = ponto_entrada_antecipada_bloqueio($id)) !== null) {
+            $acao['bloqueada'] = true;
+            $acao['aviso'] = $bloqueio['mensagem'];
+            $acao['liberado_em'] = $bloqueio['liberado_em'];
+        }
+        $acoes[] = $acao;
     }
 
     /* Dia já encerrado: existe jornada e nenhuma está aberta. A tela precisa
@@ -236,6 +244,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
                 throw new RuntimeException('Esse tipo de batida não está disponível agora. Confira a sequência do seu ponto.');
             }
 
+            /* Entrada cedo demais para o cargo: avisa e NÃO grava. */
+            if ($tipo === 'entrada' && ($bloqueio = ponto_entrada_antecipada_bloqueio((int)$funcionario['id'])) !== null) {
+                throw new RuntimeException($bloqueio['mensagem']);
+            }
+
             /* Toque duplo / reenvio por internet lenta: a mesma batida chegava
              * duas vezes e o dia ficava com "Entrada" repetida. Barra a mesma
              * batida do mesmo funcionário dentro de 60 segundos. */
@@ -341,6 +354,8 @@ $cssTela = <<<'CSS'
     }
     .punch-button:not(:disabled):active { transform: scale(.97); }
     .punch-button:disabled { opacity:.38; box-shadow:none; cursor:not-allowed; }
+    /* Entrada antes da hora permitida pelo cargo: botão apagado (o toque só mostra o aviso). */
+    .punch-button[data-bloqueado="1"] { opacity:.38 !important; box-shadow:none; cursor:not-allowed; transform:none !important; }
 
     /* Moldura que orienta o enquadramento do rosto na foto. */
     .guia-rosto {
@@ -512,6 +527,10 @@ Como usar o aplicativo (tutorial)
 
 <section class="grid grid-cols-2 gap-4 w-full" id="listaTipos"></section>
 <p class="hidden font-body-md text-body-md text-secondary text-center px-4" id="dicaRefeicao"></p>
+<div class="hidden items-start gap-2 rounded-xl border border-error/40 bg-error/10 p-3" id="avisoAntecipado">
+<span class="material-symbols-outlined text-error text-[18px] flex-shrink-0">schedule</span>
+<p class="font-body-md text-body-md text-on-surface-variant" id="avisoAntecipadoTexto"></p>
+</div>
 <div class="hidden items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3" id="avisoDiaAnterior">
 <span class="material-symbols-outlined text-amber-500 text-[18px] flex-shrink-0">warning</span>
 <p class="font-body-md text-body-md text-on-surface-variant" id="avisoDiaAnteriorTexto"></p>
@@ -911,7 +930,7 @@ Abrindo a câmera...
                 : funcionario.status.next);
 
         box.innerHTML = acoes.map((acao, i) => `
-            <button class="punch-button surgir rounded-2xl p-3 flex flex-col items-center justify-center gap-3 h-28 w-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background group" data-tipo="${acao.tipo}" data-label="${acao.label.replace(/"/g, '&quot;')}" style="animation-delay:${i * 70}ms" type="button">
+            <button class="punch-button surgir rounded-2xl p-3 flex flex-col items-center justify-center gap-3 h-28 w-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background group" data-tipo="${acao.tipo}" data-label="${acao.label.replace(/"/g, '&quot;')}" ${acao.bloqueada ? 'data-bloqueado="1" aria-disabled="true"' : ''} style="animation-delay:${i * 70}ms${acao.bloqueada ? ';opacity:.4' : ''}" type="button">
                 <div class="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center group-hover:bg-primary/20 transition-colors duration-300">
                     <span class="material-symbols-outlined text-secondary group-hover:text-primary transition-colors duration-300" style="font-variation-settings: 'FILL' 1;">${ICONES[acao.tipo] || 'schedule'}</span>
                 </div>
@@ -944,6 +963,18 @@ Abrindo a câmera...
         } else {
             aviso.classList.add('hidden');
             aviso.classList.remove('flex');
+        }
+
+        /* Entrada antes da hora permitida pelo cargo: avisa e não deixa bater. */
+        const bloqueada = ((funcionario && funcionario.acoes) || []).find((a) => a.bloqueada);
+        const avisoCedo = $('#avisoAntecipado');
+        if (bloqueada) {
+            $('#avisoAntecipadoTexto').textContent = bloqueada.aviso;
+            avisoCedo.classList.remove('hidden');
+            avisoCedo.classList.add('flex');
+        } else {
+            avisoCedo.classList.add('hidden');
+            avisoCedo.classList.remove('flex');
         }
 
         const dica = $('#dicaRefeicao');
@@ -1225,12 +1256,20 @@ Abrindo a câmera...
 
     $('#btnNovaJornada').addEventListener('click', () => {
         const entrada = (funcionario.acoes || []).find((a) => a.tipo === 'entrada');
-        if (entrada) abrirSheet(entrada.tipo, entrada.label);
+        if (!entrada) return;
+        if (entrada.bloqueada) { toast(entrada.aviso, 'error'); vibrar([60, 40, 60]); return; }
+        abrirSheet(entrada.tipo, entrada.label);
     });
 
     $('#listaTipos').addEventListener('click', (evento) => {
         const botao = evento.target.closest('button[data-tipo]');
         if (!botao) return;
+        if (botao.dataset.bloqueado === '1') {
+            const a = ((funcionario && funcionario.acoes) || []).find((x) => x.tipo === botao.dataset.tipo);
+            toast(a && a.aviso ? a.aviso : 'Ainda não dá para bater essa entrada.', 'error');
+            vibrar([60, 40, 60]);
+            return;
+        }
         abrirSheet(botao.dataset.tipo, botao.dataset.label);
     });
 

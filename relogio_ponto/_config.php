@@ -2313,9 +2313,11 @@ function ponto_antecipacao_entrada_minutos(?string $dataHora, ?array $jornada = 
  *  - Atraso tolerado: chegar até N min depois da entrada não conta como falta.
  *    Passou de N, o atraso inteiro conta (08:20 com tolerância 15 = 20 min).
  *    Tolerância 0/vazia = todo minuto conta.
- *  - Chegada antecipada tolerada: chegar até N min antes é aceito. O que passar
- *    disso (ex.: bater 07:20 para entrar 08:00 com limite de 10) NÃO conta como
- *    trabalhado — só vale a partir de (entrada - N). Campo vazio = sem limite.
+ *  - Chegada antecipada tolerada: chegar até N min antes é aceito. Antes disso o
+ *    app AVISA E NÃO DEIXA bater a entrada (ponto_entrada_antecipada_bloqueio).
+ *    Se existir uma batida mais cedo mesmo assim (lançada à mão pelo admin ou
+ *    anterior à regra), o que passar do limite NÃO conta como trabalhado — só
+ *    vale a partir de (entrada - N). Campo vazio = sem limite.
  *
  * Continua valendo a escolha do administrador: trabalhar além da jornada não
  * gera crédito, então a falta nunca é negativa.
@@ -2681,4 +2683,57 @@ function ponto_jornada_padrao_min(array $jornada): int
 {
     $turno = !empty($jornada['turnos']) ? ponto_turno_padrao($jornada['turnos']) : null;
     return (int)($turno['jornada_min'] ?? $jornada['jornada_min'] ?? PONTO_JORNADA_PADRAO_MINUTOS);
+}
+
+
+/**
+ * A entrada de agora é CEDO DEMAIS para o horário do cargo?
+ *
+ * Só vale quando o cargo tem "Antes até (min)" preenchido (campo vazio = sem
+ * limite, nunca bloqueia). Quem tenta bater a entrada antes de
+ * (entrada do turno - limite) é avisado e a batida NÃO é gravada. Atrasado nunca
+ * é bloqueado aqui. Em cargo com vários horários vale o turno mais próximo da hora.
+ *
+ * @return array{liberado_em:string, turno:string, antecipacao:int, faltam_min:int, mensagem:string}|null
+ *         null = pode bater.
+ */
+function ponto_entrada_antecipada_da_jornada(?array $jornada, string $agora): ?array
+{
+    if (!$jornada || empty($jornada['turnos'])) {
+        return null;
+    }
+    $turno = ponto_turno_do_dia([['tipo' => 'entrada', 'data_hora' => $agora]], $jornada);
+    if (empty($turno['definido']) || !isset($turno['antecipacao']) || $turno['antecipacao'] === null) {
+        return null;
+    }
+
+    $limite = (int)$turno['antecipacao'];
+    $diferenca = ponto_diferenca_entrada_min($agora, (int)$turno['entrada_min']);
+    if ($diferenca === null || $diferenca >= -$limite) {
+        return null;
+    }
+
+    $faltam = (-$diferenca) - $limite;
+    $liberadoMin = (((int)$turno['entrada_min'] - $limite) % 1440 + 1440) % 1440;
+    $liberado = sprintf('%02d:%02d', intdiv($liberadoMin, 60), $liberadoMin % 60);
+    $horario = (string)($turno['horario'] ?? (($turno['entrada'] ?? '') . '-' . ($turno['saida'] ?? '')));
+
+    return [
+        'liberado_em' => $liberado,
+        'turno' => $horario,
+        'antecipacao' => $limite,
+        'faltam_min' => $faltam,
+        'mensagem' => 'Ainda não dá para bater a entrada. Seu horário é ' . $horario
+            . ($limite > 0 ? ' e a entrada só é liberada a partir das ' . $liberado . ' (até ' . $limite . ' min antes)' : ' e a entrada só é liberada a partir das ' . $liberado)
+            . '. Faltam ' . $faltam . ' min — volte às ' . $liberado . '.',
+    ];
+}
+
+function ponto_entrada_antecipada_bloqueio(int $funcionarioId, ?string $agora = null): ?array
+{
+    try {
+        return ponto_entrada_antecipada_da_jornada(ponto_jornada_do_funcionario($funcionarioId), $agora ?: now_sp());
+    } catch (Throwable $e) {
+        return null; // nunca impede alguém de bater o ponto por falha de leitura do cargo
+    }
 }

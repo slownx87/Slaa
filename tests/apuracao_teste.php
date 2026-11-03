@@ -167,5 +167,27 @@ confere('12x36 (11 h líquidas) = 38h30', ponto_meta_semana_min(660, true), 2310
 confere('cargo sem horário = 44 h', ponto_meta_semana_min(480, false), 2640);
 confere('9 h/dia não passa de 44 h', ponto_meta_semana_min(540, true), 2640);
 
+echo "Entrada antes da hora (aviso e bloqueio)\n";
+$jl = jornada_de($comLimite); // 08:00-17:00, limite de 10 min antes
+$b = ponto_entrada_antecipada_da_jornada($jl, '2026-08-03 07:49:00');
+confere('07:49 com limite de 10: bloqueia', $b !== null, true);
+confere('  ...libera a partir das 07:50', $b['liberado_em'] ?? null, '07:50');
+confere('  ...falta 1 min', $b['faltam_min'] ?? null, 1);
+confere('07:50 já pode', ponto_entrada_antecipada_da_jornada($jl, '2026-08-03 07:50:00'), null);
+confere('08:30 (atrasado) nunca é bloqueado', ponto_entrada_antecipada_da_jornada($jl, '2026-08-03 08:30:00'), null);
+confere('06:00 bloqueia (falta 1h50)', (ponto_entrada_antecipada_da_jornada($jl, '2026-08-03 06:00:00') ?? [])['faltam_min'] ?? null, 110);
+confere('cargo SEM limite: não bloqueia nunca', ponto_entrada_antecipada_da_jornada(jornada_de($porteiro), '2026-08-03 05:00:00'), null);
+$zero2 = $porteiro; $zero2['antecipacao_minutos'] = 0;
+confere('limite 0: 07:59 já bloqueia', ponto_entrada_antecipada_da_jornada(jornada_de($zero2), '2026-08-03 07:59:00') !== null, true);
+confere('mensagem diz o horário', strpos($b['mensagem'], '08:00-17:00') !== false && strpos($b['mensagem'], '07:50') !== false, true);
+confere('turno da noite 18:00 (limite 10): 17:45 bloqueia', (ponto_entrada_antecipada_da_jornada($jv, '2026-08-03 17:45:00') ?? [])['liberado_em'] ?? null, '17:50');
+confere('turno da noite: 00:30 (6h30 depois) não bloqueia', ponto_entrada_antecipada_da_jornada($jv, '2026-08-04 00:30:00'), null);
+$escala = ['id' => 5, 'hora_entrada' => '06:00:00', 'hora_saida' => '14:00:00', 'minutos_intervalo' => 60, 'tolerancia_minutos' => 15, 'antecipacao_minutos' => 10];
+$je = jornada_de($escala);
+$t2 = $je['turnos'][0]; $t2['id'] = 9; $t2['principal'] = false; $t2['entrada_min'] = 840; $t2['saida_min'] = 1320; $t2['entrada'] = '14:00'; $t2['saida'] = '22:00'; $t2['horario'] = '14:00-22:00'; $t2['descricao'] = '14:00-22:00';
+$je['turnos'][] = $t2; $je['multi'] = true;
+confere('escala 06:00/14:00: 13:30 bloqueia o turno das 14:00', (ponto_entrada_antecipada_da_jornada($je, '2026-08-03 13:30:00') ?? [])['liberado_em'] ?? null, '13:50');
+confere('escala 06:00/14:00: 05:55 pode (turno das 06:00)', ponto_entrada_antecipada_da_jornada($je, '2026-08-03 05:55:00'), null);
+
 echo "\n$total verificações, $falhas falha(s).\n";
 exit($falhas ? 1 : 0);
