@@ -391,7 +391,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
         throw new RuntimeException('Ação desconhecida.');
     } catch (Throwable $e) {
-        admin_json(['ok' => false, 'error' => $e->getMessage()], 422);
+        admin_json(['ok' => false, 'error' => ponto_msg_erro($e)], 422);
     }
 }
 

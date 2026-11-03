@@ -179,6 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
          * aprovar. O funcionário não grava batida retroativa sozinho — seria
          * hora sem conferência nenhuma. */
         if ($acao === 'fechar_dia') {
+            ponto_travar_funcionario((int)$funcionario['id']);
             ensure_solicitacoes_table();
             $id = (int)$funcionario['id'];
 
@@ -237,6 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
         }
 
         if ($acao === 'registrar') {
+            ponto_travar_funcionario((int)$funcionario['id']);
             $tipo = (string)($_POST['tipo'] ?? '');
             $dataPonto = data_ponto_ativa((int)$funcionario['id'], today_sp());
             $allowed = allowed_ponto_actions((int)$funcionario['id'], $dataPonto);
@@ -302,7 +304,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
         ponto_json(['ok' => true, 'funcionario' => ponto_funcionario_payload($funcionario)]);
     } catch (Throwable $e) {
-        $msg = $e->getMessage();
+        $msg = ponto_msg_erro($e);
         if (stripos($msg, 'mais de um funcionário') !== false || stripos($msg, 'Selecione o condomínio') !== false) {
             $msg = 'PIN duplicado. Peça ao administrador para alterar o PIN de um dos funcionários.';
         }

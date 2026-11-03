@@ -53,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
         throw new RuntimeException('Ação desconhecida.');
     } catch (Throwable $e) {
-        admin_json(['ok' => false, 'error' => $e->getMessage()], 422);
+        admin_json(['ok' => false, 'error' => ponto_msg_erro($e)], 422);
     }
 }
 
@@ -67,7 +67,11 @@ function admin_conta(string $sql, array $params = []): int
 
 [$filtroF, $paramsF] = admin_filtro_condominio('f');
 $totalFuncionarios = admin_conta("SELECT COUNT(*) FROM ponto_funcionarios f WHERE f.ativo = 1 {$filtroF}", $paramsF);
-$batidasHoje = admin_conta("SELECT COUNT(*) FROM ponto_registros r WHERE r.data_ponto = ? {$filtroCond}", array_merge([today_sp()], $paramsCond));
+/* "Hoje" = o dia da jornada OU qualquer batida feita desde a meia-noite: a
+ * saída/volta da madrugada de quem faz turno da noite tem data_ponto de ONTEM e
+ * sumia da lista enquanto a pessoa ainda estava trabalhando. */
+$inicioHoje = today_sp() . ' 00:00:00';
+$batidasHoje = admin_conta("SELECT COUNT(*) FROM ponto_registros r WHERE (r.data_ponto = ? OR r.data_hora >= ?) {$filtroCond}", array_merge([today_sp(), $inicioHoje], $paramsCond));
 
 [$filtroS, $paramsS] = admin_filtro_condominio('s');
 $pedidosPendentes = admin_conta("SELECT COUNT(*) FROM ponto_solicitacoes s WHERE s.status = 'pendente' {$filtroS}", $paramsS);
@@ -108,9 +112,9 @@ $stmt = db()->prepare("SELECT r.*, f.nome AS funcionario_nome, c.nome AS condomi
     FROM ponto_registros r
     INNER JOIN ponto_funcionarios f ON f.id = r.funcionario_id
     INNER JOIN ponto_condominios c ON c.id = r.condominio_id
-    WHERE r.data_ponto = ? {$filtroCond}
+    WHERE (r.data_ponto = ? OR r.data_hora >= ?) {$filtroCond}
     ORDER BY r.data_hora DESC LIMIT 60");
-$stmt->execute(array_merge([today_sp()], $paramsCond));
+$stmt->execute(array_merge([today_sp(), $inicioHoje], $paramsCond));
 $batidas = $stmt->fetchAll();
 
 /* Atraso da chegada, pelo horário do CARGO de cada um.

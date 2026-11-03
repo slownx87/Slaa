@@ -296,8 +296,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
             $registroId = (int)($_POST['registro_id'] ?? 0);
             $dataPonto = (string)($_POST['data_ponto'] ?? '');
-            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dataPonto)) {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dataPonto) || !strtotime($dataPonto)) {
                 throw new RuntimeException('Dia inválido.');
+            }
+            if ($dataPonto < date('Y-m-d', strtotime('-400 days'))) {
+                throw new RuntimeException('Esse dia é antigo demais para pedir correção pelo app. Fale com o administrador.');
             }
 
             /* O app diz explicitamente o que está fazendo; sem isso, uma batida
@@ -404,7 +407,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             'historico' => hist_payload($funcionarioId, $ym),
         ]);
     } catch (Throwable $e) {
-        $msg = $e->getMessage();
+        $msg = ponto_msg_erro($e);
         if (stripos($msg, 'mais de um funcionário') !== false || stripos($msg, 'Selecione o condomínio') !== false) {
             $msg = 'PIN duplicado. Peça ao administrador para alterar o PIN de um dos funcionários.';
         }

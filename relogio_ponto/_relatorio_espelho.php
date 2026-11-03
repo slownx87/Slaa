@@ -18,12 +18,6 @@ function rel_fmt_hora(?string $dt, string $dataBase): string
     return date('H:i', $ts);
 }
 
-function rel_saida_noite_gerada(string $entradaDt): string
-{
-    // Mantido por compatibilidade: a regra mora em ponto_saida_noturna_estimada().
-    return ponto_saida_noturna_estimada($entradaDt);
-}
-
 
 function rel_fmt_min(int $min): string
 {
@@ -35,15 +29,6 @@ function rel_fmt_saldo(int $min): string
 {
     if ($min === 0) return '00:00';
     return ($min > 0 ? '+' : '-') . rel_fmt_min(abs($min));
-}
-
-function rel_diff_min(?string $ini, ?string $fim): int
-{
-    if (!$ini || !$fim) return 0;
-    $a = strtotime($ini);
-    $b = strtotime($fim);
-    if (!$a || !$b || $b <= $a) return 0;
-    return (int)floor(($b - $a) / 60);
 }
 
 function rel_dia_semana(string $data): string

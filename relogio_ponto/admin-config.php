@@ -318,6 +318,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             if (mb_strlen($usuario) < 3) throw new RuntimeException('Informe o usuário de acesso.');
             if (mb_strlen($senha) < 6) throw new RuntimeException('A senha precisa de pelo menos 6 caracteres.');
             if (!in_array($nivel, ['admin', 'super_admin'], true)) $nivel = 'admin';
+            /* Admin de condomínio SEM condomínio seria tratado como acesso a tudo
+             * (o sistema entende "sem condomínio" como administrador geral). */
+            if ($nivel !== 'super_admin') {
+                $stCond = db()->prepare("SELECT COUNT(*) FROM ponto_condominios WHERE id = ? AND ativo = 1");
+                $stCond->execute([$condominioId]);
+                if ($condominioId <= 0 || (int)$stCond->fetchColumn() < 1) {
+                    throw new RuntimeException('Escolha o condomínio desse administrador (ele só enxerga o condomínio escolhido).');
+                }
+            }
 
             $stmt = db()->prepare("SELECT COUNT(*) FROM ponto_admins WHERE usuario = ?");
             $stmt->execute([$usuario]);
@@ -331,7 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
         throw new RuntimeException('Ação desconhecida.');
     } catch (Throwable $e) {
-        admin_json(['ok' => false, 'error' => $e->getMessage()], 422);
+        admin_json(['ok' => false, 'error' => ponto_msg_erro($e)], 422);
     }
 }
 

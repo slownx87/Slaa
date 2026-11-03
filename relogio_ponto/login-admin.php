@@ -48,7 +48,7 @@ try {
         redirect('admin.php');
     }
 } catch (Throwable $e) {
-    $erro = $e->getMessage();
+    $erro = ponto_msg_erro($e);
 }
 
 app_mobile_head('Painel Admin - ' . APP_NAME, 'bg-background text-on-background antialiased min-h-screen', admin_css(), 'manifest-admin.webmanifest');

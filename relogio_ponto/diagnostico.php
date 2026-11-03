@@ -24,7 +24,7 @@ try {
     db();
     diag_item('Conexão com banco', true, 'Conectado com sucesso');
 } catch (Throwable $e) {
-    diag_item('Conexão com banco', false, $e->getMessage());
+    diag_item('Conexão com banco', false, ($e->getPrevious() ?: $e)->getMessage());
 }
 
 /* As três últimas são criadas sozinhas pelo app. */

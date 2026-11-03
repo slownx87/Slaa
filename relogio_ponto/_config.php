@@ -49,6 +49,16 @@ if (session_status() === PHP_SESSION_NONE) {
 
 date_default_timezone_set('America/Sao_Paulo');
 
+/* Cabeçalhos de segurança. As páginas trazem dado pessoal (ponto, fotos): não
+ * podem ficar em cache do navegador/proxy (voltar depois de sair mostrava a tela
+ * antiga), nem ser abertas dentro de iframe de outro site. */
+if (PHP_SAPI !== 'cli' && !headers_sent()) {
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: same-origin');
+    header('Cache-Control: no-store');
+}
+
 /* Dados do banco: NÃO ficam mais neste arquivo.
  *
  * Crie o arquivo _config.local.php (copie o _config.local.php.example) na mesma
@@ -85,9 +95,28 @@ function db(): PDO
         ]);
         $pdo->exec("SET time_zone = '-03:00'");
     } catch (Throwable $e) {
-        throw new RuntimeException('Erro na conexão com o banco. Confira DB_HOST, DB_NAME, DB_USER e DB_PASS no _config.php. Detalhe: ' . $e->getMessage());
+        /* O detalhe (host, usuário, motivo) vai para o log e fica em getPrevious()
+         * — só o diagnóstico do admin mostra. Antes ia na mensagem e aparecia até
+         * na tela pública de bater ponto quando o banco caía. */
+        error_log('[ponto] falha ao conectar no banco: ' . $e->getMessage());
+        throw new RuntimeException('Não foi possível conectar ao banco de dados agora. Tente de novo em instantes.', 0, $e);
     }
     return $pdo;
+}
+
+/**
+ * Mensagem segura para mostrar na tela. Erro NOSSO (RuntimeException com texto
+ * escrito para o usuário) passa como está; erro de banco/PHP não: o detalhe vai
+ * para o log do servidor e a tela recebe um texto genérico. Antes um
+ * "SQLSTATE[23000]: Integrity constraint violation ..." aparecia no painel.
+ */
+function ponto_msg_erro(Throwable $e): string
+{
+    if ($e instanceof PDOException || !($e instanceof RuntimeException)) {
+        error_log('[ponto] ' . get_class($e) . ': ' . $e->getMessage() . ' em ' . basename($e->getFile()) . ':' . $e->getLine());
+        return 'Não foi possível concluir por um erro interno. Tente de novo; se repetir, avise quem cuida do sistema.';
+    }
+    return $e->getMessage();
 }
 
 function h(?string $value): string
@@ -146,6 +175,29 @@ function require_admin(): void
     if (!is_admin_logged()) {
         redirect('login-admin.php');
     }
+
+    /* Confere o admin no banco a cada página. Antes só olhava a sessão: quem era
+     * desativado (ou tinha o nível/condomínio trocado) continuava com o acesso
+     * antigo até a sessão vencer — e a sessão agora dura 12 h. */
+    static $conferido = false;
+    if ($conferido) {
+        return;
+    }
+    $conferido = true;
+    try {
+        $st = db()->prepare("SELECT nome, nivel, condominio_id, ativo FROM ponto_admins WHERE id = ?");
+        $st->execute([admin_id()]);
+        $a = $st->fetch();
+    } catch (Throwable $e) {
+        return; // banco fora do ar: não derruba quem já estava logado
+    }
+    if (!$a || (int)$a['ativo'] !== 1) {
+        $_SESSION = [];
+        redirect('login-admin.php');
+    }
+    $_SESSION['ponto_admin_nome'] = $a['nome'];
+    $_SESSION['ponto_admin_nivel'] = $a['nivel'];
+    $_SESSION['ponto_admin_condominio_id'] = $a['condominio_id'] !== null ? (int)$a['condominio_id'] : null;
 }
 
 function admin_id(): ?int
@@ -191,30 +243,6 @@ function admin_condominio_id(): ?int
     return isset($_SESSION['ponto_admin_condominio_id']) && $_SESSION['ponto_admin_condominio_id'] !== null
         ? (int)$_SESSION['ponto_admin_condominio_id']
         : null;
-}
-
-function admin_where_condominio(string $alias = ''): array
-{
-    $prefix = $alias ? $alias . '.' : '';
-    if (admin_nivel() === 'super_admin' || admin_condominio_id() === null) {
-        return ['', []];
-    }
-    return [" AND {$prefix}condominio_id = ? ", [admin_condominio_id()]];
-}
-
-function flash_set(string $type, string $message): void
-{
-    $_SESSION['flash'][] = ['type' => $type, 'message' => $message];
-}
-
-function flash_show(): void
-{
-    $items = $_SESSION['flash'] ?? [];
-    unset($_SESSION['flash']);
-    foreach ($items as $item) {
-        $type = $item['type'] === 'error' ? 'error' : 'success';
-        echo '<div class="alert ' . h($type) . '">' . h($item['message']) . '</div>';
-    }
 }
 
 function table_exists(string $table): bool
@@ -579,20 +607,6 @@ function ponto_registros_do_dia_em_memoria(array $registros, string $data, ?int 
     return ponto_normalizar_turno_noite_registros($out);
 }
 
-function ponto_jornada_numero_por_registro(array $registros): array
-{
-    $map = [];
-    $jornadas = ponto_jornadas_from_registros($registros);
-    foreach ($jornadas as $idx => $jornada) {
-        $num = $idx + 1;
-        foreach (($jornada['eventos'] ?? []) as $ev) {
-            $id = ponto_registro_ordem_id($ev);
-            if ($id > 0) $map[$id] = $num;
-        }
-    }
-    return $map;
-}
-
 
 function ponto_registro_ordem_id(array $r): int
 {
@@ -701,19 +715,6 @@ function ponto_eh_entrada_noite(?string $dt, ?int $funcionarioId = null): bool
 {
     $min = ponto_minutos_hora($dt);
     return $min !== null && $min >= ponto_janela_noite($funcionarioId)[0];
-}
-
-function ponto_eh_saida_madrugada_turno_noite(?string $dt): bool
-{
-    $min = ponto_minutos_hora($dt);
-    // Janela principal pedida: 05:50 até 06:00.
-    // Mantém tolerância até 08:00 para casos reais que atrasaram, sem inventar horário.
-    return $min !== null && $min >= 0 && $min <= (8 * 60);
-}
-
-function ponto_saida_prevista_turno_noite_texto(): string
-{
-    return 'saída não registrada (prev. 05:50-06:00)';
 }
 
 
@@ -1033,8 +1034,6 @@ function save_photo_base64(string $base64, int $funcionarioId, string $tipo): ar
         throw new RuntimeException('Foto inválida. Capture uma foto pela câmera antes de bater o ponto.');
     }
 
-    $mimeExt = strtolower($m[1]);
-    $ext = $mimeExt === 'jpeg' ? 'jpg' : $mimeExt;
     $clean = preg_replace('/^data:image\/[a-zA-Z0-9+.-]+;base64,/', '', $base64);
     $bin = base64_decode($clean, true);
     if ($bin === false || strlen($bin) < 2000) {
@@ -1043,9 +1042,20 @@ function save_photo_base64(string $base64, int $funcionarioId, string $tipo): ar
     if (strlen($bin) > 8 * 1024 * 1024) {
         throw new RuntimeException('Foto muito grande. Capture em qualidade menor.');
     }
-    if (!@getimagesizefromstring($bin)) {
+    $info = @getimagesizefromstring($bin);
+    if (!$info) {
         throw new RuntimeException('O arquivo enviado não parece ser uma imagem válida.');
     }
+    /* A extensão (e o tipo com que a foto é entregue depois) vem do que o
+     * arquivo REALMENTE é, não do que o envio dizia ser. */
+    $tiposReais = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png'];
+    if (defined('IMAGETYPE_WEBP')) {
+        $tiposReais[IMAGETYPE_WEBP] = 'webp';
+    }
+    if (!isset($tiposReais[$info[2]])) {
+        throw new RuntimeException('Formato de foto não aceito. Tire a foto pela câmera do aplicativo.');
+    }
+    $ext = $tiposReais[$info[2]];
 
     $dirRel = 'uploads/ponto_fotos/' . date('Y') . '/' . date('m');
     $dirAbs = __DIR__ . '/' . $dirRel;
@@ -1371,6 +1381,23 @@ const PONTO_SEMANA_PADRAO_MINUTOS = 2640;   // 44h por semana (cargo sem horári
  * varrer as 10 mil combinações em minutos. */
 const PONTO_PIN_MAX_TENTATIVAS = 5;
 const PONTO_PIN_BLOQUEIO_SEGUNDOS = 300;
+
+/**
+ * Trava curta por funcionário: duas batidas do mesmo funcionário chegando juntas
+ * (toque duplo + internet lenta) passavam pela conferência ao mesmo tempo e eram
+ * gravadas as duas. A trava (GET_LOCK do MySQL) é liberada sozinha quando a
+ * requisição termina. Se não der para travar, a batida segue normalmente.
+ */
+function ponto_travar_funcionario(int $funcionarioId): void
+{
+    try {
+        $st = db()->prepare("SELECT GET_LOCK(?, 5)");
+        $st->execute(['ponto_func_' . $funcionarioId]);
+        $st->fetchColumn();
+    } catch (Throwable $e) {
+        // nunca impede alguém de bater o ponto
+    }
+}
 
 function ponto_client_ip(): string
 {
@@ -2455,42 +2482,6 @@ function ponto_falta_horas_do_dia(array $registros, ?array $jornada = null, ?int
         'atraso_tolerado' => $ap['atraso_tolerado_min'],
         'antecipacao' => $ap['antecipacao_min'],
         'antecipacao_excedida' => $ap['antecipacao_excedida_min'],
-    ];
-}
-
-/**
- * Atraso só pelo horário de chegada. Continua existindo para o painel marcar
- * em vermelho quem bateu a entrada fora do horário, mas NÃO é o número que
- * entra no total de atraso do mês.
- */
-function ponto_atraso_do_dia(array $registros, ?array $jornada = null): array
-{
-    $entrada = null;
-    foreach ($registros as $r) {
-        if ((string)($r['tipo'] ?? '') === 'entrada') {
-            $entrada = (string)($r['data_hora'] ?? '');
-            break;
-        }
-    }
-
-    if ($entrada === null || $entrada === '') {
-        return ['minutos' => 0, 'entrada' => null, 'esperado' => '', 'turno' => '', 'turno_horario' => '', 'turno_descricao' => '', 'jornada_min' => $jornada['jornada_min'] ?? PONTO_JORNADA_PADRAO_MINUTOS];
-    }
-
-    /* Cargo com vários horários: vale o mais próximo do que a pessoa bateu. */
-    $turno = ponto_turno_efetivo($registros, $jornada);
-    $esperadoMin = ponto_entrada_esperada_min($entrada, $turno);
-
-    return [
-        'minutos' => ponto_atraso_entrada_minutos($entrada, $turno),
-        'entrada' => date('H:i', strtotime($entrada)),
-        'esperado' => sprintf('%02d:%02d', intdiv($esperadoMin, 60), $esperadoMin % 60),
-        'turno' => !empty($turno['definido'])
-            ? ((string)($turno['horario'] ?? '') ?: (string)($turno['descricao'] ?? ''))
-            : ponto_turno_label($entrada),
-        'turno_horario' => (string)($turno['horario'] ?? ''),
-        'turno_descricao' => (string)($turno['descricao'] ?? ''),
-        'jornada_min' => (int)($turno['jornada_min'] ?? PONTO_JORNADA_PADRAO_MINUTOS),
     ];
 }
 

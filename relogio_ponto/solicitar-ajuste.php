@@ -102,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             'contagem' => $lista['contagem'],
         ]);
     } catch (Throwable $e) {
-        $msg = $e->getMessage();
+        $msg = ponto_msg_erro($e);
         if (stripos($msg, 'mais de um funcionário') !== false || stripos($msg, 'Selecione o condomínio') !== false) {
             $msg = 'PIN duplicado. Peça ao administrador para alterar o PIN de um dos funcionários.';
         }

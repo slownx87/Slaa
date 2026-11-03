@@ -14,6 +14,31 @@ require_once __DIR__ . '/_config.php';
 require_once __DIR__ . '/_admin_shell.php';
 require_admin();
 
+/** Condomínio e cargo escolhidos precisam existir (antes um id inventado virava erro de banco na tela). */
+function admin_valida_condominio_e_cargo(int $condominioId, int $cargoId, int $condominioAtual = 0, int $cargoAtual = 0): void
+{
+    $st = db()->prepare("SELECT ativo FROM ponto_condominios WHERE id = ?");
+    $st->execute([$condominioId]);
+    $row = $st->fetch();
+    if (!$row) {
+        throw new RuntimeException('Esse condomínio não existe. Escolha um da lista.');
+    }
+    if ((int)$row['ativo'] !== 1 && $condominioId !== $condominioAtual) {
+        throw new RuntimeException('Esse condomínio está desativado. Escolha outro ou reative-o antes.');
+    }
+    if ($cargoId > 0) {
+        $st = db()->prepare("SELECT ativo FROM ponto_cargos WHERE id = ?");
+        $st->execute([$cargoId]);
+        $row = $st->fetch();
+        if (!$row) {
+            throw new RuntimeException('Esse cargo não existe. Escolha um da lista ou "Sem cargo".');
+        }
+        if ((int)$row['ativo'] !== 1 && $cargoId !== $cargoAtual) {
+            throw new RuntimeException('Esse cargo está desativado. Escolha outro ou reative-o antes.');
+        }
+    }
+}
+
 /**
  * Grava o PIN escolhido pelo administrador. PIN vazio sorteia um.
  * Devolve o PIN em texto para mostrar UMA vez na tela — depois só fica o hash.
@@ -67,6 +92,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
                 throw new RuntimeException('Sem permissão para esse condomínio.');
             }
 
+            admin_valida_condominio_e_cargo($condominioId, $cargoId);
+            $nome = mb_substr($nome, 0, 120);
+
             $jaUsa = ponto_pin_em_uso($pin);
             if ($jaUsa) {
                 throw new RuntimeException('O PIN ' . $pin . ' já é de ' . $jaUsa['nome']
@@ -75,10 +103,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
             if (pin_fingerprint_disponivel()) {
                 db()->prepare("INSERT INTO ponto_funcionarios (condominio_id, cargo_id, nome, cpf, telefone, email, pin_hash, pin_fingerprint, ativo) VALUES (?, ?, ?, '', ?, '', ?, ?, 1)")
-                    ->execute([$condominioId, $cargoId ?: null, $nome, trim((string)($_POST['telefone'] ?? '')), password_hash($pin, PASSWORD_DEFAULT), pin_fingerprint($pin)]);
+                    ->execute([$condominioId, $cargoId ?: null, $nome, mb_substr(trim((string)($_POST['telefone'] ?? '')), 0, 30), password_hash($pin, PASSWORD_DEFAULT), pin_fingerprint($pin)]);
             } else {
                 db()->prepare("INSERT INTO ponto_funcionarios (condominio_id, cargo_id, nome, cpf, telefone, email, pin_hash, ativo) VALUES (?, ?, ?, '', ?, '', ?, 1)")
-                    ->execute([$condominioId, $cargoId ?: null, $nome, trim((string)($_POST['telefone'] ?? '')), password_hash($pin, PASSWORD_DEFAULT)]);
+                    ->execute([$condominioId, $cargoId ?: null, $nome, mb_substr(trim((string)($_POST['telefone'] ?? '')), 0, 30), password_hash($pin, PASSWORD_DEFAULT)]);
             }
             log_action('criar_funcionario', 'Cadastrou funcionário: ' . $nome, (int)db()->lastInsertId(), $condominioId);
             admin_json(['ok' => true, 'mensagem' => $nome . ' cadastrado.']);
@@ -98,8 +126,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
                 throw new RuntimeException('Sem permissão para mover para esse condomínio.');
             }
 
+            admin_valida_condominio_e_cargo($condominioId, $cargoId, (int)$func['condominio_id'], (int)($func['cargo_id'] ?? 0));
+            $nome = mb_substr($nome, 0, 120);
+
             db()->prepare("UPDATE ponto_funcionarios SET nome = ?, cargo_id = ?, condominio_id = ?, telefone = ? WHERE id = ?")
-                ->execute([$nome, $cargoId ?: null, $condominioId, trim((string)($_POST['telefone'] ?? '')), $id]);
+                ->execute([$nome, $cargoId ?: null, $condominioId, mb_substr(trim((string)($_POST['telefone'] ?? '')), 0, 30), $id]);
             log_action('editar_funcionario', 'Editou funcionário ID ' . $id, $id, $condominioId);
 
             /* Campo de PIN em branco na edição = mantém o PIN atual. */
@@ -161,14 +192,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
                 throw new RuntimeException($func['nome'] . ' tem ' . $batidas . ' batida(s) registrada(s) e não pode ser excluído — use Desativar para tirar do sistema sem perder o histórico.');
             }
 
-            db()->prepare("DELETE FROM ponto_funcionarios WHERE id = ?")->execute([$id]);
+            /* Pedidos, advertências e resumos desse funcionário iriam ficar soltos
+             * no banco (apontando para um id que não existe mais). Sai tudo junto. */
+            db()->beginTransaction();
+            try {
+                foreach (['ponto_solicitacoes', 'ponto_advertencias', 'ponto_resumo_diario', 'ponto_ajustes'] as $tabelaFilha) {
+                    if (table_exists($tabelaFilha)) {
+                        db()->prepare("DELETE FROM {$tabelaFilha} WHERE funcionario_id = ?")->execute([$id]);
+                    }
+                }
+                db()->prepare("DELETE FROM ponto_funcionarios WHERE id = ?")->execute([$id]);
+                db()->commit();
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
             log_action('excluir_funcionario', 'Excluiu funcionário ' . $func['nome'] . ' (ID ' . $id . ')', null, (int)$func['condominio_id']);
             admin_json(['ok' => true, 'mensagem' => $func['nome'] . ' excluído.']);
         }
 
         throw new RuntimeException('Ação desconhecida.');
     } catch (Throwable $e) {
-        admin_json(['ok' => false, 'error' => $e->getMessage()], 422);
+        admin_json(['ok' => false, 'error' => ponto_msg_erro($e)], 422);
     }
 }
 

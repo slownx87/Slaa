@@ -47,6 +47,23 @@ Tudo abaixo foi conferido lendo o código inteiro e **rodando o sistema de verda
 | 24 | Barra "Semana" do app: 44 h para todo mundo | Meta pelo cargo (8 h/dia = 44 h como antes; 6 h/dia = 33 h; 12x36 = 38h30) |
 | 25 | **PDF e ícones dependiam de internet** (cdnjs e Google Fonts) | Bibliotecas do PDF, fonte Inter e ícones hospedados em `assets/` (testado com a internet bloqueada: PDF e ZIP saem, ícones aparecem) |
 
+### Rodada 3 (varredura completa)
+Rodei o sistema com **todos os avisos do PHP ligados**, percorri cada tela (celular 360 px e computador 1280 px, com câmera de teste) e cada ação de funcionário e admin (cadastro, edição, PIN, ativar/excluir, advertência, pedidos, aprovação, fechamento de dia, calendário, lote, sair).
+
+| # | Problema | Situação |
+|---|----------|----------|
+| 26 | **Erro de banco aparecia na tela** (`SQLSTATE[23000] ...`), e com o banco fora do ar a tela pública de bater ponto mostrava host/usuário | Tela recebe texto genérico; o detalhe vai para o log do servidor (só o `diagnostico.php` do admin mostra) |
+| 27 | **Admin desativado (ou com nível/condomínio trocado) mantinha o acesso antigo** até a sessão vencer (agora 12 h) | O painel confere o admin no banco a cada página |
+| 28 | **Admin de condomínio criado sem condomínio virava acesso a tudo** | Exige condomínio válido |
+| 29 | Funcionário podia ser cadastrado com cargo/condomínio inexistente ou desativado | Validação com mensagem clara; nome e telefone limitados ao tamanho do campo |
+| 30 | Excluir funcionário deixava pedidos, advertências e resumos "soltos" no banco | Sai tudo junto (em transação) |
+| 31 | Duas batidas iguais chegando juntas podiam ser gravadas as duas | Trava por funcionário |
+| 32 | Foto: tipo era o **declarado** no envio (GIF "disfarçado" de PNG era aceito como .png) | Vale o tipo real; só JPG/PNG/WebP |
+| 33 | Painel: batidas da madrugada de quem faz turno da noite **não apareciam** em "Batidas de hoje" | Aparecem (e entram no contador) |
+| 34 | Pedido de correção aceitava dia de qualquer ano | Limite de ~13 meses (depois, fale com o admin) |
+| 35 | Sem cabeçalhos de segurança; página com dado pessoal ficava em cache do navegador | `nosniff`, `X-Frame-Options`, `Referrer-Policy` e `no-store` |
+| 36 | 9 funções mortas (sobras das telas antigas) | Removidas |
+
 ### Segurança menor
 CSV podia executar fórmula do Excel (nome começando com `=`) · sorteio de PIN usava `Math.random` ·
 JSON dentro de `<script>` sem escape de `</script>` · `diagnostico.php` agora confere as colunas novas e a proteção das fotos.
@@ -118,4 +135,4 @@ Regra aplicada no relatório, CSV, PDF do espelho e no Histórico do funcionári
 
 ## 5. Testes
 
-`php tests/apuracao_teste.php` — 78 verificações da conta (tolerância, antecipação, turno da noite, virada de meia-noite, Páscoa/feriados, regra de falta, meta da semana, bloqueio de entrada antes da hora). Não usa banco.
+`php tests/apuracao_teste.php` — 79 verificações da conta (tolerância, antecipação, turno da noite, virada de meia-noite, Páscoa/feriados, regra de falta, meta da semana, bloqueio de entrada antes da hora). Não usa banco.
