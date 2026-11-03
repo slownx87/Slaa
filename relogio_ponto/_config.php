@@ -1850,7 +1850,7 @@ function ensure_cargo_horarios(): void
         'minutos_intervalo' => "ADD COLUMN minutos_intervalo INT NOT NULL DEFAULT 60",
         'tolerancia_minutos' => "ADD COLUMN tolerancia_minutos INT NOT NULL DEFAULT 15",
         /* NULL = sem limite de chegada antecipada (não controla). */
-        'antecipacao_minutos' => "ADD COLUMN antecipacao_minutos INT NULL",
+        'antecipacao_minutos' => "ADD COLUMN antecipacao_minutos INT NULL DEFAULT " . PONTO_ANTECIPACAO_PADRAO_MIN,
         /* 1 = dia sem nenhuma batida conta como falta (exceto domingo/feriado).
          * 0 = não controla (escala 12x36 / revezamento, em que o dia de folga varia). */
         'controla_falta' => "ADD COLUMN controla_falta TINYINT(1) NOT NULL DEFAULT 1",
@@ -1955,7 +1955,7 @@ function ensure_cargo_turnos_table(): void
         hora_saida TIME NOT NULL,
         minutos_intervalo INT NOT NULL DEFAULT 60,
         tolerancia_minutos INT NOT NULL DEFAULT 15,
-        antecipacao_minutos INT NULL,
+        antecipacao_minutos INT NULL DEFAULT " . PONTO_ANTECIPACAO_PADRAO_MIN . ",
         descricao VARCHAR(60) NULL,
         criado_em DATETIME NOT NULL,
         KEY idx_turno_cargo (cargo_id)
@@ -1964,7 +1964,7 @@ function ensure_cargo_turnos_table(): void
     /* Tabela criada na versão anterior: ganha a coluna nova sozinha. */
     try {
         if (!column_exists('ponto_cargo_turnos', 'antecipacao_minutos')) {
-            db()->exec("ALTER TABLE ponto_cargo_turnos ADD COLUMN antecipacao_minutos INT NULL AFTER tolerancia_minutos");
+            db()->exec("ALTER TABLE ponto_cargo_turnos ADD COLUMN antecipacao_minutos INT NULL DEFAULT " . PONTO_ANTECIPACAO_PADRAO_MIN . " AFTER tolerancia_minutos");
         }
     } catch (Throwable $e) {
         // segue sem a coluna: o turno extra usa a regra do cargo
@@ -2213,6 +2213,10 @@ const PONTO_ENTRADA_COMERCIAL_MIN = 480;   // 08:00
 const PONTO_ENTRADA_NOTURNO_MIN = 1080;    // 18:00
 const PONTO_CORTE_TURNO_NOTURNO_MIN = 1020; // 17:00 — a partir daqui é turno da noite
 const PONTO_TOLERANCIA_ATRASO_MIN = 15;
+/* Padrão de "pode chegar antes": 10 min. Cargo novo já vem com 10, e os cargos que
+ * já existiam quando a coluna foi criada ficam com 10. Campo em branco continua
+ * sendo "sem limite" (NULL). */
+const PONTO_ANTECIPACAO_PADRAO_MIN = 10;
 
 /**
  * Horário de entrada esperado (minutos desde 00:00).

@@ -58,12 +58,12 @@ JSON dentro de `<script>` sem escape de `</script>` · `diagnostico.php` agora c
 | Campo | Em branco | Preenchido com N |
 |-------|-----------|------------------|
 | **Atrasado até (min)** | **Sem tolerância**: todo minuto depois da entrada conta | Chegar até N min depois da entrada **não conta atraso**. Passou de N, conta **tudo** (08:20 com N=15 = 20 min) |
-| **Antes até (min)** | **Sem limite**: chegar cedo não é restringido | Chegar até N min antes é aceito. **Antes disso o app avisa e NÃO deixa bater a entrada** (07:30 com N=10 p/ entrada 08:00: "entrada liberada a partir das 07:50"). A batida nem é gravada. |
+| **Antes até (min)** — **padrão 10** | **Sem limite**: chegar cedo não é restringido | Chegar até N min antes é aceito. **Antes disso o app avisa e NÃO deixa bater a entrada** (07:30 com N=10 p/ entrada 08:00: "entrada liberada a partir das 07:50"). A batida nem é gravada. |
 
 - Continua valendo a regra que você já tinha: atraso = o que faltou para fechar a jornada; trabalhar além **não** gera crédito.
 - O atraso tolerado entra como "cumprido" (o saldo do espelho não fica negativo por causa dele).
 - Aparece igual em: histórico do funcionário, painel do admin (`+Xmin` / `-Xmin cedo`), relatório, CSV e PDF do espelho.
-- Cargo novo já vem com "Atrasado até 15" (o comportamento que existia); para não ter tolerância, apague o número.
+- Cargo novo já vem com "Atrasado até 15" e "Antes até 10"; para não ter tolerância/limite, apague o número. Os cargos que já existiam ficam com "Antes até 10" quando a coluna é criada.
 - O limite "Antes até" só funciona com entrada e saída preenchidas (precisa de um horário para medir).
 
 ### Entrada antes da hora (aviso e bloqueio)
@@ -92,8 +92,8 @@ Regra aplicada no relatório, CSV, PDF do espelho e no Histórico do funcionári
 3. Suba os arquivos de `relogio_ponto/` (**não** apague `uploads/`).
 4. Abra `admin-config.php` uma vez: as colunas novas (`antecipacao_minutos`) são criadas sozinhas. Se preferir na mão:
    ```sql
-   ALTER TABLE ponto_cargos ADD COLUMN antecipacao_minutos INT NULL;
-   ALTER TABLE ponto_cargo_turnos ADD COLUMN antecipacao_minutos INT NULL AFTER tolerancia_minutos;
+   ALTER TABLE ponto_cargos ADD COLUMN antecipacao_minutos INT NULL DEFAULT 10;
+   ALTER TABLE ponto_cargo_turnos ADD COLUMN antecipacao_minutos INT NULL DEFAULT 10 AFTER tolerancia_minutos;
    ALTER TABLE ponto_cargos ADD COLUMN controla_falta TINYINT(1) NOT NULL DEFAULT 1;
    ```
    (A tabela `ponto_feriados` também é criada sozinha.)

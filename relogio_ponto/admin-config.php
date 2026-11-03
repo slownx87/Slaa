@@ -64,12 +64,17 @@ function admin_horario_do_post(): array
         $tolerancia = $bruto === '' ? 0 : min(180, (int)$bruto);
     }
 
-    /* Chegada antecipada tolerada: campo vazio = SEM limite (NULL). */
-    $brutoAnt = trim((string)($_POST['antecipacao_minutos'] ?? ''));
-    if ($brutoAnt !== '' && !ctype_digit($brutoAnt)) {
-        throw new RuntimeException('Chegada antecipada: use só números (minutos), ou deixe em branco para não ter limite.');
+    /* Chegada antecipada: campo que nem veio = padrão (10 min); campo vazio =
+     * SEM limite (NULL). */
+    if (!array_key_exists('antecipacao_minutos', $_POST)) {
+        $antecipacao = PONTO_ANTECIPACAO_PADRAO_MIN;
+    } else {
+        $brutoAnt = trim((string)$_POST['antecipacao_minutos']);
+        if ($brutoAnt !== '' && !ctype_digit($brutoAnt)) {
+            throw new RuntimeException('Chegada antecipada: use só números (minutos), ou deixe em branco para não ter limite.');
+        }
+        $antecipacao = $brutoAnt === '' ? null : min(240, (int)$brutoAnt);
     }
-    $antecipacao = $brutoAnt === '' ? null : min(240, (int)$brutoAnt);
 
     return [$entrada, $saida, $intervalo, $tolerancia, $antecipacao];
 }
@@ -189,8 +194,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             if (!array_key_exists('tolerancia_minutos', $_POST)) {
                 $_POST['tolerancia_minutos'] = (string)(int)($cargoRow['tolerancia_minutos'] ?? 15);
             }
-            if (!array_key_exists('antecipacao_minutos', $_POST) && isset($cargoRow['antecipacao_minutos'])) {
-                $_POST['antecipacao_minutos'] = (string)$cargoRow['antecipacao_minutos'];
+            if (!array_key_exists('antecipacao_minutos', $_POST)) {
+                $_POST['antecipacao_minutos'] = isset($cargoRow['antecipacao_minutos'])
+                    ? (string)(int)$cargoRow['antecipacao_minutos']
+                    : ''; // cargo sem limite => o horário extra também fica sem limite
             }
             [$entrada, $saida, $intervalo, $tolerancia, $antecipacao] = admin_horario_do_post();
             if ($entrada === null) {
@@ -422,7 +429,7 @@ admin_topbar(false);
 </div>
 
 <span class="font-label-bold text-label-bold text-primary uppercase tracking-wider mt-1">Tolerâncias de chegada</span>
-<p class="font-label-sm text-label-sm text-secondary">Opcional. <b>Pode chegar atrasado até</b>: depois da entrada, esses minutos não contam como atraso (passou disso, conta tudo). <b>Pode chegar antes até</b>: quem tentar bater a entrada mais cedo que isso recebe um aviso e o app <b>não deixa</b> bater. Em branco = sem tolerância / sem limite.</p>
+<p class="font-label-sm text-label-sm text-secondary">Opcional. <b>Pode chegar atrasado até</b>: depois da entrada, esses minutos não contam como atraso (passou disso, conta tudo). <b>Pode chegar antes até</b>: quem tentar bater a entrada mais cedo que isso recebe um aviso e o app <b>não deixa</b> bater. Em branco = sem tolerância / sem limite. O padrão de "antes" é <b><?= (int)PONTO_ANTECIPACAO_PADRAO_MIN ?> min</b>.</p>
 <div class="grid grid-cols-2 gap-2">
 <div class="flex flex-col gap-1">
 <label class="font-label-sm text-label-sm text-secondary" for="cgTolerancia">Atrasado até (min)</label>
@@ -430,7 +437,7 @@ admin_topbar(false);
 </div>
 <div class="flex flex-col gap-1">
 <label class="font-label-sm text-label-sm text-secondary" for="cgAntecipacao">Antes até (min)</label>
-<input class="campo font-body-md text-body-md text-center" id="cgAntecipacao" inputmode="numeric" max="240" min="0" placeholder="sem limite" type="number"/>
+<input class="campo font-body-md text-body-md text-center" id="cgAntecipacao" inputmode="numeric" max="240" min="0" placeholder="sem limite" type="number" value="<?= (int)PONTO_ANTECIPACAO_PADRAO_MIN ?>"/>
 </div>
 </div>
 <p class="font-label-sm text-label-sm text-primary" id="cgPreview"></p>

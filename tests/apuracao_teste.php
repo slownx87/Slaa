@@ -168,6 +168,7 @@ confere('cargo sem horário = 44 h', ponto_meta_semana_min(480, false), 2640);
 confere('9 h/dia não passa de 44 h', ponto_meta_semana_min(540, true), 2640);
 
 echo "Entrada antes da hora (aviso e bloqueio)\n";
+confere('padrão de "pode chegar antes" = 10 min', PONTO_ANTECIPACAO_PADRAO_MIN, 10);
 $jl = jornada_de($comLimite); // 08:00-17:00, limite de 10 min antes
 $b = ponto_entrada_antecipada_da_jornada($jl, '2026-08-03 07:49:00');
 confere('07:49 com limite de 10: bloqueia', $b !== null, true);
