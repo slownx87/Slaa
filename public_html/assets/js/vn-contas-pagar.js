@@ -35,6 +35,12 @@
   function urlFoto(id, mini) { return 'contas-pagar-foto.php?id=' + encodeURIComponent(id) + (mini ? '&mini=1' : ''); }
   function dinheiro(txt) { return 'R$ ' + txt; }
   function dataBR(iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; }
+  /* Código único de cada abertura de janela: se o envio for repetido (toque duplo, falha de rede), o servidor recusa o 2º. */
+  function novoToken() {
+    var a = new Uint8Array(12), i;
+    try { (window.crypto || window.msCrypto).getRandomValues(a); } catch (e) { for (i = 0; i < a.length; i++) a[i] = Math.floor(Math.random() * 256); }
+    return Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
 
   /* ------------------------------------------------------------ máscara de valor: digita 125000 -> 1.250,00 */
   function mascara(el) {
@@ -54,6 +60,7 @@
     limparArquivos(formConta);
     $('[data-cp-titulo]', dlgConta).textContent = nova ? 'Nova conta' : 'Editar conta';
     setVal(formConta, 'conta_id', nova ? 0 : c.id);
+    setVal(formConta, 'token', nova ? novoToken() : '');
     setVal(formConta, 'descricao', nova ? '' : c.descricao);
     setVal(formConta, 'valor', nova ? '' : c.valor);
     setVal(formConta, 'vencimento', nova ? '' : c.vencimento);
@@ -161,8 +168,10 @@
     var ok = cents > 0 && n >= 1 && n <= 120 && (tipo === '' || (entC > 0 && entC < cents));
     if (!ok) { box.textContent = 'Preencha o valor total, a entrada e as parcelas para ver como fica.'; return; }
     var resto = cents - entC, base = Math.floor(resto / n), ultima = resto - base * (n - 1);
+    var qtd = n + (entC ? 1 : 0);
     box.textContent = (entC ? 'Entrada ' + brl(entC / 100) + ' + ' : '') + n + ' × ' + brl(base / 100)
-      + (ultima !== base ? ' (a última ' + brl(ultima / 100) + ')' : '') + ' = ' + brl(cents / 100);
+      + (ultima !== base ? ' (a última ' + brl(ultima / 100) + ')' : '') + ' = ' + brl(cents / 100)
+      + ' · ' + qtd + ' contas, numeradas de 1/' + qtd + ' a ' + qtd + '/' + qtd;
   }
 
   function reagir(e) {
@@ -199,6 +208,7 @@
   function abrirPagar(c) {
     limparArquivos(formPagar);
     setVal(formPagar, 'conta_id', c.id);
+    setVal(formPagar, 'token', novoToken());
     setVal(formPagar, 'pago_em', root.getAttribute('data-hoje') || '');
     setVal(formPagar, 'valor_pago', c.valor);
     setVal(formPagar, 'forma_pagamento', '');
@@ -265,6 +275,7 @@
     contaFotos = c;
     limparArquivos(formFotos);
     setVal(formFotos, 'conta_id', c.id);
+    setVal(formFotos, 'token', novoToken());
     setVal(formFotos, 'tipo', c.pago ? 'comprovante' : 'conta');
     $('#cpFotosTitulo', dlgFotos).textContent = 'Fotos — ' + c.descricao;
     $('[data-cp-resumo]', dlgFotos).textContent = dinheiro(c.valor) + (c.pago ? ' · paga em ' + dataBR(c.pago_em) + (c.forma && FORMAS[c.forma] ? ' (' + FORMAS[c.forma] + ')' : '') : ' · vence ' + dataBR(c.vencimento));

@@ -34,6 +34,8 @@ function fin_render_topo(array $f, string $mes): void
     .vn-mchart-cols .col.entrada{background:#16a34a}
     .vn-mchart-cols .col.saida{background:#e11d48}
     .fin-badge-venc{font-weight:800}
+    .cp-num{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;background:var(--primary-softer);color:var(--primary-ink);border:1px solid var(--primary-soft);font-size:.74rem;font-weight:800;white-space:nowrap;vertical-align:1px}
+    html[data-theme="dark"] .cp-num{color:#bfdbfe;background:rgba(59,130,246,.16);border-color:rgba(59,130,246,.4)}
     .fin-vazio-aviso{margin:0}
 </style>
 <?php if (!empty($f['erros'])): ?>
@@ -118,11 +120,11 @@ function fin_render_topo(array $f, string $mes): void
                 <tbody>
                 <?php foreach ($pag['proximas'] as $c):
                     $atras = (string)$c['vencimento'] < $hoje;
-                    $parc = cp_rotulo_parcela($c['parcela_num'] !== null ? (int)$c['parcela_num'] : null, $c['parcela_total'] !== null ? (int)$c['parcela_total'] : null);
+                    $parc = cp_numero_parcela($c['parcela_ordem'] !== null ? (int)$c['parcela_ordem'] : null, $c['parcela_qtd'] !== null ? (int)$c['parcela_qtd'] : null);
                 ?>
                     <tr>
                         <td data-label="Vencimento"><span class="vn-row-title"<?php echo $atras ? ' style="color:var(--danger-text)"' : ''; ?>><?php echo vn_h(vn_date_br($c['vencimento'])); ?></span><span class="vn-row-sub"<?php echo $atras ? ' style="color:var(--danger-text);font-weight:800"' : ''; ?>><?php echo vn_h(cp_quando((string)$c['vencimento'], $hoje)); ?></span></td>
-                        <td data-label="Conta"><span class="vn-row-title"><?php echo vn_h($c['descricao']); ?></span><span class="vn-row-sub"><?php echo vn_h(implode(' · ', array_filter([(string)($c['fornecedor'] ?? ''), (string)($c['categoria'] ?? ''), (string)$parc]))); ?></span></td>
+                        <td data-label="Conta"><span class="vn-row-title"><?php echo vn_h($c['descricao']); ?><?php if ($parc !== null): ?> <span class="cp-num"><?php echo vn_h($parc); ?></span><?php endif; ?></span><span class="vn-row-sub"><?php echo vn_h(implode(' · ', array_filter([(string)($c['fornecedor'] ?? ''), (string)($c['categoria'] ?? '')]))); ?></span></td>
                         <td data-label="Valor" class="num"><strong><?php echo vn_money($c['valor']); ?></strong></td>
                     </tr>
                 <?php endforeach; ?>

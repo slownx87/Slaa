@@ -47,6 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $verVolta = cp_ver((string)($_POST['ver'] ?? 'abertas'));
     $qVolta = mb_substr(trim((string)($_POST['q'] ?? '')), 0, 80);
     $abrirFotos = 0;
+    $tokenUsado = '';
+    $feito = false;   // a operação (criar, pagar, anexar) chegou a acontecer?
 
     try {
         cp_ensure_tables();
@@ -61,12 +63,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($acao === 'salvar_conta') {
             $dados = cp_validar_conta($_POST);
             $nova = $contaId <= 0;
+            if ($nova) {
+                $tokenUsado = cp_token_usar((string)($_POST['token'] ?? ''), 'Essa conta já foi cadastrada. Veja na lista.');
+                if ($tokenUsado === '' && cp_conta_igual_recente($dados)) throw new CpErro('Essa conta já foi cadastrada agora há pouco. Veja na lista.');
+            }
             $plano = $nova ? cp_validar_parcelamento($_POST, $dados) : null;
             $rep = ($nova && !$plano) ? cp_validar_repeticao($_POST, $dados['vencimento'], $hoje) : null;
             if ($plano) {
                 $contaId = cp_criar_parcelamento($dados, $plano);
-                $msg = 'Conta parcelada: ' . ($plano['entrada'] > 0 ? 'entrada de ' . vn_money($plano['entrada']) . ' + ' : '')
-                    . $plano['n'] . ($plano['n'] === 1 ? ' parcela' : ' parcelas') . ' (total ' . vn_money($dados['valor']) . '). Cada uma aparece na lista com o seu vencimento.';
+                $qtdPag = count($plano['itens']);
+                $msg = 'Conta parcelada em ' . $qtdPag . ' pagamentos, numerados de 1/' . $qtdPag . ' a ' . $qtdPag . '/' . $qtdPag . ': '
+                    . ($plano['entrada'] > 0 ? 'entrada de ' . vn_money($plano['entrada']) . ' + ' : '')
+                    . $plano['n'] . ($plano['n'] === 1 ? ' parcela' : ' parcelas') . ' (total ' . vn_money($dados['valor']) . ').';
             } elseif ($rep) {
                 $contaId = cp_criar_recorrente($dados, $rep['freq'], $rep['vezes'], $hoje);
                 $msg = 'Conta adicionada. Ela se repete (' . mb_strtolower(cp_frequencias()[$rep['freq']]) . ($rep['vezes'] ? ', ' . $rep['vezes'] . ' vezes' : ', sem data final') . ') e as próximas aparecem sozinhas.';
@@ -75,13 +83,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $contaId = cp_salvar_conta($contaId, $dados, $aplicar);
                 $msg = $nova ? 'Conta adicionada.' : 'Conta atualizada.' . ($aplicar ? ' As próximas repetições também foram atualizadas.' : '');
             }
+            $feito = true;
             if ($nova) { $verVolta = 'abertas'; $qVolta = ''; }
             if (!empty($_FILES['fotos'])) {
                 $r = cp_salvar_fotos($contaId, 'conta', $_FILES['fotos']);
                 if ($r['salvas'] || $r['falhas']) { [$tipoAviso, $extra] = cp_texto_fotos($r); $msg .= ' ' . $extra; if ($tipoAviso === 'err') $tipoAviso = 'warn'; }
             }
         } elseif ($acao === 'pagar') {
+            $tokenUsado = cp_token_usar((string)($_POST['token'] ?? ''), 'Esse pagamento já foi registrado. Veja na lista.');
             cp_marcar_paga($contaId, $_POST);
+            $feito = true;
             $msg = 'Pagamento registrado.';
             if (!empty($_FILES['fotos'])) {
                 $r = cp_salvar_fotos($contaId, 'comprovante', $_FILES['fotos']);
@@ -93,7 +104,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($acao === 'add_fotos') {
             if (!cp_conta($contaId)) throw new CpErro('Conta não encontrada.');
             if (empty($_FILES['fotos'])) throw new CpErro('Escolha ou tire pelo menos uma foto.');
+            $tokenUsado = cp_token_usar((string)($_POST['token'] ?? ''), 'Essas fotos já foram enviadas. Veja na conta.');
             $r = cp_salvar_fotos($contaId, (string)($_POST['tipo'] ?? 'conta'), $_FILES['fotos']);
+            $feito = $r['salvas'] > 0;
             [$tipoAviso, $msg] = cp_texto_fotos($r);
             if ($msg === '') throw new CpErro('Escolha ou tire pelo menos uma foto.');
             $abrirFotos = $contaId;
@@ -125,6 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new CpErro('Ação inválida. Recarregue a página e tente de novo.');
         }
     } catch (Throwable $e) {
+        if ($tokenUsado !== '' && !$feito) cp_token_liberar($tokenUsado);   // deu erro antes de acontecer: pode tentar de novo
         $tipoAviso = 'err';
         $msg = $e instanceof CpErro ? $e->getMessage() : vn_public_error($e, 'contas-pagar');
         $abrirFotos = 0;
@@ -261,8 +275,9 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 ? cp_rotulo_repeticao((string)$c['rec_freq'], $c['rec_total'] !== null ? (int)$c['rec_total'] : null, (int)$c['ocorrencia'])
                 : null;
             $parcRotulo = !empty($c['parcelamento_id'])
-                ? cp_rotulo_parcela($c['parcela_num'] !== null ? (int)$c['parcela_num'] : null, $c['parcela_total'] !== null ? (int)$c['parcela_total'] : null)
+                ? cp_rotulo_parcela($c['parcela_num'] !== null ? (int)$c['parcela_num'] : null, $c['parcela_ordem'] !== null ? (int)$c['parcela_ordem'] : null, $c['parcela_qtd'] !== null ? (int)$c['parcela_qtd'] : null)
                 : null;
+            $parcNumero = !empty($c['parcelamento_id']) ? cp_numero_parcela($c['parcela_ordem'] !== null ? (int)$c['parcela_ordem'] : null, $c['parcela_qtd'] !== null ? (int)$c['parcela_qtd'] : null) : null;
             $rotulosEstado = ['paga' => ['pago', 'Paga'], 'atrasada' => ['atrasada', 'Atrasada'], 'hoje' => ['hoje', 'Vence hoje'], 'semana' => ['pendente', 'Esta semana'], 'futura' => ['', 'A vencer']];
             $dados = [
                 'id' => $id,
@@ -289,7 +304,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
         ?>
             <tr class="cp-row <?php echo vn_h($estado); ?>" data-cp="<?php echo vn_h(json_encode($dados, JSON_UNESCAPED_UNICODE)); ?>">
                 <td data-label="Conta"><div class="cp-bloco">
-                    <span class="vn-row-title"><?php echo vn_h($c['descricao']); ?></span>
+                    <span class="vn-row-title"><?php echo vn_h($c['descricao']); ?><?php if ($parcNumero !== null): ?> <span class="cp-num"><?php echo vn_h($parcNumero); ?></span><?php endif; ?></span>
                     <?php $sub = array_filter([(string)($c['fornecedor'] ?? ''), (string)($c['categoria'] ?? '')]); ?>
                     <?php if ($sub): ?><span class="vn-row-sub"><?php echo vn_h(implode(' · ', $sub)); ?></span><?php endif; ?>
                     <?php if ($recRotulo !== null): ?><span class="cp-rec"><span class="material-symbols-outlined" aria-hidden="true">event_repeat</span><?php echo vn_h($recRotulo . ((int)$c['rec_ativa'] ? '' : ' · encerrada')); ?></span><?php endif; ?>
@@ -349,6 +364,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
     <form method="post" enctype="multipart/form-data" data-cp-form>
         <input type="hidden" name="acao" value="salvar_conta">
         <input type="hidden" name="conta_id" value="0">
+        <input type="hidden" name="token" value="">
         <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
         <div class="vn-dialog-head"><h4 id="cpContaTitulo" data-cp-titulo>Nova conta</h4></div>
         <div class="vn-dialog-body">
@@ -441,6 +457,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
     <form method="post" enctype="multipart/form-data" data-cp-form>
         <input type="hidden" name="acao" value="pagar">
         <input type="hidden" name="conta_id" value="0">
+        <input type="hidden" name="token" value="">
         <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
         <div class="vn-dialog-head"><h4 id="cpPagarTitulo">Registrar pagamento</h4><p class="cp-dlg-sub" data-cp-resumo></p></div>
         <div class="vn-dialog-body">
@@ -470,6 +487,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
         <form method="post" enctype="multipart/form-data" class="cp-envio" data-cp-form>
             <input type="hidden" name="acao" value="add_fotos">
             <input type="hidden" name="conta_id" value="0">
+            <input type="hidden" name="token" value="">
             <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
             <div class="vn-form-grid">
                 <div class="vn-field"><label for="cpTipoFoto">Tipo da foto</label>
