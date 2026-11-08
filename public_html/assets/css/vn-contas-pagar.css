@@ -136,3 +136,7 @@ html[data-theme="dark"] .cp-rec{color:#bfdbfe;background:rgba(59,130,246,.16);bo
 .cp-serie-info strong{font-weight:800;color:var(--text)}
 .cp-serie-info small{color:var(--muted);font-weight:600;font-size:.78rem}
 .cp-serie form{margin:0;flex:0 0 auto}
+
+/* ------------------------------------------------------------ parcelado: prévia "Entrada + N × valor" */
+.cp-resumo-parc{padding:10px 12px;border-radius:var(--radius);background:var(--primary-softer);border:1px solid var(--primary-soft);color:var(--primary-ink);font-weight:800;font-size:.9rem;line-height:1.45}
+html[data-theme="dark"] .cp-resumo-parc{color:#bfdbfe;background:rgba(59,130,246,.16);border-color:rgba(59,130,246,.4)}

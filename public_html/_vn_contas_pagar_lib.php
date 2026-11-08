@@ -12,6 +12,9 @@
     recebe um .htaccess "Require all denied" e as imagens só saem por contas-pagar-foto.php).
     Cada foto tem um tipo: 'conta' (boleto, nota, foto da conta) ou 'comprovante' (prova do pagamento).
 
+    Contas parceladas: "Parcelado" cria, de uma vez, a entrada (opcional, em % ou em R$) e as parcelas do restante.
+    Cada uma é uma conta comum (paga, tem fotos, pode ser editada) ligada às outras por parcelamento_id.
+
     Contas recorrentes (aluguel, internet, contador...): a conta é criada com "Repetir" e passa a existir uma
     "repetição" (vn_contas_pagar_recorrentes). As próximas contas aparecem sozinhas, com cerca de 2 meses de
     antecedência (cp_gerar_recorrentes, chamada a cada vez que a tela abre), até acabar o número de vezes ou
@@ -69,10 +72,14 @@ function cp_ensure_tables(): void
         forma_pagamento VARCHAR(20) NULL,
         recorrente_id INT NULL,
         ocorrencia INT NULL,
+        parcelamento_id INT NULL,
+        parcela_num INT NULL,
+        parcela_total INT NULL,
         criado_em DATETIME NOT NULL,
         INDEX (pago, vencimento),
         INDEX (pago_em),
-        INDEX idx_recorrente (recorrente_id)
+        INDEX idx_recorrente (recorrente_id),
+        INDEX idx_parcelamento (parcelamento_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     vn_exec("CREATE TABLE IF NOT EXISTS vn_contas_pagar_recorrentes (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -92,6 +99,9 @@ function cp_ensure_tables(): void
     // Quem já usa o A Pagar tem a tabela antiga: acrescenta as colunas novas sem perder nada.
     vn_add_col_if_missing('vn_contas_pagar', 'recorrente_id', 'INT NULL, ADD INDEX idx_recorrente (recorrente_id)');
     vn_add_col_if_missing('vn_contas_pagar', 'ocorrencia', 'INT NULL');
+    vn_add_col_if_missing('vn_contas_pagar', 'parcelamento_id', 'INT NULL, ADD INDEX idx_parcelamento (parcelamento_id)');
+    vn_add_col_if_missing('vn_contas_pagar', 'parcela_num', 'INT NULL');
+    vn_add_col_if_missing('vn_contas_pagar', 'parcela_total', 'INT NULL');
     vn_exec("CREATE TABLE IF NOT EXISTS vn_contas_pagar_fotos (
         id INT AUTO_INCREMENT PRIMARY KEY,
         conta_id INT NOT NULL,
@@ -237,6 +247,7 @@ function cp_validar_conta(array $post): array
    Cria (id = 0) ou atualiza a conta. Devolve o id.
    $aplicarProximas: numa conta que se repete, também muda a descrição/valor/fornecedor/categoria/observação
    das próximas repetições ainda não pagas (e do modelo, para as que ainda vão aparecer). As datas não mudam.
+   Numa parcela, muda só descrição/fornecedor/categoria/observação das OUTRAS parcelas não pagas (valores e datas ficam).
 */
 function cp_salvar_conta(int $id, array $d, bool $aplicarProximas = false): int
 {
@@ -252,6 +263,10 @@ function cp_salvar_conta(int $id, array $d, bool $aplicarProximas = false): int
             vn_exec('UPDATE vn_contas_pagar SET descricao = ?, fornecedor = ?, categoria = ?, valor = ?, observacao = ?
                      WHERE recorrente_id = ? AND pago = 0 AND ocorrencia > ?',
                 [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['observacao'], $rec, (int)($atual['ocorrencia'] ?? 0)]);
+        }
+        if ($aplicarProximas && (int)($atual['parcelamento_id'] ?? 0) > 0) {
+            vn_exec('UPDATE vn_contas_pagar SET descricao = ?, fornecedor = ?, categoria = ?, observacao = ? WHERE parcelamento_id = ? AND pago = 0 AND id <> ?',
+                [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['observacao'], (int)$atual['parcelamento_id'], $id]);
         }
         return $id;
     }
@@ -288,6 +303,124 @@ function cp_excluir_conta(int $id): void
     }
     vn_exec('DELETE FROM vn_contas_pagar WHERE id = ?', [$id]);
     @rmdir(cp_fotos_dir($id));   // só remove se ficou vazia
+}
+
+/* ------------------------------------------------------------------ contas parceladas */
+function cp_intervalos(): array
+{
+    return ['mensal' => 'Todo mês', 'quinzenal' => 'A cada 15 dias', 'semanal' => 'Toda semana'];
+}
+
+/* "Entrada" ou "Parcela 2 de 5" (null se a conta não é parcelada). */
+function cp_rotulo_parcela(?int $num, ?int $total): ?string
+{
+    if ($num === null) return null;
+    return $num === 0 ? 'Entrada' : 'Parcela ' . $num . ' de ' . (int)$total;
+}
+
+/*
+   Lê "Forma de pagamento" do formulário. Devolve null (à vista) ou o plano:
+     ['entrada' => R$, 'n' => parcelas do restante, 'freq' => ..., 'itens' => [['num' => 0..n, 'valor' => R$, 'venc' => data], ...]]
+   Entrada em porcentagem ('pct') ou em reais ('val'). O restante é dividido em n parcelas (os centavos que sobram
+   ficam na última, então a soma fecha sempre no valor total). Lança CpErro com a mensagem para o usuário.
+   $d = cp_validar_conta(): valor = total; vencimento = data da entrada (ou da 1ª parcela, se não houver entrada).
+*/
+function cp_validar_parcelamento(array $post, array $d): ?array
+{
+    if ((string)($post['condicao'] ?? 'avista') !== 'parcelado') return null;
+
+    $n = trim((string)($post['parcelas'] ?? ''));
+    if ($n === '' || !ctype_digit($n) || (int)$n < 1 || (int)$n > 120) throw new CpErro('Em "número de parcelas", digite de 1 a 120.');
+    $n = (int)$n;
+
+    $totalCent = (int)round($d['valor'] * 100);
+    $tipo = (string)($post['entrada_tipo'] ?? '');
+    $entradaCent = 0;
+    if ($tipo === 'pct') {
+        $pct = (float)str_replace(',', '.', trim((string)($post['entrada_valor'] ?? '')));
+        if ($pct <= 0 || $pct >= 100) throw new CpErro('A entrada em porcentagem deve ser maior que 0% e menor que 100%.');
+        $entradaCent = (int)round($totalCent * $pct / 100);
+    } elseif ($tipo === 'val') {
+        $entradaCent = (int)round(vn_money_db($post['entrada_valor'] ?? '') * 100);
+        if ($entradaCent <= 0) throw new CpErro('Informe o valor da entrada.');
+    } elseif ($tipo !== '') {
+        throw new CpErro('Escolha se a entrada é em porcentagem ou em valor.');
+    }
+    if ($tipo !== '' && ($entradaCent <= 0 || $entradaCent >= $totalCent)) throw new CpErro('A entrada precisa ser maior que zero e menor que o valor total.');
+    if ($entradaCent === 0 && $n === 1) return null;   // 1 parcela sem entrada = conta à vista
+
+    $freq = (string)($post['intervalo'] ?? 'mensal');
+    if (!isset(cp_intervalos()[$freq])) $freq = 'mensal';
+
+    // datas: entrada no vencimento escolhido; 1ª parcela depois (padrão: um intervalo depois), ou no próprio vencimento se não há entrada
+    $primeira = $d['vencimento'];
+    if ($entradaCent > 0) {
+        $primeira = vn_date_db_or_null($post['venc_parcela'] ?? '') ?: cp_data_ocorrencia($d['vencimento'], $freq, 1);
+        if ($primeira < $d['vencimento']) throw new CpErro('O vencimento da 1ª parcela não pode ser antes da entrada.');
+    }
+
+    $restoCent = $totalCent - $entradaCent;
+    $baseCent = intdiv($restoCent, $n);
+    $itens = [];
+    if ($entradaCent > 0) $itens[] = ['num' => 0, 'valor' => (float)($entradaCent / 100), 'venc' => $d['vencimento']];
+    for ($k = 1; $k <= $n; $k++) {
+        $cent = $k < $n ? $baseCent : $restoCent - $baseCent * ($n - 1);
+        $itens[] = ['num' => $k, 'valor' => (float)($cent / 100), 'venc' => cp_data_ocorrencia($primeira, $freq, $k - 1)];
+    }
+    foreach ($itens as $it) if ($it['valor'] <= 0) throw new CpErro('Com tantas parcelas o valor de cada uma ficaria zerado. Diminua o número de parcelas.');
+    return ['entrada' => (float)($entradaCent / 100), 'n' => $n, 'freq' => $freq, 'itens' => $itens];
+}
+
+/* Cria a entrada e as parcelas como contas comuns. Devolve o id da primeira (onde vão as fotos e o código do boleto). */
+function cp_criar_parcelamento(array $d, array $plano): int
+{
+    $criadas = [];
+    $grupo = null;
+    try {
+        foreach ($plano['itens'] as $it) {
+            vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, codigo, observacao, parcelamento_id, parcela_num, parcela_total, criado_em)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$d['descricao'], $d['fornecedor'], $d['categoria'], $it['valor'], $it['venc'], $grupo === null ? $d['codigo'] : null, $d['observacao'],
+                 $grupo, $it['num'], $plano['n'], date('Y-m-d H:i:s')]);
+            $id = vn_last_id();
+            $criadas[] = $id;
+            if ($grupo === null) {                       // o grupo é o id da primeira conta
+                $grupo = $id;
+                vn_exec('UPDATE vn_contas_pagar SET parcelamento_id = ? WHERE id = ?', [$grupo, $id]);
+            }
+        }
+    } catch (Throwable $e) {
+        foreach ($criadas as $id) vn_exec('DELETE FROM vn_contas_pagar WHERE id = ?', [$id]);   // não deixa parcelamento pela metade
+        throw $e;
+    }
+    return $criadas[0];
+}
+
+/* Por parcelamento: quantas contas, quantas pagas e o total. [parcelamento_id => [...]] */
+function cp_resumo_parcelamentos(array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if (!$ids) return [];
+    $marcas = implode(',', array_fill(0, count($ids), '?'));
+    $out = [];
+    foreach (vn_fetch_all("SELECT parcelamento_id, COUNT(*) AS q, SUM(pago) AS pagas, SUM(valor) AS total FROM vn_contas_pagar WHERE parcelamento_id IN ($marcas) GROUP BY parcelamento_id", $ids) as $r) {
+        $out[(int)$r['parcelamento_id']] = ['q' => (int)$r['q'], 'pagas' => (int)$r['pagas'], 'total' => (float)$r['total']];
+    }
+    return $out;
+}
+
+/* Cancela o parcelamento: remove as parcelas NÃO pagas e sem foto. As pagas (e as com foto) ficam. Devolve quantas removeu. */
+function cp_cancelar_parcelamento(int $grupo): int
+{
+    if ($grupo <= 0) throw new CpErro('Essa conta não é parcelada.');
+    $n = 0;
+    foreach (vn_fetch_all(
+        'SELECT c.id FROM vn_contas_pagar c WHERE c.parcelamento_id = ? AND c.pago = 0
+           AND NOT EXISTS (SELECT 1 FROM vn_contas_pagar_fotos f WHERE f.conta_id = c.id)', [$grupo]) as $c) {
+        vn_exec('DELETE FROM vn_contas_pagar WHERE id = ?', [(int)$c['id']]);
+        $n++;
+    }
+    return $n;
 }
 
 /* ------------------------------------------------------------------ contas recorrentes */
@@ -422,6 +555,58 @@ function cp_parar_recorrente(int $recId, string $depoisDe): int
         $removidas++;
     }
     return $removidas;
+}
+
+/* ------------------------------------------------------------------ relatório financeiro */
+/* Dados do A Pagar para orcamentos-dashboard.php (Relatórios Financeiros). */
+
+/* Primeiro e último dia de um mês 'AAAA-MM'. */
+function cp_rel_limites(string $mes): array
+{
+    $ini = $mes . '-01';
+    return [$ini, date('Y-m-t', strtotime($ini))];
+}
+
+/* Quanto foi pago no mês (pela data do pagamento): ['total' => R$, 'qtd' => n]. */
+function cp_rel_pago_no_mes(string $mes): array
+{
+    [$ini, $fim] = cp_rel_limites($mes);
+    $r = vn_fetch_one('SELECT COALESCE(SUM(COALESCE(valor_pago, valor)), 0) AS t, COUNT(*) AS q FROM vn_contas_pagar WHERE pago = 1 AND pago_em >= ? AND pago_em <= ?', [$ini, $fim]) ?: [];
+    return ['total' => (float)($r['t'] ?? 0), 'qtd' => (int)($r['q'] ?? 0)];
+}
+
+/* Pago no mês por categoria, do maior para o menor: [['categoria' => ..., 'total' => R$, 'qtd' => n], ...]. */
+function cp_rel_pago_por_categoria(string $mes): array
+{
+    [$ini, $fim] = cp_rel_limites($mes);
+    $out = [];
+    foreach (vn_fetch_all("SELECT COALESCE(NULLIF(TRIM(categoria), ''), 'Sem categoria') AS cat, SUM(COALESCE(valor_pago, valor)) AS t, COUNT(*) AS q
+                           FROM vn_contas_pagar WHERE pago = 1 AND pago_em >= ? AND pago_em <= ? GROUP BY cat ORDER BY t DESC", [$ini, $fim]) as $r) {
+        $out[] = ['categoria' => (string)$r['cat'], 'total' => (float)$r['t'], 'qtd' => (int)$r['q']];
+    }
+    return $out;
+}
+
+/* Pago em cada mês entre os dois meses (inclusive): ['AAAA-MM' => R$]. */
+function cp_rel_pago_por_mes(string $mesIni, string $mesFim): array
+{
+    [$ini] = cp_rel_limites($mesIni);
+    [, $fim] = cp_rel_limites($mesFim);
+    $out = [];
+    foreach (vn_fetch_all("SELECT DATE_FORMAT(pago_em, '%Y-%m') AS m, SUM(COALESCE(valor_pago, valor)) AS t FROM vn_contas_pagar
+                           WHERE pago = 1 AND pago_em >= ? AND pago_em <= ? GROUP BY m", [$ini, $fim]) as $r) {
+        $out[(string)$r['m']] = (float)$r['t'];
+    }
+    return $out;
+}
+
+/* As próximas contas a pagar (atrasadas primeiro), com a quantidade de fotos de cada uma. */
+function cp_rel_proximas(int $limite = 8): array
+{
+    $limite = max(1, min(50, $limite));
+    return vn_fetch_all("SELECT c.id, c.descricao, c.fornecedor, c.categoria, c.valor, c.vencimento, c.pago, c.parcela_num, c.parcela_total,
+                                (SELECT COUNT(*) FROM vn_contas_pagar_fotos f WHERE f.conta_id = c.id) AS fotos
+                         FROM vn_contas_pagar c WHERE c.pago = 0 ORDER BY c.vencimento ASC, c.id ASC LIMIT $limite");
 }
 
 /* ------------------------------------------------------------------ fotos */

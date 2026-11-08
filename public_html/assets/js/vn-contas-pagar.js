@@ -61,11 +61,27 @@
     setVal(formConta, 'categoria', nova ? '' : c.categoria);
     setVal(formConta, 'codigo', nova ? '' : c.codigo);
     setVal(formConta, 'observacao', nova ? '' : c.observacao);
-    // repetir e fotos: só na conta nova (fotos de uma conta existente: pela janela "Fotos")
-    Array.prototype.forEach.call(dlgConta.querySelectorAll('[data-cp-so-nova]'), function (e) { e.hidden = !nova; });
+    // forma de pagamento, repetir e fotos: só na conta nova (fotos de uma conta existente: pela janela "Fotos")
+    setVal(formConta, 'condicao', 'avista');
+    setVal(formConta, 'entrada_tipo', '');
+    setVal(formConta, 'entrada_valor', '');
+    setVal(formConta, 'parcelas', '2');
+    setVal(formConta, 'intervalo', 'mensal');
+    setVal(formConta, 'venc_parcela', '');
+    formConta.elements.venc_parcela.__manual = false;
     setVal(formConta, 'repetir', '');
     setVal(formConta, 'vezes', '');
-    atualizarVezes();
+    contaNova = nova;
+    atualizarCampos();
+    // parcela de um parcelamento: resumo, "aplicar às outras" e "cancelar parcelamento"
+    var cxp = $('[data-cp-parc-box]', dlgConta);
+    cxp.hidden = nova || !c.parc;
+    if (!cxp.hidden) {
+      $('[data-cp-parc-texto]', cxp).textContent = c.parc.rotulo + ' de um parcelamento de R$ ' + c.parc.total + ' (' + c.parc.pagas + ' de ' + c.parc.q + ' já ' + (c.parc.pagas === 1 ? 'paga' : 'pagas') + ').';
+      if (formConta.elements.aplicar_parcelas) formConta.elements.aplicar_parcelas.checked = false;
+    }
+    var fcp = $('#cpFormCancelarParc', dlgConta);
+    if (fcp) fcp.elements.conta_id.value = nova ? 0 : c.id;
     // conta que já se repete: caixa com "aplicar às próximas" e "parar de repetir"
     var caixa = $('[data-cp-rec-box]', dlgConta);
     caixa.hidden = nova || !c.rec;
@@ -85,13 +101,86 @@
     if (fe) fe.elements.conta_id.value = nova ? 0 : c.id;
     abrir(dlgConta);
   }
-  /* "Quantas vezes?" só aparece quando a conta vai se repetir */
-  function atualizarVezes() {
-    var sel = formConta.elements.repetir;
-    var campo = $('[data-cp-vezes]', dlgConta);
-    if (campo) campo.hidden = dlgConta.querySelector('[data-cp-so-nova]').hidden || !sel || sel.value === '';
+  /* ------------------------------------------------------------ à vista x parcelado (e repetir) */
+  var contaNova = true;
+
+  function numero(txt) {
+    var t = String(txt || '').trim();
+    if (!t) return NaN;
+    return parseFloat(t.indexOf(',') !== -1 ? t.replace(/\./g, '').replace(',', '.') : t);
   }
-  formConta.elements.repetir.addEventListener('change', atualizarVezes);
+  function brl(v) { return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+  /* Mostra só os campos que fazem sentido: à vista x parcelado, com ou sem entrada, repetir... */
+  function atualizarCampos() {
+    var cond = formConta.elements.condicao.value;
+    var ent = formConta.elements.entrada_tipo.value;
+    var rep = formConta.elements.repetir.value;
+    Array.prototype.forEach.call(dlgConta.querySelectorAll('[data-cp-so-nova]'), function (e) {
+      var v = contaNova;
+      if (v && e.hasAttribute('data-cp-parc') && cond !== 'parcelado') v = false;
+      if (v && e.hasAttribute('data-cp-entrada') && ent === '') v = false;
+      if (v && e.hasAttribute('data-cp-repetir') && cond !== 'avista') v = false;
+      if (v && e.hasAttribute('data-cp-vezes') && rep === '') v = false;
+      e.hidden = !v;
+    });
+    var parcelado = contaNova && cond === 'parcelado';
+    $('[data-cp-rot-valor]', dlgConta).textContent = parcelado ? 'Valor total (R$) *' : 'Valor (R$) *';
+    $('[data-cp-rot-venc]', dlgConta).textContent = !parcelado ? 'Vencimento *' : (ent !== '' ? 'Vencimento da entrada *' : 'Vencimento da 1ª parcela *');
+    $('[data-cp-rot-entrada]', dlgConta).textContent = ent === 'val' ? 'Valor da entrada (R$)' : 'Entrada (%)';
+    var campo = formConta.elements.entrada_valor;
+    if (ent === 'val') campo.setAttribute('data-cp-money', ''); else campo.removeAttribute('data-cp-money');
+    campo.placeholder = ent === 'val' ? '0,00' : 'Ex.: 30';
+    campo.inputMode = ent === 'val' ? 'numeric' : 'decimal';
+    resumoParcelas();
+  }
+
+  /* Sugere o vencimento da 1ª parcela (um intervalo depois da entrada) enquanto a pessoa não escolher outro. */
+  function sugerirVencParcela() {
+    var campo = formConta.elements.venc_parcela;
+    if (campo.__manual || formConta.elements.entrada_tipo.value === '') return;
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(formConta.elements.vencimento.value);
+    if (!m) { campo.value = ''; return; }
+    var ano = +m[1], mes = +m[2] - 1, dia = +m[3], iv = formConta.elements.intervalo.value, d;
+    if (iv === 'semanal') d = new Date(ano, mes, dia + 7);
+    else if (iv === 'quinzenal') d = new Date(ano, mes, dia + 14);
+    else { var ult = new Date(ano, mes + 2, 0).getDate(); d = new Date(ano, mes + 1, Math.min(dia, ult)); }   // mês seguinte; dia 31 vira o último dia
+    campo.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  /* "Entrada R$ 300,00 + 3 × R$ 233,33 (a última R$ 233,34) = R$ 1.000,00" */
+  function resumoParcelas() {
+    var box = $('[data-cp-resumo-parc]', dlgConta);
+    if (box.hidden) return;
+    var total = numero(formConta.elements.valor.value);
+    var n = parseInt(formConta.elements.parcelas.value, 10);
+    var tipo = formConta.elements.entrada_tipo.value;
+    var cents = Math.round(total * 100), entC = 0;
+    if (tipo === 'pct') entC = Math.round(cents * numero(formConta.elements.entrada_valor.value) / 100);
+    else if (tipo === 'val') entC = Math.round(numero(formConta.elements.entrada_valor.value) * 100);
+    var ok = cents > 0 && n >= 1 && n <= 120 && (tipo === '' || (entC > 0 && entC < cents));
+    if (!ok) { box.textContent = 'Preencha o valor total, a entrada e as parcelas para ver como fica.'; return; }
+    var resto = cents - entC, base = Math.floor(resto / n), ultima = resto - base * (n - 1);
+    box.textContent = (entC ? 'Entrada ' + brl(entC / 100) + ' + ' : '') + n + ' × ' + brl(base / 100)
+      + (ultima !== base ? ' (a última ' + brl(ultima / 100) + ')' : '') + ' = ' + brl(cents / 100);
+  }
+
+  function reagir(e) {
+    var nome = e.target && e.target.name;
+    if (e.target.matches && e.target.matches('[data-cp-money]')) mascara(e.target);   // a máscara global roda depois deste aviso
+    if (e.type === 'change' && nome === 'entrada_tipo') formConta.elements.entrada_valor.value = '';
+    if (nome === 'condicao' || nome === 'entrada_tipo' || nome === 'repetir') atualizarCampos();
+    if (nome === 'vencimento' || nome === 'intervalo' || nome === 'entrada_tipo' || nome === 'condicao') sugerirVencParcela();
+    resumoParcelas();
+  }
+  formConta.addEventListener('input', reagir);
+  formConta.addEventListener('change', reagir);
+  formConta.elements.venc_parcela.addEventListener('input', function () { this.__manual = true; });
+
+  $('[data-cp-cancelar-parc]', dlgConta).addEventListener('click', function () {
+    var f = $('#cpFormCancelarParc', dlgConta);
+    if (f && f.requestSubmit) f.requestSubmit(); else if (f) f.submit();
+  });
 
   $('[data-cp-parar]', dlgConta).addEventListener('click', function () {
     var fp = $('#cpFormParar', dlgConta);
