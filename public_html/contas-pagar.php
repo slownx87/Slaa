@@ -134,8 +134,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $n = cp_cancelar_parcelamento((int)$c['parcelamento_id']);
             $msg = 'Parcelamento cancelado.' . ($n > 0 ? ' ' . $n . ($n === 1 ? ' parcela sem pagamento foi removida.' : ' parcelas sem pagamento foram removidas.') : ' Nada foi removido (as parcelas restantes já estão pagas ou têm foto).');
         } elseif ($acao === 'excluir_conta') {
-            cp_excluir_conta($contaId);
-            $msg = 'Conta excluída.';
+            $parar = !empty($_POST['parar_repeticao']);
+            cp_excluir_conta($contaId, $parar);
+            $msg = 'Conta excluída.' . ($parar ? ' A repetição foi parada: não vai aparecer mais.' : '');
         } else {
             throw new CpErro('Ação inválida. Recarregue a página e tente de novo.');
         }
@@ -456,6 +457,26 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
         <?php endforeach; ?>
     </div>
     <div class="vn-dialog-foot"><button type="button" class="vn-btn" data-cp-fechar>Fechar</button></div>
+</dialog>
+
+<dialog class="vn-dialog cp-dlg" id="cpDlgExcluirRec" aria-labelledby="cpExcluirRecTitulo">
+    <div class="vn-dialog-head"><h4 id="cpExcluirRecTitulo">Excluir conta que se repete</h4><p class="cp-dlg-sub" data-cp-excluir-rec-nome></p></div>
+    <div class="vn-dialog-body">
+        <p style="margin:0">Esta conta se repete. O que você quer fazer?</p>
+        <form method="post" class="cp-opcao">
+            <input type="hidden" name="acao" value="excluir_conta"><input type="hidden" name="conta_id" value="0">
+            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+            <button type="submit" class="vn-btn vn-btn-danger vn-btn-block"><span class="material-symbols-outlined" aria-hidden="true">delete</span>Excluir só esta</button>
+            <small>A conta do próximo mês continua e aparece na hora certa.</small>
+        </form>
+        <form method="post" class="cp-opcao">
+            <input type="hidden" name="acao" value="excluir_conta"><input type="hidden" name="parar_repeticao" value="1"><input type="hidden" name="conta_id" value="0">
+            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+            <button type="submit" class="vn-btn vn-btn-danger vn-btn-block"><span class="material-symbols-outlined" aria-hidden="true">delete</span>Excluir e parar de repetir</button>
+            <small>Remove esta e as próximas que ainda não foram pagas. Nenhuma conta nova será criada.</small>
+        </form>
+    </div>
+    <div class="vn-dialog-foot"><button type="button" class="vn-btn" data-cp-fechar>Cancelar</button></div>
 </dialog>
 
 <dialog class="vn-dialog cp-dlg" id="cpDlgPagar" aria-labelledby="cpPagarTitulo">

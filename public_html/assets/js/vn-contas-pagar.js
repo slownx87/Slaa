@@ -105,11 +105,18 @@
     var ex = $('[data-cp-excluir]', dlgConta);
     ex.hidden = nova;
     var fe = $('#cpFormExcluir', dlgConta);
-    if (fe) fe.elements.conta_id.value = nova ? 0 : c.id;
+    if (fe) {
+      fe.elements.conta_id.value = nova ? 0 : c.id;
+      fe.setAttribute('data-confirm', !nova && c.parc
+        ? 'Excluir só esta parcela? As outras continuam (para apagar todas, use "Cancelar parcelamento").'
+        : 'Excluir esta conta e as fotos dela? Isso não pode ser desfeito.');
+    }
+    contaAberta = nova ? null : c;
     abrir(dlgConta);
   }
   /* ------------------------------------------------------------ à vista x parcelado (e repetir) */
   var contaNova = true;
+  var contaAberta = null;   // conta que está na janela de edição
 
   function numero(txt) {
     var t = String(txt || '').trim();
@@ -197,6 +204,15 @@
   });
 
   $('[data-cp-excluir]', dlgConta).addEventListener('click', function () {
+    // conta que se repete: pergunta se é só esta ou se é para parar de repetir também
+    if (contaAberta && contaAberta.rec && contaAberta.rec.ativa) {
+      var dlgRec = $('#cpDlgExcluirRec');
+      Array.prototype.forEach.call(dlgRec.querySelectorAll('input[name="conta_id"]'), function (i) { i.value = contaAberta.id; });
+      $('[data-cp-excluir-rec-nome]', dlgRec).textContent = contaAberta.descricao + ' · vence ' + dataBR(contaAberta.vencimento);
+      fechar(dlgConta);
+      abrir(dlgRec);
+      return;
+    }
     var fe = $('#cpFormExcluir', dlgConta);
     if (fe && fe.requestSubmit) fe.requestSubmit(); else if (fe) fe.submit();
   });

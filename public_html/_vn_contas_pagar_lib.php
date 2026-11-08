@@ -308,9 +308,12 @@ function cp_desfazer_pagamento(int $id): void
     vn_exec('UPDATE vn_contas_pagar SET pago = 0, pago_em = NULL, valor_pago = NULL, forma_pagamento = NULL WHERE id = ?', [$id]);
 }
 
-function cp_excluir_conta(int $id): void
+/* Exclui a conta e as fotos dela. $pararRepeticao: se ela se repete, para a repetição (remove as futuras sem pagamento e sem foto). */
+function cp_excluir_conta(int $id, bool $pararRepeticao = false): void
 {
-    if (!cp_conta($id)) throw new CpErro('Conta não encontrada.');
+    $c = cp_conta($id);
+    if (!$c) throw new CpErro('Conta não encontrada.');
+    if ($pararRepeticao && (int)($c['recorrente_id'] ?? 0) > 0) cp_parar_recorrente((int)$c['recorrente_id'], (string)$c['vencimento']);
     foreach (vn_fetch_all('SELECT id FROM vn_contas_pagar_fotos WHERE conta_id = ?', [$id]) as $f) {
         cp_excluir_foto((int)$f['id']);
     }
@@ -549,7 +552,7 @@ function cp_criar_recorrente(array $d, string $freq, ?int $vezes, string $hoje):
 
 /*
    Cria a PRÓXIMA conta de cada repetição, uma por vez. A ocorrência n (n >= 1) só é criada quando:
-     - a anterior (n-1) já foi paga (ou foi apagada), ou
+     - a anterior (n-1) já foi paga, ou
      - faltam CP_ANTECEDENCIA_DIAS dias ou menos para ela vencer (para não esquecer se a anterior não foi paga).
    Pode rodar quantas vezes quiser: cada vez só cria o que falta (o contador proximo_n da repetição é "reservado"
    antes de criar, então duas abas abertas ao mesmo tempo não duplicam). $so: só essa repetição.
@@ -574,8 +577,10 @@ function cp_gerar_recorrentes(string $hoje, ?int $so = null, bool $forcarPrimeir
             $venc = cp_data_ocorrencia((string)$r['primeira'], (string)$r['frequencia'], $n);
             if ($n > 0) {
                 $anterior = vn_fetch_one('SELECT pago FROM vn_contas_pagar WHERE recorrente_id = ? AND ocorrencia = ?', [$rid, $n - 1]);
-                $libera = $anterior === null || (int)$anterior['pago'] === 1 || $venc <= $limite;
-                if (!$libera) break;                      // a anterior ainda está em aberto e esta está longe: espera
+                // anterior paga libera. Anterior APAGADA não libera: quem exclui a conta do mês não quer que a do mês
+                // seguinte apareça na mesma hora (parecia que "excluiu mas não excluiu"); ela vem na data normal.
+                $libera = ($anterior !== null && (int)$anterior['pago'] === 1) || $venc <= $limite;
+                if (!$libera) break;                      // a anterior não foi paga e esta está longe: espera
             } elseif (!$forcarPrimeira) {
                 // ocorrência 0 sem pedido explícito (repetição sem nenhuma conta ainda): cria só se já estiver perto
                 if ($venc > $limite) break;
