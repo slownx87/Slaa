@@ -17,11 +17,10 @@
     numerada junto com as outras: 1/5, 2/5, 3/5... (a entrada, se houver, é a 1/N).
 
     Contas recorrentes (aluguel, internet, contador...): a conta é criada com "Repetir" e passa a existir uma
-    "repetição" (vn_contas_pagar_recorrentes). Existe UMA conta aberta por vez: a seguinte só aparece quando a
-    atual é paga, ou quando faltam CP_ANTECEDENCIA_DIAS dias para ela vencer (para não esquecer se não pagarem a
-    anterior). Isso acontece sozinho (cp_gerar_recorrentes, chamada a cada vez que a tela abre), até acabar o
-    número de vezes ou alguém tocar em "Parar de repetir". Cada ocorrência é uma conta normal (paga, tem fotos,
-    pode ser editada).
+    "repetição" (vn_contas_pagar_recorrentes). A primeira conta nasce na hora em que é cadastrada; cada uma das
+    seguintes é criada CP_ANTECEDENCIA_DIAS (7) dias antes de vencer, sozinha (cp_gerar_recorrentes, chamada a cada
+    vez que a tela abre), até acabar o número de vezes ou alguém tocar em "Parar de repetir". Cada ocorrência é
+    uma conta normal (paga, tem fotos, pode ser editada).
 */
 
 /* Erro com mensagem escrita para o usuário (aparece como está na tela). */
@@ -29,7 +28,7 @@ class CpErro extends Exception {}
 
 const CP_FOTOS_MAX_POR_CONTA = 20;
 const CP_FOTO_MAX_BYTES = 15 * 1024 * 1024;
-const CP_ANTECEDENCIA_DIAS = 7;    // a próxima conta repetida aparece, no máximo, quantos dias antes de vencer (se a anterior não foi paga)
+const CP_ANTECEDENCIA_DIAS = 7;    // cada conta repetida é criada quantos dias antes de vencer
 
 function cp_frequencias(): array
 {
@@ -551,13 +550,11 @@ function cp_criar_recorrente(array $d, string $freq, ?int $vezes, string $hoje):
 }
 
 /*
-   Cria a PRÓXIMA conta de cada repetição, uma por vez. A ocorrência n (n >= 1) só é criada quando:
-     - a anterior (n-1) já foi paga, ou
-     - faltam CP_ANTECEDENCIA_DIAS dias ou menos para ela vencer (para não esquecer se a anterior não foi paga).
-   Pode rodar quantas vezes quiser: cada vez só cria o que falta (o contador proximo_n da repetição é "reservado"
-   antes de criar, então duas abas abertas ao mesmo tempo não duplicam). $so: só essa repetição.
-   $forcarPrimeira: cria a ocorrência 0 (a primeira, que a pessoa acabou de cadastrar) sempre.
-   Devolve quantas contas criou.
+   Cria as contas das repetições que chegaram a CP_ANTECEDENCIA_DIAS (7) dias do vencimento. É só a data que conta:
+   pagar ou excluir a anterior não adianta nem atrasa a próxima. A primeira (ocorrência 0) é criada na hora em que a
+   pessoa cadastra ($forcarPrimeira). Pode rodar quantas vezes quiser: cada vez só cria o que falta (o contador
+   proximo_n da repetição é "reservado" antes de criar, então duas abas abertas ao mesmo tempo não duplicam, e uma
+   ocorrência que já existe não é criada de novo). $so: só essa repetição. Devolve quantas contas criou.
 */
 function cp_gerar_recorrentes(string $hoje, ?int $so = null, bool $forcarPrimeira = false): int
 {
@@ -575,26 +572,20 @@ function cp_gerar_recorrentes(string $hoje, ?int $so = null, bool $forcarPrimeir
                 break;
             }
             $venc = cp_data_ocorrencia((string)$r['primeira'], (string)$r['frequencia'], $n);
-            if ($n > 0) {
-                $anterior = vn_fetch_one('SELECT pago FROM vn_contas_pagar WHERE recorrente_id = ? AND ocorrencia = ?', [$rid, $n - 1]);
-                // anterior paga libera. Anterior APAGADA não libera: quem exclui a conta do mês não quer que a do mês
-                // seguinte apareça na mesma hora (parecia que "excluiu mas não excluiu"); ela vem na data normal.
-                $libera = ($anterior !== null && (int)$anterior['pago'] === 1) || $venc <= $limite;
-                if (!$libera) break;                      // a anterior não foi paga e esta está longe: espera
-            } elseif (!$forcarPrimeira) {
-                // ocorrência 0 sem pedido explícito (repetição sem nenhuma conta ainda): cria só se já estiver perto
-                if ($venc > $limite) break;
-            }
+            if ($venc > $limite && !($forcarPrimeira && $n === 0)) break;     // ainda não chegou a hora (7 dias antes)
             if (vn_exec('UPDATE vn_contas_pagar_recorrentes SET proximo_n = ? WHERE id = ? AND proximo_n = ?', [$n + 1, $rid, $n]) !== 1) break;   // outra aba já fez
             try {
-                vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, observacao, recorrente_id, ocorrencia, criado_em)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [$r['descricao'], $r['fornecedor'], $r['categoria'], $r['valor'], $venc, $r['observacao'], $rid, $n, date('Y-m-d H:i:s')]);
+                $ja = vn_fetch_one('SELECT id FROM vn_contas_pagar WHERE recorrente_id = ? AND ocorrencia = ?', [$rid, $n]);
+                if (!$ja) {
+                    vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, observacao, recorrente_id, ocorrencia, criado_em)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        [$r['descricao'], $r['fornecedor'], $r['categoria'], $r['valor'], $venc, $r['observacao'], $rid, $n, date('Y-m-d H:i:s')]);
+                    $criadas++;
+                }
             } catch (Throwable $e) {
                 vn_exec('UPDATE vn_contas_pagar_recorrentes SET proximo_n = ? WHERE id = ? AND proximo_n = ?', [$n, $rid, $n + 1]);   // devolve a vez
                 throw $e;
             }
-            $criadas++;
             $n++;
         }
     }
@@ -602,10 +593,11 @@ function cp_gerar_recorrentes(string $hoje, ?int $so = null, bool $forcarPrimeir
 }
 
 /*
-   Ajuste para repetições criadas quando o sistema ainda criava vários meses de uma vez: mantém só a próxima conta
-   em aberto de cada repetição e remove as que vinham depois, MAS só as que ninguém mexeu (sem pagamento, sem foto,
-   sem código de boleto, com os mesmos dados do modelo) e que ainda não estão perto de vencer. Depois acerta o
-   contador para a próxima conta continuar do mês certo (sem pular nenhum). Devolve quantas removeu.
+   Ajuste para repetições criadas antes da regra "7 dias antes de vencer" (quando o sistema criava vários meses de uma vez
+   ou a seguinte logo ao pagar): remove as contas futuras que ainda não chegaram a 7 dias do vencimento, MAS só as que
+   ninguém mexeu (sem pagamento, sem foto, sem código de boleto, com os mesmos dados do modelo). A primeira conta de cada
+   repetição (ocorrência 0), que a pessoa cadastrou, nunca é removida. Depois acerta o contador para elas voltarem a ser
+   criadas na data certa. Devolve quantas removeu.
 */
 function cp_enxugar_recorrentes(string $hoje): int
 {
@@ -613,18 +605,16 @@ function cp_enxugar_recorrentes(string $hoje): int
     $removidas = 0;
     foreach (vn_fetch_all('SELECT * FROM vn_contas_pagar_recorrentes WHERE ativa = 1') as $r) {
         $rid = (int)$r['id'];
-        $prox = vn_fetch_one('SELECT MIN(ocorrencia) AS o FROM vn_contas_pagar WHERE recorrente_id = ? AND pago = 0', [$rid]);
-        if (!$prox || $prox['o'] === null) continue;
         $dele = vn_fetch_all(
-            'SELECT c.id FROM vn_contas_pagar c
-             WHERE c.recorrente_id = ? AND c.pago = 0 AND c.ocorrencia > ? AND c.vencimento > ?
+            'SELECT c.id, c.ocorrencia FROM vn_contas_pagar c
+             WHERE c.recorrente_id = ? AND c.pago = 0 AND c.ocorrencia >= 1 AND c.vencimento > ?
                AND c.codigo IS NULL AND c.descricao <=> ? AND c.fornecedor <=> ? AND c.categoria <=> ? AND c.valor = ? AND c.observacao <=> ?
                AND NOT EXISTS (SELECT 1 FROM vn_contas_pagar_fotos f WHERE f.conta_id = c.id)',
-            [$rid, (int)$prox['o'], $limite, $r['descricao'], $r['fornecedor'], $r['categoria'], $r['valor'], $r['observacao']]);
+            [$rid, $limite, $r['descricao'], $r['fornecedor'], $r['categoria'], $r['valor'], $r['observacao']]);
         if (!$dele) continue;
-        foreach ($dele as $c) { vn_exec('DELETE FROM vn_contas_pagar WHERE id = ?', [(int)$c['id']]); $removidas++; }
-        $max = vn_fetch_one('SELECT MAX(ocorrencia) AS m FROM vn_contas_pagar WHERE recorrente_id = ?', [$rid]);
-        vn_exec('UPDATE vn_contas_pagar_recorrentes SET proximo_n = ? WHERE id = ?', [(int)($max['m'] ?? -1) + 1, $rid]);   // a próxima volta a ser a seguinte à última que ficou
+        $menor = PHP_INT_MAX;
+        foreach ($dele as $c) { vn_exec('DELETE FROM vn_contas_pagar WHERE id = ?', [(int)$c['id']]); $removidas++; $menor = min($menor, (int)$c['ocorrencia']); }
+        vn_exec('UPDATE vn_contas_pagar_recorrentes SET proximo_n = ? WHERE id = ? AND proximo_n > ?', [$menor, $rid, $menor]);   // volta a criar a partir da 1ª removida, na data certa
     }
     return $removidas;
 }
@@ -650,6 +640,15 @@ function cp_recorrentes_ativas(): array
         'SELECT r.*, (SELECT MIN(c.vencimento) FROM vn_contas_pagar c WHERE c.recorrente_id = r.id AND c.pago = 0) AS proxima
          FROM vn_contas_pagar_recorrentes r WHERE r.ativa = 1 ORDER BY r.descricao'
     );
+}
+
+/* Quando a próxima conta ainda não criada de uma repetição vence e em que dia ela vai aparecer (7 dias antes). null se já criou todas. */
+function cp_proxima_a_criar(array $r): ?array
+{
+    $n = (int)$r['proximo_n'];
+    if ($r['total_vezes'] !== null && $n >= (int)$r['total_vezes']) return null;
+    $venc = cp_data_ocorrencia((string)$r['primeira'], (string)$r['frequencia'], $n);
+    return ['vence' => $venc, 'aparece' => date('Y-m-d', strtotime($venc . ' -' . CP_ANTECEDENCIA_DIAS . ' days'))];
 }
 
 /*

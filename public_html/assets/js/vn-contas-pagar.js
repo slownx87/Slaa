@@ -94,7 +94,7 @@
     caixa.hidden = nova || !c.rec;
     if (!caixa.hidden) {
       $('[data-cp-rec-texto]', caixa).textContent = c.rec.ativa
-        ? 'Esta conta se repete: ' + c.rec.rotulo + '. A próxima aparece quando você pagar esta (ou 7 dias antes de vencer).'
+        ? 'Esta conta se repete: ' + c.rec.rotulo + '. Cada conta seguinte aparece sozinha 7 dias antes de vencer.'
         : 'Esta conta fazia parte de uma repetição que já terminou: ' + c.rec.rotulo + '.';
       $('[data-cp-parar]', caixa).hidden = !c.rec.ativa;
       var chk = formConta.elements.aplicar_proximas;

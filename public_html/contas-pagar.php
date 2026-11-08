@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . $plano['n'] . ($plano['n'] === 1 ? ' parcela' : ' parcelas') . ' (total ' . vn_money($dados['valor']) . ').';
             } elseif ($rep) {
                 $contaId = cp_criar_recorrente($dados, $rep['freq'], $rep['vezes'], $hoje);
-                $msg = 'Conta adicionada. Ela se repete (' . mb_strtolower(cp_frequencias()[$rep['freq']]) . ($rep['vezes'] ? ', ' . $rep['vezes'] . ' vezes' : ', sem data final') . '): a próxima aparece quando você pagar esta, ou ' . CP_ANTECEDENCIA_DIAS . ' dias antes de vencer.';
+                $msg = 'Conta adicionada. Ela se repete (' . mb_strtolower(cp_frequencias()[$rep['freq']]) . ($rep['vezes'] ? ', ' . $rep['vezes'] . ' vezes' : ', sem data final') . '): cada conta seguinte aparece sozinha ' . CP_ANTECEDENCIA_DIAS . ' dias antes de vencer.';
             } else {
                 $aplicar = !$nova && (!empty($_POST['aplicar_proximas']) || !empty($_POST['aplicar_parcelas']));
                 $contaId = cp_salvar_conta($contaId, $dados, $aplicar);
@@ -94,8 +94,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cp_marcar_paga($contaId, $_POST);
             $feito = true;
             $msg = 'Pagamento registrado.';
-            $c = cp_conta($contaId);
-            if ($c && !empty($c['recorrente_id']) && cp_gerar_recorrentes($hoje, (int)$c['recorrente_id']) > 0) $msg .= ' A próxima conta desta repetição já apareceu na lista.';
             if (!empty($_FILES['fotos'])) {
                 $r = cp_salvar_fotos($contaId, 'comprovante', $_FILES['fotos']);
                 if ($r['salvas'] || $r['falhas']) { [$tipoAviso, $extra] = cp_texto_fotos($r); $msg .= ' ' . $extra; if ($tipoAviso === 'err') $tipoAviso = 'warn'; }
@@ -166,10 +164,10 @@ $erroTela = '';
 $contas = []; $resumo = []; $fotosPorConta = []; $series = []; $parcelamentos = [];
 try {
     cp_ensure_tables();
-    // uma única vez: quem já tinha contas repetidas criadas de vários meses de uma vez fica só com a próxima de cada uma
-    $enxutas = cp_ajuste_unico('recorrentes_uma_por_vez', function () use ($hoje) { return cp_enxugar_recorrentes($hoje); });
-    if ($enxutas) $flash = ['tipo' => 'ok', 'msg' => 'Arrumei as contas que se repetem: deixei só a próxima de cada uma (removi ' . (int)$enxutas . ' conta(s) futura(s) criadas a mais). A seguinte aparece quando você pagar a atual.'];
-    cp_gerar_recorrentes($hoje);           // cria a próxima de cada repetição quando chega a hora (conta anterior paga ou vencimento perto)
+    // uma única vez: contas repetidas que foram criadas adiantadas (vários meses, ou logo ao pagar) voltam a aparecer só 7 dias antes de vencer
+    $enxutas = cp_ajuste_unico('recorrentes_7_dias_antes', function () use ($hoje) { return cp_enxugar_recorrentes($hoje); });
+    if ($enxutas) $flash = ['tipo' => 'ok', 'msg' => 'Arrumei as contas que se repetem: cada uma agora só aparece ' . CP_ANTECEDENCIA_DIAS . ' dias antes de vencer (removi ' . (int)$enxutas . ' conta(s) que estavam adiantadas; elas voltam sozinhas na data certa).'];
+    cp_gerar_recorrentes($hoje);           // cria as contas repetidas que chegaram a 7 dias do vencimento
     $resumo = cp_resumo($hoje);
     $contas = cp_listar($ver, $q, $hoje);
     $fotosPorConta = cp_fotos_das_contas(array_column($contas, 'id'));
@@ -438,7 +436,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
 </dialog>
 
 <dialog class="vn-dialog cp-dlg cp-dlg-wide" id="cpDlgSeries" aria-labelledby="cpSeriesTitulo">
-    <div class="vn-dialog-head"><h4 id="cpSeriesTitulo">Contas fixas (que se repetem)</h4><p class="cp-dlg-sub">Fica sempre uma conta aberta de cada vez: a seguinte aparece quando você paga a atual (ou 7 dias antes de vencer). Para mudar uma, abra a conta na lista e toque em Editar.</p></div>
+    <div class="vn-dialog-head"><h4 id="cpSeriesTitulo">Contas fixas (que se repetem)</h4><p class="cp-dlg-sub">Cada conta seguinte é criada sozinha 7 dias antes de vencer. Para mudar uma, abra a conta na lista e toque em Editar.</p></div>
     <div class="vn-dialog-body">
         <?php if (!$series): ?><div class="cp-sem-fotos">Nenhuma conta fixa no momento.</div><?php endif; ?>
         <?php foreach ($series as $r): ?>
@@ -446,7 +444,9 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 <div class="cp-serie-info">
                     <strong><?php echo vn_h($r['descricao']); ?></strong>
                     <small><?php echo vn_h(cp_frequencias()[$r['frequencia']] ?? 'Repete'); ?> · <?php echo vn_money($r['valor']); ?><?php echo !empty($r['fornecedor']) ? ' · ' . vn_h($r['fornecedor']) : ''; ?></small>
-                    <small>Próxima: <?php echo vn_h($r['proxima'] ? vn_date_br($r['proxima']) : 'ainda não criada'); ?> · <?php echo $r['total_vezes'] !== null ? (int)$r['proximo_n'] . ' de ' . (int)$r['total_vezes'] . ' criadas' : 'sem data final'; ?></small>
+                    <small>Em aberto: <?php echo vn_h($r['proxima'] ? 'vence ' . vn_date_br($r['proxima']) : 'nenhuma'); ?> · <?php echo $r['total_vezes'] !== null ? (int)$r['proximo_n'] . ' de ' . (int)$r['total_vezes'] . ' criadas' : 'sem data final'; ?></small>
+                    <?php $pc = cp_proxima_a_criar($r); ?>
+                    <small><?php echo $pc ? 'Próxima: vence ' . vn_h(vn_date_br($pc['vence'])) . ' · aparece em ' . vn_h(substr(vn_date_br($pc['aparece']), 0, 5)) : 'Todas as contas já foram criadas'; ?></small>
                 </div>
                 <form method="post" data-danger data-confirm="Parar de repetir &quot;<?php echo vn_h($r['descricao']); ?>&quot;? As contas futuras que ainda não foram pagas (e não têm foto) serão removidas.">
                     <input type="hidden" name="acao" value="parar_recorrente"><input type="hidden" name="rec_id" value="<?php echo (int)$r['id']; ?>">
@@ -467,7 +467,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
             <input type="hidden" name="acao" value="excluir_conta"><input type="hidden" name="conta_id" value="0">
             <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
             <button type="submit" class="vn-btn vn-btn-danger vn-btn-block"><span class="material-symbols-outlined" aria-hidden="true">delete</span>Excluir só esta</button>
-            <small>A conta do próximo mês continua e aparece na hora certa.</small>
+            <small>A conta do próximo mês continua e aparece 7 dias antes de vencer.</small>
         </form>
         <form method="post" class="cp-opcao">
             <input type="hidden" name="acao" value="excluir_conta"><input type="hidden" name="parar_repeticao" value="1"><input type="hidden" name="conta_id" value="0">
