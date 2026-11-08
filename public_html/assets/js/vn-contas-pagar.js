@@ -1,6 +1,7 @@
 /* =========================================================================
    VN System — A Pagar (contas-pagar.php) · v1
-   - janelas: nova/editar conta, pagar e fotos (usa <dialog>)
+   - janelas: nova/editar conta, pagar, fotos e contas fixas (usa <dialog>)
+   - repetir: escolher "Todo mês" etc. na conta nova; editar/parar numa conta que se repete
    - campo de valor com máscara (1.250,00)
    - fotos: pré-visualização, redução no celular antes de enviar e galeria com ampliação
    Sem JS os formulários ainda enviam normalmente; o JS só deixa tudo mais leve.
@@ -60,14 +61,43 @@
     setVal(formConta, 'categoria', nova ? '' : c.categoria);
     setVal(formConta, 'codigo', nova ? '' : c.codigo);
     setVal(formConta, 'observacao', nova ? '' : c.observacao);
-    $('[data-cp-so-nova]', dlgConta).hidden = !nova;           // fotos de uma conta existente: pela janela "Fotos"
+    // repetir e fotos: só na conta nova (fotos de uma conta existente: pela janela "Fotos")
+    Array.prototype.forEach.call(dlgConta.querySelectorAll('[data-cp-so-nova]'), function (e) { e.hidden = !nova; });
+    setVal(formConta, 'repetir', '');
+    setVal(formConta, 'vezes', '');
+    atualizarVezes();
+    // conta que já se repete: caixa com "aplicar às próximas" e "parar de repetir"
+    var caixa = $('[data-cp-rec-box]', dlgConta);
+    caixa.hidden = nova || !c.rec;
+    if (!caixa.hidden) {
+      $('[data-cp-rec-texto]', caixa).textContent = c.rec.ativa
+        ? 'Esta conta se repete: ' + c.rec.rotulo + '. As próximas aparecem sozinhas.'
+        : 'Esta conta fazia parte de uma repetição que já terminou: ' + c.rec.rotulo + '.';
+      $('[data-cp-parar]', caixa).hidden = !c.rec.ativa;
+      var chk = formConta.elements.aplicar_proximas;
+      if (chk) { chk.checked = false; chk.closest('label').hidden = !c.rec.ativa; }
+    }
+    var fp = $('#cpFormParar', dlgConta);
+    if (fp) fp.elements.conta_id.value = nova ? 0 : c.id;
     var ex = $('[data-cp-excluir]', dlgConta);
     ex.hidden = nova;
     var fe = $('#cpFormExcluir', dlgConta);
     if (fe) fe.elements.conta_id.value = nova ? 0 : c.id;
     abrir(dlgConta);
-    setTimeout(function () { var f = formConta.elements.descricao; if (f && nova) f.focus(); }, 60);
   }
+  /* "Quantas vezes?" só aparece quando a conta vai se repetir */
+  function atualizarVezes() {
+    var sel = formConta.elements.repetir;
+    var campo = $('[data-cp-vezes]', dlgConta);
+    if (campo) campo.hidden = dlgConta.querySelector('[data-cp-so-nova]').hidden || !sel || sel.value === '';
+  }
+  formConta.elements.repetir.addEventListener('change', atualizarVezes);
+
+  $('[data-cp-parar]', dlgConta).addEventListener('click', function () {
+    var fp = $('#cpFormParar', dlgConta);
+    if (fp && fp.requestSubmit) fp.requestSubmit(); else if (fp) fp.submit();
+  });
+
   $('[data-cp-excluir]', dlgConta).addEventListener('click', function () {
     var fe = $('#cpFormExcluir', dlgConta);
     if (fe && fe.requestSubmit) fe.requestSubmit(); else if (fe) fe.submit();
@@ -189,6 +219,8 @@
     var t = e.target.closest ? e.target : e.target.parentElement;
     if (!t) return;
     if (t.closest('[data-cp-nova]')) { abrirConta(null); return; }
+    var ab = t.closest('[data-cp-abrir]');
+    if (ab) { var alvo = document.getElementById(ab.getAttribute('data-cp-abrir')); if (alvo) abrir(alvo); return; }
     var ac = t.closest('[data-cp-acao]');
     if (ac) {
       var c = dadosDaLinha(ac);

@@ -5,7 +5,8 @@
     - cadastro (descrição, fornecedor, valor, vencimento, código do boleto/PIX);
     - lista por urgência (atrasadas, esta semana, mais adiante) e as já pagas;
     - "Pagar": registra data, valor e forma, e já aceita a foto do comprovante;
-    - fotos em qualquer conta (boleto, nota, comprovante), tiradas na hora ou da galeria.
+    - fotos em qualquer conta (boleto, nota, comprovante), tiradas na hora ou da galeria;
+    - contas que se repetem (aluguel, internet...): as próximas aparecem sozinhas; "Contas fixas" mostra e para.
     Dados e fotos: _vn_contas_pagar_lib.php. Tela: assets/css/vn-contas-pagar.css e assets/js/vn-contas-pagar.js.
     Só admin abre (funcionário e cliente ficam barrados por vn_role_pages).
 */
@@ -59,8 +60,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($acao === 'salvar_conta') {
             $dados = cp_validar_conta($_POST);
             $nova = $contaId <= 0;
-            $contaId = cp_salvar_conta($contaId, $dados);
-            $msg = $nova ? 'Conta adicionada.' : 'Conta atualizada.';
+            $rep = $nova ? cp_validar_repeticao($_POST, $dados['vencimento'], $hoje) : null;
+            if ($rep) {
+                $contaId = cp_criar_recorrente($dados, $rep['freq'], $rep['vezes'], $hoje);
+                $msg = 'Conta adicionada. Ela se repete (' . mb_strtolower(cp_frequencias()[$rep['freq']]) . ($rep['vezes'] ? ', ' . $rep['vezes'] . ' vezes' : ', sem data final') . ') e as próximas aparecem sozinhas.';
+            } else {
+                $aplicar = !$nova && !empty($_POST['aplicar_proximas']);
+                $contaId = cp_salvar_conta($contaId, $dados, $aplicar);
+                $msg = $nova ? 'Conta adicionada.' : 'Conta atualizada.' . ($aplicar ? ' As próximas repetições também foram atualizadas.' : '');
+            }
             if ($nova) { $verVolta = 'abertas'; $qVolta = ''; }
             if (!empty($_FILES['fotos'])) {
                 $r = cp_salvar_fotos($contaId, 'conta', $_FILES['fotos']);
@@ -88,6 +96,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($contaId <= 0) throw new CpErro('Foto não encontrada.');
             $msg = 'Foto removida.';
             $abrirFotos = $contaId;
+        } elseif ($acao === 'parar_recorrente') {
+            $recId = (int)($_POST['rec_id'] ?? 0);
+            $depoisDe = $hoje;
+            if ($recId <= 0) {
+                $c = cp_conta($contaId);
+                if (!$c || empty($c['recorrente_id'])) throw new CpErro('Essa conta não se repete.');
+                $recId = (int)$c['recorrente_id'];
+                $depoisDe = (string)$c['vencimento'];   // pela linha: mantém esta conta e as anteriores
+            }
+            $n = cp_parar_recorrente($recId, $depoisDe);
+            $msg = 'Parou de repetir.' . ($n > 0 ? ' ' . $n . ($n === 1 ? ' conta futura sem pagamento foi removida.' : ' contas futuras sem pagamento foram removidas.') : '');
         } elseif ($acao === 'excluir_conta') {
             cp_excluir_conta($contaId);
             $msg = 'Conta excluída.';
@@ -116,12 +135,14 @@ $flash = $_SESSION['cp_flash'] ?? null;
 unset($_SESSION['cp_flash']);
 
 $erroTela = '';
-$contas = []; $resumo = []; $fotosPorConta = [];
+$contas = []; $resumo = []; $fotosPorConta = []; $series = [];
 try {
     cp_ensure_tables();
+    cp_gerar_recorrentes($hoje);           // cria as contas repetidas que já entraram na janela de ~2 meses
     $resumo = cp_resumo($hoje);
     $contas = cp_listar($ver, $q, $hoje);
     $fotosPorConta = cp_fotos_das_contas(array_column($contas, 'id'));
+    $series = cp_recorrentes_ativas();
 } catch (Throwable $e) {
     $erroTela = vn_public_error($e, 'contas-pagar');
 }
@@ -196,6 +217,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
 <section class="vn-panel">
     <div class="vn-panel-head">
         <div><h3><?php echo vn_h($abas[$ver][0]); ?></h3><small><?php echo count($contas); ?> conta(s) · <?php echo vn_money($totalLista); ?><?php echo $q !== '' ? ' · busca: "' . vn_h($q) . '"' : ''; ?></small></div>
+        <?php if ($series): ?><button type="button" class="vn-mini-btn" data-cp-abrir="cpDlgSeries"><span class="material-symbols-outlined" aria-hidden="true">event_repeat</span>Contas fixas (<?php echo count($series); ?>)</button><?php endif; ?>
     </div>
 
     <div class="cp-tools">
@@ -223,6 +245,9 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
             $estado = cp_estado($c, $hoje);
             $paga = $estado === 'paga';
             $fotos = $fotosPorConta[$id] ?? [];
+            $recRotulo = !empty($c['recorrente_id'])
+                ? cp_rotulo_repeticao((string)$c['rec_freq'], $c['rec_total'] !== null ? (int)$c['rec_total'] : null, (int)$c['ocorrencia'])
+                : null;
             $rotulosEstado = ['paga' => ['pago', 'Paga'], 'atrasada' => ['atrasada', 'Atrasada'], 'hoje' => ['hoje', 'Vence hoje'], 'semana' => ['pendente', 'Esta semana'], 'futura' => ['', 'A vencer']];
             $dados = [
                 'id' => $id,
@@ -238,6 +263,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 'valor_pago' => number_format((float)($c['valor_pago'] ?? $c['valor']), 2, ',', '.'),
                 'forma' => (string)($c['forma_pagamento'] ?? ''),
                 'fotos' => $fotos,
+                'rec' => $recRotulo === null ? null : ['rotulo' => $recRotulo, 'ativa' => (int)$c['rec_ativa']],
             ];
         ?>
             <tr class="cp-row <?php echo vn_h($estado); ?>" data-cp="<?php echo vn_h(json_encode($dados, JSON_UNESCAPED_UNICODE)); ?>">
@@ -245,6 +271,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                     <span class="vn-row-title"><?php echo vn_h($c['descricao']); ?></span>
                     <?php $sub = array_filter([(string)($c['fornecedor'] ?? ''), (string)($c['categoria'] ?? '')]); ?>
                     <?php if ($sub): ?><span class="vn-row-sub"><?php echo vn_h(implode(' · ', $sub)); ?></span><?php endif; ?>
+                    <?php if ($recRotulo !== null): ?><span class="cp-rec"><span class="material-symbols-outlined" aria-hidden="true">event_repeat</span><?php echo vn_h($recRotulo . ((int)$c['rec_ativa'] ? '' : ' · encerrada')); ?></span><?php endif; ?>
                     <?php if (!empty($c['observacao'])): ?><span class="vn-row-sub cp-obs"><?php echo vn_h(mb_strimwidth((string)$c['observacao'], 0, 90, '…')); ?></span><?php endif; ?>
                 </div></td>
                 <td data-label="Vencimento"><div class="cp-bloco">
@@ -309,8 +336,16 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 <div class="vn-field"><label for="cpVenc">Vencimento *</label><input id="cpVenc" name="vencimento" type="date" required></div>
                 <div class="vn-field"><label for="cpFornecedor">Fornecedor</label><input id="cpFornecedor" name="fornecedor" maxlength="180" placeholder="Quem vai receber"></div>
                 <div class="vn-field"><label for="cpCategoria">Categoria</label><input id="cpCategoria" name="categoria" maxlength="60" list="cpCategorias" placeholder="Escolha ou digite"></div>
+                <div class="vn-field" data-cp-so-nova><label for="cpRepetir">Repetir</label>
+                    <select id="cpRepetir" name="repetir"><option value="">Não repete</option><?php foreach (cp_frequencias() as $k => $rot): ?><option value="<?php echo vn_h($k); ?>"><?php echo vn_h($rot); ?></option><?php endforeach; ?></select></div>
+                <div class="vn-field" data-cp-so-nova data-cp-vezes hidden><label for="cpVezes">Quantas vezes?</label><input id="cpVezes" name="vezes" inputmode="numeric" maxlength="3" autocomplete="off" placeholder="Vazio = sem data final"></div>
                 <div class="vn-field full"><label for="cpCodigo">Código do boleto ou PIX copia e cola</label><input id="cpCodigo" name="codigo" maxlength="512" autocomplete="off" placeholder="Opcional (para copiar na hora de pagar)"></div>
                 <div class="vn-field full"><label for="cpObs">Observação</label><textarea id="cpObs" name="observacao" maxlength="2000" rows="2" placeholder="Opcional"></textarea></div>
+                <div class="vn-field full cp-rec-box" data-cp-rec-box hidden>
+                    <p><span class="material-symbols-outlined" aria-hidden="true">event_repeat</span><span data-cp-rec-texto></span></p>
+                    <label class="cp-check"><input type="checkbox" name="aplicar_proximas" value="1"> Aplicar o que mudei (nome, valor, fornecedor, categoria, observação) também às próximas repetições</label>
+                    <button type="button" class="vn-mini-btn" data-cp-parar><span class="material-symbols-outlined" aria-hidden="true">close</span>Parar de repetir</button>
+                </div>
                 <div class="vn-field full" data-cp-so-nova>
                     <label for="cpFotosConta">Fotos da conta (boleto, nota…)</label>
                     <input id="cpFotosConta" type="file" name="fotos[]" accept="image/*" multiple data-cp-fotos>
@@ -326,10 +361,36 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
             <button type="submit" class="vn-btn vn-btn-primary" data-cp-enviar>Salvar</button>
         </div>
     </form>
+    <form method="post" id="cpFormParar" data-danger data-confirm="Parar de repetir esta conta? As próximas contas que ainda não foram pagas (e não têm foto) serão removidas. Esta e as anteriores ficam." hidden>
+        <input type="hidden" name="acao" value="parar_recorrente"><input type="hidden" name="conta_id" value="0">
+        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+    </form>
     <form method="post" id="cpFormExcluir" data-danger data-confirm="Excluir esta conta e as fotos dela? Isso não pode ser desfeito." hidden>
         <input type="hidden" name="acao" value="excluir_conta"><input type="hidden" name="conta_id" value="0">
         <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
     </form>
+</dialog>
+
+<dialog class="vn-dialog cp-dlg cp-dlg-wide" id="cpDlgSeries" aria-labelledby="cpSeriesTitulo">
+    <div class="vn-dialog-head"><h4 id="cpSeriesTitulo">Contas fixas (que se repetem)</h4><p class="cp-dlg-sub">As próximas contas aparecem sozinhas, com cerca de 2 meses de antecedência. Para mudar uma, abra a conta na lista e toque em Editar.</p></div>
+    <div class="vn-dialog-body">
+        <?php if (!$series): ?><div class="cp-sem-fotos">Nenhuma conta fixa no momento.</div><?php endif; ?>
+        <?php foreach ($series as $r): ?>
+            <div class="cp-serie">
+                <div class="cp-serie-info">
+                    <strong><?php echo vn_h($r['descricao']); ?></strong>
+                    <small><?php echo vn_h(cp_frequencias()[$r['frequencia']] ?? 'Repete'); ?> · <?php echo vn_money($r['valor']); ?><?php echo !empty($r['fornecedor']) ? ' · ' . vn_h($r['fornecedor']) : ''; ?></small>
+                    <small>Próxima: <?php echo vn_h($r['proxima'] ? vn_date_br($r['proxima']) : 'ainda não criada'); ?> · <?php echo $r['total_vezes'] !== null ? (int)$r['proximo_n'] . ' de ' . (int)$r['total_vezes'] . ' criadas' : 'sem data final'; ?></small>
+                </div>
+                <form method="post" data-danger data-confirm="Parar de repetir &quot;<?php echo vn_h($r['descricao']); ?>&quot;? As contas futuras que ainda não foram pagas (e não têm foto) serão removidas.">
+                    <input type="hidden" name="acao" value="parar_recorrente"><input type="hidden" name="rec_id" value="<?php echo (int)$r['id']; ?>">
+                    <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+                    <button type="submit" class="vn-mini-btn"><span class="material-symbols-outlined" aria-hidden="true">close</span>Parar</button>
+                </form>
+            </div>
+        <?php endforeach; ?>
+    </div>
+    <div class="vn-dialog-foot"><button type="button" class="vn-btn" data-cp-fechar>Fechar</button></div>
 </dialog>
 
 <dialog class="vn-dialog cp-dlg" id="cpDlgPagar" aria-labelledby="cpPagarTitulo">

@@ -126,6 +126,9 @@ html[data-theme="dark"]{
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 html,body{margin:0;padding:0}
+/* Android (principalmente no app instalado): puxar a tela para baixo recarregava a pagina sem querer
+   quando o dedo descia para rolar para cima. Desliga o "puxar para atualizar". */
+html{overscroll-behavior-y:contain}
 
 body.vn-admin-page{
   font-family:var(--font);
@@ -245,8 +248,7 @@ html[data-theme="dark"] [data-theme-toggle] .vn-theme-icon::before{content:"ligh
 .vn-drawer>*{flex-shrink:0}
 /* A rolagem fica presa ao menu: ao chegar no fim/topo, o gesto NAO passa para a pagina de tras
    (no Android isso fazia o menu parecer travado: so descia, e a pagina de tras e que subia). */
-.vn-drawer{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
-.vn-drawer-backdrop{touch-action:none}
+.vn-drawer{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 @media(max-width:900px){
   /* menu aberto: a pagina de tras fica parada */
   html.vn-drawer-open,html.vn-drawer-open body{overflow:hidden;overscroll-behavior:none}

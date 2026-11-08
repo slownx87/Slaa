@@ -104,7 +104,7 @@
 
 @media (max-width:760px){
   .cp-tools{flex-direction:column;align-items:stretch}
-  .cp-busca{justify-content:stretch}
+  .cp-busca{flex:0 0 auto;justify-content:stretch}   /* sem isso o flex-basis de 280px virava ALTURA na coluna */
   .cp-busca input[type="search"]{max-width:none}
   .cp-dlg,.cp-dlg-wide{width:calc(100vw - 16px);max-height:92vh}
   .cp-obs{max-width:none}
@@ -119,3 +119,20 @@
 @media (max-width:760px){
   .cp-table .num .cp-bloco{align-items:flex-start}
 }
+
+/* ------------------------------------------------------------ contas que se repetem */
+.cp-rec{display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:2px 8px 2px 6px;border-radius:999px;background:var(--primary-softer);color:var(--primary-ink);font-size:.72rem;font-weight:800;align-self:flex-start;border:1px solid var(--primary-soft)}
+html[data-theme="dark"] .cp-rec{color:#bfdbfe;background:rgba(59,130,246,.16);border-color:rgba(59,130,246,.4)}
+.cp-rec .material-symbols-outlined{font-size:.95rem}
+.cp-rec-box{padding:12px;border:1px dashed var(--line-strong);border-radius:var(--radius);background:var(--surface-2);gap:10px}
+.cp-rec-box p{margin:0;display:flex;align-items:flex-start;gap:8px;font-weight:700;font-size:.86rem;color:var(--text-soft);line-height:1.4}
+.cp-rec-box p .material-symbols-outlined{color:var(--primary-fg);font-size:1.2rem;flex:0 0 auto}
+.cp-check{display:flex!important;align-items:flex-start;gap:8px;font-weight:600!important;font-size:.84rem!important;line-height:1.4;cursor:pointer}
+.cp-check input{width:20px;height:20px;min-height:0!important;margin:0;flex:0 0 auto;accent-color:var(--primary)}
+.cp-rec-box .vn-mini-btn{align-self:flex-start}
+.cp-serie{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.cp-serie:last-child{border-bottom:0}
+.cp-serie-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cp-serie-info strong{font-weight:800;color:var(--text)}
+.cp-serie-info small{color:var(--muted);font-weight:600;font-size:.78rem}
+.cp-serie form{margin:0;flex:0 0 auto}

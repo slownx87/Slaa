@@ -11,6 +11,11 @@
     Fotos ficam em uploads/contas_pagar/<id da conta>/ (fora do alcance direto do navegador: a pasta
     recebe um .htaccess "Require all denied" e as imagens só saem por contas-pagar-foto.php).
     Cada foto tem um tipo: 'conta' (boleto, nota, foto da conta) ou 'comprovante' (prova do pagamento).
+
+    Contas recorrentes (aluguel, internet, contador...): a conta é criada com "Repetir" e passa a existir uma
+    "repetição" (vn_contas_pagar_recorrentes). As próximas contas aparecem sozinhas, com cerca de 2 meses de
+    antecedência (cp_gerar_recorrentes, chamada a cada vez que a tela abre), até acabar o número de vezes ou
+    alguém tocar em "Parar de repetir". Cada ocorrência é uma conta normal (paga, tem fotos, pode ser editada).
 */
 
 /* Erro com mensagem escrita para o usuário (aparece como está na tela). */
@@ -18,6 +23,12 @@ class CpErro extends Exception {}
 
 const CP_FOTOS_MAX_POR_CONTA = 20;
 const CP_FOTO_MAX_BYTES = 15 * 1024 * 1024;
+const CP_HORIZONTE_DIAS = 62;      // quantos dias à frente as contas repetidas já aparecem
+
+function cp_frequencias(): array
+{
+    return ['semanal' => 'Toda semana', 'quinzenal' => 'A cada 15 dias', 'mensal' => 'Todo mês', 'anual' => 'Todo ano'];
+}
 
 function cp_formas(): array
 {
@@ -56,10 +67,31 @@ function cp_ensure_tables(): void
         pago_em DATE NULL,
         valor_pago DECIMAL(12,2) NULL,
         forma_pagamento VARCHAR(20) NULL,
+        recorrente_id INT NULL,
+        ocorrencia INT NULL,
         criado_em DATETIME NOT NULL,
         INDEX (pago, vencimento),
-        INDEX (pago_em)
+        INDEX (pago_em),
+        INDEX idx_recorrente (recorrente_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    vn_exec("CREATE TABLE IF NOT EXISTS vn_contas_pagar_recorrentes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        descricao VARCHAR(200) NOT NULL,
+        fornecedor VARCHAR(180) NULL,
+        categoria VARCHAR(60) NULL,
+        valor DECIMAL(12,2) NOT NULL DEFAULT 0,
+        observacao TEXT NULL,
+        frequencia VARCHAR(12) NOT NULL DEFAULT 'mensal',
+        primeira DATE NOT NULL,
+        proximo_n INT NOT NULL DEFAULT 0,
+        total_vezes INT NULL,
+        ativa TINYINT(1) NOT NULL DEFAULT 1,
+        criado_em DATETIME NOT NULL,
+        INDEX (ativa)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // Quem já usa o A Pagar tem a tabela antiga: acrescenta as colunas novas sem perder nada.
+    vn_add_col_if_missing('vn_contas_pagar', 'recorrente_id', 'INT NULL, ADD INDEX idx_recorrente (recorrente_id)');
+    vn_add_col_if_missing('vn_contas_pagar', 'ocorrencia', 'INT NULL');
     vn_exec("CREATE TABLE IF NOT EXISTS vn_contas_pagar_fotos (
         id INT AUTO_INCREMENT PRIMARY KEY,
         conta_id INT NOT NULL,
@@ -133,21 +165,23 @@ function cp_listar(string $ver, string $q, string $hoje): array
     $fim7 = date('Y-m-d', strtotime($hoje . ' +7 days'));
     $where = [];
     $params = [];
-    $ordem = 'pago ASC, vencimento ASC, id ASC';
+    $ordem = 'c.pago ASC, c.vencimento ASC, c.id ASC';
     switch ($ver) {
-        case 'atrasadas': $where[] = 'pago = 0 AND vencimento < ?'; $params[] = $hoje; break;
-        case 'semana':    $where[] = 'pago = 0 AND vencimento >= ? AND vencimento <= ?'; $params[] = $hoje; $params[] = $fim7; break;
-        case 'pagas':     $where[] = 'pago = 1'; $ordem = 'pago_em DESC, id DESC'; break;
+        case 'atrasadas': $where[] = 'c.pago = 0 AND c.vencimento < ?'; $params[] = $hoje; break;
+        case 'semana':    $where[] = 'c.pago = 0 AND c.vencimento >= ? AND c.vencimento <= ?'; $params[] = $hoje; $params[] = $fim7; break;
+        case 'pagas':     $where[] = 'c.pago = 1'; $ordem = 'c.pago_em DESC, c.id DESC'; break;
         case 'todas':     break;
-        default:          $where[] = 'pago = 0'; break;
+        default:          $where[] = 'c.pago = 0'; break;
     }
     $q = trim($q);
     if ($q !== '') {
         $like = '%' . strtr($q, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']) . '%';
-        $where[] = '(descricao LIKE ? OR fornecedor LIKE ? OR categoria LIKE ? OR observacao LIKE ?)';
+        $where[] = '(c.descricao LIKE ? OR c.fornecedor LIKE ? OR c.categoria LIKE ? OR c.observacao LIKE ?)';
         array_push($params, $like, $like, $like, $like);
     }
-    $sql = 'SELECT * FROM vn_contas_pagar' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY ' . $ordem . ' LIMIT 400';
+    $sql = 'SELECT c.*, r.frequencia AS rec_freq, r.total_vezes AS rec_total, r.ativa AS rec_ativa
+            FROM vn_contas_pagar c LEFT JOIN vn_contas_pagar_recorrentes r ON r.id = c.recorrente_id'
+        . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY ' . $ordem . ' LIMIT 400';
     return vn_fetch_all($sql, $params);
 }
 
@@ -199,13 +233,26 @@ function cp_validar_conta(array $post): array
     ];
 }
 
-/* Cria (id = 0) ou atualiza a conta. Devolve o id. */
-function cp_salvar_conta(int $id, array $d): int
+/*
+   Cria (id = 0) ou atualiza a conta. Devolve o id.
+   $aplicarProximas: numa conta que se repete, também muda a descrição/valor/fornecedor/categoria/observação
+   das próximas repetições ainda não pagas (e do modelo, para as que ainda vão aparecer). As datas não mudam.
+*/
+function cp_salvar_conta(int $id, array $d, bool $aplicarProximas = false): int
 {
     if ($id > 0) {
-        if (!cp_conta($id)) throw new CpErro('Conta não encontrada.');
+        $atual = cp_conta($id);
+        if (!$atual) throw new CpErro('Conta não encontrada.');
         vn_exec('UPDATE vn_contas_pagar SET descricao = ?, fornecedor = ?, categoria = ?, valor = ?, vencimento = ?, codigo = ?, observacao = ? WHERE id = ?',
             [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['vencimento'], $d['codigo'], $d['observacao'], $id]);
+        if ($aplicarProximas && (int)($atual['recorrente_id'] ?? 0) > 0) {
+            $rec = (int)$atual['recorrente_id'];
+            vn_exec('UPDATE vn_contas_pagar_recorrentes SET descricao = ?, fornecedor = ?, categoria = ?, valor = ?, observacao = ? WHERE id = ?',
+                [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['observacao'], $rec]);
+            vn_exec('UPDATE vn_contas_pagar SET descricao = ?, fornecedor = ?, categoria = ?, valor = ?, observacao = ?
+                     WHERE recorrente_id = ? AND pago = 0 AND ocorrencia > ?',
+                [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['observacao'], $rec, (int)($atual['ocorrencia'] ?? 0)]);
+        }
         return $id;
     }
     vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, codigo, observacao, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -241,6 +288,140 @@ function cp_excluir_conta(int $id): void
     }
     vn_exec('DELETE FROM vn_contas_pagar WHERE id = ?', [$id]);
     @rmdir(cp_fotos_dir($id));   // só remove se ficou vazia
+}
+
+/* ------------------------------------------------------------------ contas recorrentes */
+/*
+   Lê "Repetir" do formulário. Devolve null (não repete) ou ['freq' => ..., 'vezes' => int|null].
+   vezes = null: sem data final. Lança CpErro se a combinação não faz sentido.
+*/
+function cp_validar_repeticao(array $post, string $primeiroVenc, string $hoje): ?array
+{
+    $freq = (string)($post['repetir'] ?? '');
+    if ($freq === '') return null;
+    if (!isset(cp_frequencias()[$freq])) throw new CpErro('Escolha como a conta se repete.');
+    $vezes = trim((string)($post['vezes'] ?? ''));
+    $n = null;
+    if ($vezes !== '') {
+        if (!ctype_digit($vezes) || (int)$vezes < 1 || (int)$vezes > 120) throw new CpErro('Em "quantas vezes", digite um número de 1 a 120 (ou deixe vazio para repetir sem data final).');
+        $n = (int)$vezes;
+        if ($n === 1) return null;   // 1 vez só = conta comum
+    }
+    if ($primeiroVenc < date('Y-m-d', strtotime($hoje . ' -40 days'))) {
+        throw new CpErro('Para repetir, o primeiro vencimento não pode ser de mais de 40 dias atrás. Use a data da próxima conta a vencer.');
+    }
+    return ['freq' => $freq, 'vezes' => $n];
+}
+
+/* Data da ocorrência de número $n (0 = a primeira). Mês curto: dia 31 vira o último dia do mês. */
+function cp_data_ocorrencia(string $primeira, string $freq, int $n): string
+{
+    $d = DateTime::createFromFormat('!Y-m-d', $primeira);
+    if (!$d) throw new CpErro('Data inicial da repetição inválida.');
+    if ($freq === 'semanal') return $d->modify('+' . (7 * $n) . ' days')->format('Y-m-d');
+    if ($freq === 'quinzenal') return $d->modify('+' . (14 * $n) . ' days')->format('Y-m-d');
+    $dia = (int)$d->format('j');
+    $ano = (int)$d->format('Y');
+    $mes = (int)$d->format('n') + ($freq === 'anual' ? 12 * $n : $n);
+    $ano += intdiv($mes - 1, 12);
+    $mes = (($mes - 1) % 12) + 1;
+    return sprintf('%04d-%02d-%02d', $ano, $mes, min($dia, (int)date('t', mktime(0, 0, 0, $mes, 1, $ano))));
+}
+
+/* "Todo mês", "Todo mês · 3 de 12" para mostrar na lista. */
+function cp_rotulo_repeticao(string $freq, ?int $total, ?int $ocorrencia): string
+{
+    $t = cp_frequencias()[$freq] ?? 'Repete';
+    if ($total !== null && $ocorrencia !== null) $t .= ' · ' . ($ocorrencia + 1) . ' de ' . $total;
+    return $t;
+}
+
+/*
+   Cria a repetição e já gera a primeira conta (mesmo que seja daqui a muito tempo, para poder anexar foto).
+   Devolve o id da primeira conta.
+*/
+function cp_criar_recorrente(array $d, string $freq, ?int $vezes, string $hoje): int
+{
+    vn_exec('INSERT INTO vn_contas_pagar_recorrentes (descricao, fornecedor, categoria, valor, observacao, frequencia, primeira, proximo_n, total_vezes, ativa, criado_em)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?)',
+        [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['observacao'], $freq, $d['vencimento'], $vezes, date('Y-m-d H:i:s')]);
+    $recId = vn_last_id();
+    cp_gerar_recorrentes($hoje, $recId, true);
+    // o código do boleto vale só para a primeira conta (os próximos boletos têm outro código)
+    $primeira = vn_fetch_one('SELECT id FROM vn_contas_pagar WHERE recorrente_id = ? AND ocorrencia = 0', [$recId]);
+    if (!$primeira) throw new CpErro('Não foi possível criar a conta repetida.');
+    if ($d['codigo'] !== null) vn_exec('UPDATE vn_contas_pagar SET codigo = ? WHERE id = ?', [$d['codigo'], (int)$primeira['id']]);
+    return (int)$primeira['id'];
+}
+
+/*
+   Cria as contas das repetições que já entraram na janela de CP_HORIZONTE_DIAS. Pode rodar quantas vezes quiser:
+   cada vez só cria o que falta (o contador proximo_n da repetição é "reservado" antes de criar, então duas
+   abas abertas ao mesmo tempo não duplicam). $so: só essa repetição. $forcarPrimeira: cria a ocorrência 0 sempre.
+   Devolve quantas contas criou.
+*/
+function cp_gerar_recorrentes(string $hoje, ?int $so = null, bool $forcarPrimeira = false): int
+{
+    $limite = date('Y-m-d', strtotime($hoje . ' +' . CP_HORIZONTE_DIAS . ' days'));
+    $criadas = 0;
+    $lista = $so ? vn_fetch_all('SELECT * FROM vn_contas_pagar_recorrentes WHERE id = ? AND ativa = 1', [$so])
+                 : vn_fetch_all('SELECT * FROM vn_contas_pagar_recorrentes WHERE ativa = 1');
+    foreach ($lista as $r) {
+        $rid = (int)$r['id'];
+        $n = (int)$r['proximo_n'];
+        $total = $r['total_vezes'] !== null ? (int)$r['total_vezes'] : null;
+        for ($guarda = 0; $guarda < 130; $guarda++) {
+            if ($total !== null && $n >= $total) {
+                vn_exec('UPDATE vn_contas_pagar_recorrentes SET ativa = 0 WHERE id = ?', [$rid]);   // acabou o número de vezes
+                break;
+            }
+            $venc = cp_data_ocorrencia((string)$r['primeira'], (string)$r['frequencia'], $n);
+            if ($venc > $limite && !($forcarPrimeira && $n === 0)) break;
+            if (vn_exec('UPDATE vn_contas_pagar_recorrentes SET proximo_n = ? WHERE id = ? AND proximo_n = ?', [$n + 1, $rid, $n]) !== 1) break;   // outra aba já fez
+            try {
+                vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, observacao, recorrente_id, ocorrencia, criado_em)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$r['descricao'], $r['fornecedor'], $r['categoria'], $r['valor'], $venc, $r['observacao'], $rid, $n, date('Y-m-d H:i:s')]);
+            } catch (Throwable $e) {
+                vn_exec('UPDATE vn_contas_pagar_recorrentes SET proximo_n = ? WHERE id = ? AND proximo_n = ?', [$n, $rid, $n + 1]);   // devolve a vez
+                throw $e;
+            }
+            $criadas++;
+            $n++;
+        }
+    }
+    return $criadas;
+}
+
+/* Repetições ativas, para a lista "Contas fixas": modelo + próxima conta ainda não paga. */
+function cp_recorrentes_ativas(): array
+{
+    return vn_fetch_all(
+        'SELECT r.*, (SELECT MIN(c.vencimento) FROM vn_contas_pagar c WHERE c.recorrente_id = r.id AND c.pago = 0) AS proxima
+         FROM vn_contas_pagar_recorrentes r WHERE r.ativa = 1 ORDER BY r.descricao'
+    );
+}
+
+/*
+   Para de repetir: nenhuma conta nova é criada. As contas ainda NÃO pagas, sem foto e com vencimento depois de
+   $depoisDe (as "do futuro" que já tinham aparecido sozinhas) são removidas. Pagas, atrasadas e com foto ficam.
+   Devolve quantas contas futuras foram removidas.
+*/
+function cp_parar_recorrente(int $recId, string $depoisDe): int
+{
+    $r = vn_fetch_one('SELECT id FROM vn_contas_pagar_recorrentes WHERE id = ?', [$recId]);
+    if (!$r) throw new CpErro('Essa repetição não existe mais.');
+    vn_exec('UPDATE vn_contas_pagar_recorrentes SET ativa = 0 WHERE id = ?', [$recId]);
+    $removidas = 0;
+    foreach (vn_fetch_all(
+        'SELECT c.id FROM vn_contas_pagar c
+         WHERE c.recorrente_id = ? AND c.pago = 0 AND c.vencimento > ?
+           AND NOT EXISTS (SELECT 1 FROM vn_contas_pagar_fotos f WHERE f.conta_id = c.id)',
+        [$recId, $depoisDe]) as $c) {
+        vn_exec('DELETE FROM vn_contas_pagar WHERE id = ?', [(int)$c['id']]);
+        $removidas++;
+    }
+    return $removidas;
 }
 
 /* ------------------------------------------------------------------ fotos */
