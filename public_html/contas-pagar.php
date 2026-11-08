@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . $plano['n'] . ($plano['n'] === 1 ? ' parcela' : ' parcelas') . ' (total ' . vn_money($dados['valor']) . ').';
             } elseif ($rep) {
                 $contaId = cp_criar_recorrente($dados, $rep['freq'], $rep['vezes'], $hoje);
-                $msg = 'Conta adicionada. Ela se repete (' . mb_strtolower(cp_frequencias()[$rep['freq']]) . ($rep['vezes'] ? ', ' . $rep['vezes'] . ' vezes' : ', sem data final') . ') e as próximas aparecem sozinhas.';
+                $msg = 'Conta adicionada. Ela se repete (' . mb_strtolower(cp_frequencias()[$rep['freq']]) . ($rep['vezes'] ? ', ' . $rep['vezes'] . ' vezes' : ', sem data final') . '): a próxima aparece quando você pagar esta, ou ' . CP_ANTECEDENCIA_DIAS . ' dias antes de vencer.';
             } else {
                 $aplicar = !$nova && (!empty($_POST['aplicar_proximas']) || !empty($_POST['aplicar_parcelas']));
                 $contaId = cp_salvar_conta($contaId, $dados, $aplicar);
@@ -94,6 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cp_marcar_paga($contaId, $_POST);
             $feito = true;
             $msg = 'Pagamento registrado.';
+            $c = cp_conta($contaId);
+            if ($c && !empty($c['recorrente_id']) && cp_gerar_recorrentes($hoje, (int)$c['recorrente_id']) > 0) $msg .= ' A próxima conta desta repetição já apareceu na lista.';
             if (!empty($_FILES['fotos'])) {
                 $r = cp_salvar_fotos($contaId, 'comprovante', $_FILES['fotos']);
                 if ($r['salvas'] || $r['falhas']) { [$tipoAviso, $extra] = cp_texto_fotos($r); $msg .= ' ' . $extra; if ($tipoAviso === 'err') $tipoAviso = 'warn'; }
@@ -163,7 +165,10 @@ $erroTela = '';
 $contas = []; $resumo = []; $fotosPorConta = []; $series = []; $parcelamentos = [];
 try {
     cp_ensure_tables();
-    cp_gerar_recorrentes($hoje);           // cria as contas repetidas que já entraram na janela de ~2 meses
+    // uma única vez: quem já tinha contas repetidas criadas de vários meses de uma vez fica só com a próxima de cada uma
+    $enxutas = cp_ajuste_unico('recorrentes_uma_por_vez', function () use ($hoje) { return cp_enxugar_recorrentes($hoje); });
+    if ($enxutas) $flash = ['tipo' => 'ok', 'msg' => 'Arrumei as contas que se repetem: deixei só a próxima de cada uma (removi ' . (int)$enxutas . ' conta(s) futura(s) criadas a mais). A seguinte aparece quando você pagar a atual.'];
+    cp_gerar_recorrentes($hoje);           // cria a próxima de cada repetição quando chega a hora (conta anterior paga ou vencimento perto)
     $resumo = cp_resumo($hoje);
     $contas = cp_listar($ver, $q, $hoje);
     $fotosPorConta = cp_fotos_das_contas(array_column($contas, 'id'));
@@ -432,7 +437,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
 </dialog>
 
 <dialog class="vn-dialog cp-dlg cp-dlg-wide" id="cpDlgSeries" aria-labelledby="cpSeriesTitulo">
-    <div class="vn-dialog-head"><h4 id="cpSeriesTitulo">Contas fixas (que se repetem)</h4><p class="cp-dlg-sub">As próximas contas aparecem sozinhas, com cerca de 2 meses de antecedência. Para mudar uma, abra a conta na lista e toque em Editar.</p></div>
+    <div class="vn-dialog-head"><h4 id="cpSeriesTitulo">Contas fixas (que se repetem)</h4><p class="cp-dlg-sub">Fica sempre uma conta aberta de cada vez: a seguinte aparece quando você paga a atual (ou 7 dias antes de vencer). Para mudar uma, abra a conta na lista e toque em Editar.</p></div>
     <div class="vn-dialog-body">
         <?php if (!$series): ?><div class="cp-sem-fotos">Nenhuma conta fixa no momento.</div><?php endif; ?>
         <?php foreach ($series as $r): ?>
