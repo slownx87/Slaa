@@ -1,0 +1,7 @@
+# Versões fixadas: as APIs destas duas bibliotecas mudaram entre versões.
+fast-plate-ocr==1.1.0
+open-image-models==0.6.0
+onnxruntime
+opencv-python-headless
+numpy
+pyyaml

@@ -1,0 +1,45 @@
+# Copie para config.yaml e ajuste. Só `camera.url` é obrigatório;
+# os demais valores abaixo são os padrões.
+
+camera:
+  # Fluxo principal (subtype=0) de câmera ou gravador Intelbras.
+  # Também aceita o caminho de um vídeo gravado.
+  url: "rtsp://admin:SENHA@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
+  decodificador: auto      # auto | hardware | software
+  tempo_limite_s: 10       # sem quadros por esse tempo -> reconecta
+
+# Região do quadro por onde as placas passam, em pixels. Use o comando `foto`
+# para escolher. Zeros = quadro inteiro. Quanto menor a zona, mais rápido tudo fica.
+zona:
+  x: 0
+  y: 0
+  largura: 0
+  altura: 0
+
+movimento:
+  limiar: 14               # diferença de brilho (0-255) para um ponto contar como "mudou"
+  area_min: 0.01           # fração da zona que precisa mudar para abrir um evento
+  pre_s: 0.5               # quadros guardados de antes do gatilho
+  pos_s: 0.7               # sem movimento por esse tempo -> fecha o evento
+  max_evento_s: 6          # movimento contínuo é fatiado em eventos desse tamanho
+  max_quadros_evento: 24
+
+fila:
+  max_mb: 200              # RAM para eventos à espera de reconhecimento
+  min_quadros_evento: 4    # o raleamento nunca deixa um evento com menos que isso
+
+reconhecimento:
+  detector: yolo-v9-t-384-license-plate-end2end   # mais rápido: yolo-v9-t-256-license-plate-end2end
+  ocr: cct-xs-v2-global-model
+  conf_detector: 0.4
+  largura_min_placa: 60    # placas menores que isso (px) não vão para o OCR
+  intervalo_cobertura_s: 0.25   # todo evento é examinado ao menos nesse passo
+  leituras_consenso: 2     # quadros que precisam concordar para o status "lida"
+  conf_consenso: 0.8
+  threads: 3               # o 4º núcleo fica para a captura
+
+saida:
+  pasta: dados             # placas.db + imagens/
+  salvar_sem_placa: true   # miniatura dos eventos sem placa, para auditoria
+  retencao_dias: 30
+  janela_duplicata_s: 20   # mesma placa de novo nesse intervalo conta como a mesma passagem

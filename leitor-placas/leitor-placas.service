@@ -1,0 +1,15 @@
+# Ajuste User e os caminhos antes de copiar para /etc/systemd/system/.
+[Unit]
+Description=Leitor de placas
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/Slaa/leitor-placas
+ExecStart=/home/pi/Slaa/leitor-placas/.venv/bin/python -m leitor_placas rodar -c config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
