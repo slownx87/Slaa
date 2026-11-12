@@ -332,7 +332,7 @@ vn_alerts($ok, $erro);
             <?php $tem = false; foreach ($sv[1] as $it): $tem = true; ?>
                 <div class="pv-it"><div class="tx"><strong><?php echo vn_h(explode(' — ', (string)$it['descricao'])[0]); ?></strong>
                     <?php $dt = trim(implode(' — ', array_slice(explode(' — ', (string)$it['descricao']), 1))); if ($dt !== ''): ?><span><?php echo vn_h($dt); ?></span><?php endif; ?>
-                    <span><?php echo vn_h(number_format((float)$it['quantidade'], 2, ',', '.')); ?> × <?php echo vn_h(vn_money($it['valor_unitario'])); ?><?php echo (($it['origem_peca'] ?? '') === 'comprar' && $sid !== 'pvServicos') ? ' · para comprar' : ''; ?></span></div>
+                    <span><?php echo vn_h(number_format((float)$it['quantidade'], 2, ',', '.')); ?><?php $unPv = (!empty($it['unidade']) && function_exists('vn_serr_unidade_rotulo')) ? vn_serr_unidade_rotulo($it['unidade'], (float)$it['quantidade']) : ''; echo $unPv !== '' ? ' ' . vn_h($unPv) : ''; ?> × <?php echo vn_h(vn_money($it['valor_unitario'])); ?><?php echo (($it['origem_peca'] ?? '') === 'comprar' && $sid !== 'pvServicos') ? ' · para comprar' : ''; ?></span></div>
                     <strong class="v"><?php echo vn_h(vn_money($it['total'])); ?></strong></div>
             <?php endforeach; ?>
             <?php if ($sid === 'pvServicos'): if ($sv[2] > 0): $tem = true; ?><div class="pv-it"><div class="tx"><strong><?php echo vn_h((string)($o['visita_descricao'] ?: 'Visita técnica')); ?></strong></div><strong class="v"><?php echo vn_h(vn_money($sv[2])); ?></strong></div><?php endif;

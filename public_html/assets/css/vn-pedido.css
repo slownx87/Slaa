@@ -183,6 +183,12 @@ html[data-theme="dark"] .pd-btn.sec:hover{background:var(--surface-2);color:var(
 }
 .pd-tabs button.on{color:var(--primary-fg);border-bottom-color:var(--primary);background:var(--surface)}
 .pd-tabs .material-symbols-outlined{font-size:1.3rem}
+/* três abas (peças de serralheria: Catálogo | Cadastrar serralheria | Cadastrar CFTV): ícone em cima, texto embaixo */
+.pd-tabs.tres{grid-template-columns:repeat(3,minmax(0,1fr))}
+.pd-tabs.tres button{flex-direction:column;gap:2px;min-height:62px;padding:6px 4px;font-size:.84rem;line-height:1.15;text-align:center}
+/* aviso de onde a peça nova fica salva */
+.pd-nota-cat{display:flex;align-items:center;gap:10px;margin:8px 0 6px;padding:11px 14px;border-radius:12px;background:var(--primary-softer);color:var(--primary-ink);font-weight:700;font-size:.9rem;line-height:1.35}
+.pd-nota-cat .material-symbols-outlined{font-size:1.35rem;flex-shrink:0}
 .pd-busca{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;padding:0 14px;margin-bottom:14px}
 .pd-busca .material-symbols-outlined{color:var(--muted);font-size:1.3rem}
 .pd-busca input{flex:1;min-width:0;border:0;background:transparent;min-height:50px;font:inherit;font-size:16px;color:var(--text);outline:0}

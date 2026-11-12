@@ -1,0 +1,40 @@
+/* =========================================================================
+   VN System — Calcular por medida (janela dentro do pedido de serralheria)
+   Só usa tokens do vn-ui.css / vn-pedido.css (claro e escuro).
+   ========================================================================= */
+
+/* aviso no alto da janela (tabela de exemplo / tabela antiga) e "estrutura sem preço" */
+.med-aviso{margin:0 0 14px;padding:11px 14px;border-radius:12px;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-text);font-weight:700;font-size:.86rem;line-height:1.45}
+.med-aviso a{color:inherit;font-weight:800;text-decoration:underline}
+.med-aviso[hidden]{display:none!important}
+#medEst + .med-aviso{margin:-4px 0 14px}
+
+/* níveis da estrutura e perfis de mão de obra: botões que quebram de linha */
+.med-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.med-chips button{
+  display:inline-flex;align-items:center;gap:7px;min-height:46px;padding:0 15px;border-radius:999px;
+  border:1.5px solid var(--line-strong);background:var(--surface);color:var(--text);font:inherit;font-weight:800;font-size:.92rem;cursor:pointer;
+}
+.med-chips button small{font-weight:700;color:var(--muted);font-size:.76rem}
+.med-chips button:hover{border-color:var(--primary)}
+.med-chips button[aria-pressed="true"]{border-color:var(--primary);background:var(--primary-softer);color:var(--primary-ink);box-shadow:var(--ring)}
+html[data-theme="dark"] .med-chips button[aria-pressed="true"]{color:var(--text)}
+.med-chips button[aria-pressed="true"] small{color:inherit;opacity:.85}
+.med-chips button:focus-visible{outline:0;box-shadow:var(--ring)}
+
+/* resumo da conta */
+.med-resumo{background:var(--surface-2);border-radius:14px;padding:4px 16px;margin:8px 0 14px}
+.med-resumo .l{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px dashed var(--line)}
+.med-resumo .l:last-child{border-bottom:0}
+.med-resumo .l>span{color:var(--text-soft);font-weight:700;font-size:.9rem;min-width:0}
+.med-resumo .l>span small{display:block;color:var(--muted);font-weight:600;font-size:.76rem;margin-top:2px}
+.med-resumo .l>span small:empty{display:none}
+.med-resumo .l>b{font-variant-numeric:tabular-nums;font-weight:800;color:var(--text);text-align:right;overflow-wrap:anywhere}
+.med-resumo .tot>span{color:var(--text);font-size:1.05rem}
+.med-resumo .tot>b{font-size:1.35rem;color:var(--primary-fg)}
+
+/* total fixo no rodapé da janela */
+.med-foot-tot{display:flex;flex-direction:column;justify-content:center;min-width:0;flex:0 0 auto;padding-right:4px}
+.med-foot-tot small{color:var(--muted);font-weight:800;font-size:.72rem;text-transform:uppercase;letter-spacing:.07em}
+.med-foot-tot b{font-size:1.15rem;font-weight:800;font-variant-numeric:tabular-nums;color:var(--text);white-space:nowrap}
+.pd-sheet-f .med-foot-tot + .pd-btn{flex:1 1 auto}

@@ -32,7 +32,7 @@ const VN_UI_ICONS = [
     'more_vert', 'move_up', 'note_add', 'notifications_active', 'output', 'paid', 'payments', 'person',
     'photo_camera', 'picture_as_pdf', 'pix', 'production_quantity_limits', 'qr_code_2', 'receipt_long', 'refresh',
     'request_quote', 'schedule', 'search', 'security', 'sell', 'send', 'share', 'shield', 'shopping_cart',
-    'signature', 'smartphone', 'space_dashboard', 'speed', 'support_agent', 'target', 'task', 'task_alt', 'tune',
+    'signature', 'smartphone', 'space_dashboard', 'speed', 'square_foot', 'support_agent', 'target', 'task', 'task_alt', 'tune',
     'upload', 'verified_user', 'videocam', 'visibility', 'visibility_off', 'warehouse', 'warning',
 ];
 

@@ -29,6 +29,9 @@ if (!function_exists('vn_set_db_timezone_sp')) {
 }
 
 
+/* Preços e conta da serralheria por medida (m², metro linear, degrau, hora, kg). */
+if (is_file(__DIR__ . '/_vn_serralheria_lib.php')) require_once __DIR__ . '/_vn_serralheria_lib.php';
+
 /* Exibição de erros: somente via VN_DEBUG no arquivo de segredos (config.php). */
 
 $vnBaseDirs = [__DIR__, dirname(__DIR__), dirname(__DIR__, 2), dirname(__DIR__, 3)];
@@ -604,6 +607,7 @@ function vn_ensure_mobile_tables(): void {
     vn_add_col_if_missing('vn_mobile_orcamento_itens', 'origem_peca', "VARCHAR(20) NOT NULL DEFAULT 'estoque'");
     vn_add_col_if_missing('vn_mobile_orcamento_itens', 'comprado', "TINYINT(1) NOT NULL DEFAULT 0");
     vn_add_col_if_missing('vn_mobile_orcamento_itens', 'linha', "VARCHAR(20) NOT NULL DEFAULT 'cftv'");   // peça de CFTV ou de serralheria
+    vn_add_col_if_missing('vn_mobile_orcamento_itens', 'unidade', "VARCHAR(12) NULL DEFAULT NULL");        // medida em que o item é cobrado: m2, m, un, h, degrau, kg (serralheria por medida)
 
     vn_exec("CREATE TABLE IF NOT EXISTS vn_mobile_orcamento_fotos (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -2500,6 +2504,7 @@ function vn_salvar_orcamento_mobile_v4(array $post): int {
     $custos = $post['item_custo'] ?? [];
     $origens = $post['item_origem'] ?? [];
     $linhasItem = $post['item_linha'] ?? [];
+    $unidadesItem = $post['item_un'] ?? [];
     $itens = [];
     $subtotalItens = 0;
     $custoTotal = 0;
@@ -2520,7 +2525,8 @@ function vn_salvar_orcamento_mobile_v4(array $post): int {
         $subtotalItens += $t;
         $custoTotal += $ct;
         $itens[] = ['tipo'=>$tipo, 'descricao'=>$d, 'quantidade'=>$q, 'valor_unitario'=>$p, 'custo_unitario'=>$c, 'total'=>$t, 'custo_total'=>$ct, 'origem_peca'=>$origem,
-                    'linha'=>vn_categoria_valida($linhasItem[$i] ?? 'cftv')];
+                    'linha'=>vn_categoria_valida($linhasItem[$i] ?? 'cftv'),
+                    'unidade'=>function_exists('vn_serr_unidade_valida') ? vn_serr_unidade_valida($unidadesItem[$i] ?? '') : ''];
     }
     $total = max(0, round($subtotalItens + $visitaValor + $maoValor - $desconto, 2));
     $lucro = round($total - $custoTotal, 2);
@@ -2548,7 +2554,7 @@ function vn_salvar_orcamento_mobile_v4(array $post): int {
     }
     foreach ($itens as $it) {
         $comprado = ($it['origem_peca'] === 'comprar' && isset($compradoMap[vn_lower($it['descricao'])])) ? 1 : 0;
-        vn_exec('INSERT INTO vn_mobile_orcamento_itens (orcamento_id, tipo, descricao, quantidade, valor_unitario, custo_unitario, total, custo_total, origem_peca, comprado, linha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$orcId, $it['tipo'], $it['descricao'], $it['quantidade'], $it['valor_unitario'], $it['custo_unitario'], $it['total'], $it['custo_total'], $it['origem_peca'], $comprado, $it['linha']]);
+        vn_exec('INSERT INTO vn_mobile_orcamento_itens (orcamento_id, tipo, descricao, quantidade, valor_unitario, custo_unitario, total, custo_total, origem_peca, comprado, linha, unidade) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$orcId, $it['tipo'], $it['descricao'], $it['quantidade'], $it['valor_unitario'], $it['custo_unitario'], $it['total'], $it['custo_total'], $it['origem_peca'], $comprado, $it['linha'], $it['unidade'] !== '' ? $it['unidade'] : null]);
     }
     // Tipo do orçamento (CFTV ou Serralheria). Formulário antigo, sem o campo, não mexe no que já estava salvo.
     if (isset($post['categoria'])) {

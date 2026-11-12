@@ -78,6 +78,10 @@
 
   /* ------------------------------------------------------------------ itens do pedido */
   var TIPOS = { material: 'Material', equipamento: 'Equipamento', produto_usado: 'Produto usado', servico: 'Serviço', mao_obra: 'Mão de obra', outro: 'Outro' };
+  /* medida em que o item é cobrado (serralheria por medida): [singular, plural] */
+  var UNID = { m2: ['m²', 'm²'], m: ['m', 'm'], un: ['un', 'un'], h: ['h', 'h'], degrau: ['degrau', 'degraus'], kg: ['kg', 'kg'] };
+  function unValida(u) { return Object.prototype.hasOwnProperty.call(UNID, u) ? u : ''; }
+  function unRotulo(u, qtd) { var d = unValida(u) ? UNID[u] : null; return d ? (Math.abs(Number(qtd) - 1) < 0.0001 ? d[0] : d[1]) : ''; }
   var boxServ = document.getElementById('itemsServicos'), boxPeca = document.getElementById('itemsPecas'), boxSerr = document.getElementById('itemsSerralheria');
   var categoria = CFG.categoria === 'serralheria' ? 'serralheria' : 'cftv';
   function todosItens() { return $$('.pd-item'); }
@@ -89,7 +93,8 @@
       tipo: campo(el, 'item_tipo').value, desc: campo(el, 'item_desc').value,
       qtd: parseBR(campo(el, 'item_qtd').value) || 1, preco: parseBR(campo(el, 'item_preco').value),
       custo: parseBR(campo(el, 'item_custo').value), origem: campo(el, 'item_origem').value,
-      linha: (campo(el, 'item_linha') || {}).value === 'serralheria' ? 'serralheria' : 'cftv'
+      linha: (campo(el, 'item_linha') || {}).value === 'serralheria' ? 'serralheria' : 'cftv',
+      un: unValida((campo(el, 'item_un') || {}).value)
     };
   }
   function ehServico(tipo) { return tipo === 'servico' || tipo === 'mao_obra'; }
@@ -101,7 +106,7 @@
     var dt = $('.dt', el);
     if (!dt) { dt = document.createElement('span'); dt.className = 'dt'; n.insertAdjacentElement('afterend', dt); }
     dt.textContent = det; dt.hidden = !det;
-    var sub = fmtQtd(d.qtd) + ' × R$ ' + moneyBR(d.preco) + ' · ' + (TIPOS[d.tipo] || 'Item');
+    var sub = fmtQtd(d.qtd) + (d.un ? ' ' + unRotulo(d.un, d.qtd) : '') + ' × R$ ' + moneyBR(d.preco) + ' · ' + (TIPOS[d.tipo] || 'Item');
     var s = $('.s', el);
     s.textContent = sub;
     if (!ehServico(d.tipo) && d.origem === 'comprar') { var tag = document.createElement('span'); tag.className = 'pd-tag comprar'; tag.textContent = 'Comprar'; s.appendChild(tag); }
@@ -113,7 +118,7 @@
     function h(nome, valor) { var i = document.createElement('input'); i.type = 'hidden'; i.name = nome + '[]'; i.value = valor; el.appendChild(i); }
     h('item_tipo', d.tipo || 'material'); h('item_desc', d.desc || ''); h('item_qtd', String(d.qtd || 1)); h('item_preco', moneyBR(d.preco || 0));
     h('item_custo', moneyBR(d.custo || 0)); h('item_origem', ehServico(d.tipo) ? 'estoque' : (d.origem || 'estoque'));
-    h('item_linha', d.linha === 'serralheria' ? 'serralheria' : 'cftv');
+    h('item_linha', d.linha === 'serralheria' ? 'serralheria' : 'cftv'); h('item_un', unValida(d.un));
     el.insertAdjacentHTML('beforeend', '<span class="n"></span><span class="s"></span><span class="t"></span>' +
       '<button type="button" class="x" data-item-remover aria-label="Remover item"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>');
     return el;
@@ -159,7 +164,7 @@
   }
 
   /* janela de edição do item */
-  var sh = { desc: $('#iDesc'), tipo: $('#iTipo'), origem: $('#iOrigem'), qtd: $('#iQtd'), preco: $('#iPreco'), custo: $('#iCusto'), lucro: $('#iLucro'), markup: $('#iMarkup'), valor: $('#iValor') };
+  var sh = { desc: $('#iDesc'), tipo: $('#iTipo'), origem: $('#iOrigem'), un: $('#iUn'), qtd: $('#iQtd'), preco: $('#iPreco'), custo: $('#iCusto'), lucro: $('#iLucro'), markup: $('#iMarkup'), valor: $('#iValor') };
   function valorDoItem() { return Math.max(0.01, parseBR(sh.qtd.value) || 1) * parseBR(sh.preco.value); }
   function atualizaValorItem() { sh.valor.textContent = 'R$ ' + moneyBR(valorDoItem()); }
   function origemVisivel() { $('#iOrigemBox').hidden = ehServico(sh.tipo.value); }
@@ -173,6 +178,7 @@
     itemAtual = el;
     var d = lerItem(el);
     sh.desc.value = d.desc; sh.tipo.value = d.tipo; sh.origem.value = d.origem || 'estoque'; sh.qtd.value = fmtQtd(d.qtd);
+    sh.un.value = d.un; $('#iUnBox').hidden = !(categoria === 'serralheria' || d.un);   // a medida só aparece no orçamento de serralheria (ou se o item já tem)
     sh.preco.value = moneyBR(d.preco); sh.custo.value = moneyBR(d.custo);
     sh.lucro.value = ''; sh.markup.value = '';
     if (d.custo > 0 && d.preco > 0) { sh.lucro.value = moneyBR(Math.max(0, ((d.preco - d.custo) / d.preco) * 100)); sh.markup.value = moneyBR(Math.max(0, ((d.preco - d.custo) / d.custo) * 100)); }
@@ -187,6 +193,7 @@
     campo(itemAtual, 'item_qtd').value = String(Math.max(0.01, parseBR(sh.qtd.value) || 1));
     campo(itemAtual, 'item_preco').value = moneyBR(parseBR(sh.preco.value)); campo(itemAtual, 'item_custo').value = moneyBR(parseBR(sh.custo.value));
     campo(itemAtual, 'item_origem').value = ehServico(sh.tipo.value) ? 'estoque' : sh.origem.value;
+    if (campo(itemAtual, 'item_un')) campo(itemAtual, 'item_un').value = sh.un.value;
     var destino = caixaDo(sh.tipo.value, lerItem(itemAtual).linha);
     if (itemAtual.parentNode !== destino) destino.appendChild(itemAtual);   // mudou o tipo: troca de grupo
     desenharItem(itemAtual); calcular(); marcarAlterado(); fechar(document.getElementById('shItem')); atualizarListasAbertas();
@@ -240,6 +247,7 @@
       r.textContent = els.length ? els.length + (els.length === 1 ? ' item' : ' itens') + ' · R$ ' + moneyBR(soma) : r.getAttribute('data-dica');
       $('.pd-plus', linha).hidden = els.length > 0; $('.pd-go', linha).hidden = els.length === 0;
     });
+    atualizarLinhas();
   }
   document.addEventListener('input', function (e) { if (e.target.matches && e.target.matches('.js-extra')) { calcular(); marcarAlterado(); } });
 
@@ -280,6 +288,20 @@
     desc = { servico: { tipo: '%', valor: 0 }, peca: { tipo: '%', valor: 0 }, legado: 0 }; calcular(); marcarAlterado(); fechar(document.getElementById('shDesconto'));
   });
 
+  /* item recém-salvo no catálogo: entra na lista em memória e na aba Catálogo da janela certa (peça de CFTV -> janela de CFTV, etc.) */
+  function registrarNoCatalogo(it) {
+    if (!it || !it.id) return;
+    var lista = CFG.catalogo = CFG.catalogo || [];
+    var ex = lista.filter(function (x) { return String(x.id) === String(it.id) && String(x.origem) === String(it.origem); })[0];
+    if (ex) { Object.keys(it).forEach(function (k) { ex[k] = it[k]; }); } else lista.push(it);
+    var serv = ehServico(it.tipo);
+    var alvo = $$('dialog[data-tipo-base]').filter(function (m) {
+      var base = m.getAttribute('data-tipo-base');
+      return serv ? base === 'servico' : (base !== 'servico' && m.getAttribute('data-linha') === it.linha);
+    })[0];
+    if (alvo && alvo.__novoCard) alvo.__novoCard(it);
+  }
+
   /* ------------------------------------------------------------------ janelas "adicionar peça / serviço" */
   $$('dialog[data-tipo-base]').forEach(function (modal) {
     var rotulo = modal.getAttribute('data-rotulo') || 'item';
@@ -299,18 +321,16 @@
       return esperado ? todosItens().filter(function (el) { var d = lerItem(el); return d.desc === esperado && ehServico(d.tipo) === ehModalServico && (ehModalServico || d.linha === linhaModal); }) : [];
     }
     /* ao abrir: o que já está no pedido aparece marcado (com a quantidade), e desmarcar remove do pedido */
-    function sincronizarSelecao() {
-      $$('[data-sel]', modal).forEach(function (card) {
-        var itens = itensDoCard(card), no = itens.length > 0;
-        card.classList.toggle('marcado', no); card.setAttribute('data-inicial', no ? '1' : '0');
-        var tag = $('.no-pedido', card);
-        if (!no) { if (tag) tag.remove(); return; }
-        var qtd = itens.reduce(function (t, el) { return t + lerItem(el).qtd; }, 0);
-        if (!tag) { tag = document.createElement('small'); tag.className = 'no-pedido'; $('.info', card).appendChild(tag); }
-        tag.textContent = 'No pedido · ' + fmtQtd(qtd) + (qtd === 1 ? ' unidade' : ' unidades');
-      });
-      sincronizar();
+    function sincronizarCard(card) {
+      var itens = itensDoCard(card), no = itens.length > 0;
+      card.classList.toggle('marcado', no); card.setAttribute('data-inicial', no ? '1' : '0');
+      var tag = $('.no-pedido', card);
+      if (!no) { if (tag) tag.remove(); return; }
+      var qtd = itens.reduce(function (t, el) { return t + lerItem(el).qtd; }, 0);
+      if (!tag) { tag = document.createElement('small'); tag.className = 'no-pedido'; $('.info', card).appendChild(tag); }
+      tag.textContent = 'No pedido · ' + fmtQtd(qtd) + (qtd === 1 ? ' unidade' : ' unidades');
     }
+    function sincronizarSelecao() { $$('[data-sel]', modal).forEach(sincronizarCard); sincronizar(); }
     modal.__sincronizarSelecao = sincronizarSelecao;
     function diferencas() {
       var add = 0, rem = 0;
@@ -319,22 +339,79 @@
     }
     function novoValido() { return q('[data-new-nome]').value.trim() !== '' && parseBR(q('[data-new-preco]').value) > 0; }
     function sincronizar() {
+      var h3 = $('.pd-sheet-h h3', modal);   // o título acompanha a aba (na aba CFTV: "Adicionar peça de CFTV ao pedido")
+      if (h3) h3.textContent = (aba === 'new' && soCatalogo()) ? 'Salvar ' + rotuloAtual() + ' no catálogo' : 'Adicionar ' + rotuloAtual() + ' ao pedido';
       if (aba === 'cat') {
         var df = diferencas();
         okBtn.textContent = df.rem > 0 ? 'aplicar alterações (' + (df.add + df.rem) + ')' : (df.add > 0 ? 'adicionar selecionadas (' + df.add + ')' : 'adicionar');
         okBtn.disabled = df.add + df.rem === 0;
       }
-      else { okBtn.textContent = 'adicionar ' + (rotulo.indexOf('peça') === 0 ? 'essa ' : 'esse ') + rotulo; okBtn.disabled = !novoValido(); }
+      else {
+        var rot = rotuloAtual();
+        okBtn.textContent = soCatalogo() ? 'salvar no catálogo de ' + (NOME_LINHA[linhaDestino()] || 'peças') : 'adicionar ' + (rot.indexOf('peça') === 0 ? 'essa ' : 'esse ') + rot;
+        okBtn.disabled = !novoValido();
+      }
     }
-    $$('[data-add-tab]', modal).forEach(function (t) {
-      t.addEventListener('click', function () {
-        aba = t.getAttribute('data-add-tab');
-        $$('[data-add-tab]', modal).forEach(function (x) { x.classList.toggle('on', x === t); });
-        $$('[data-tab-body]', modal).forEach(function (b) { b.hidden = b.getAttribute('data-tab-body') !== aba; });
-        sincronizar();
-      });
+
+    /* Aba extra "Cadastrar CFTV" (dentro das peças de serralheria): a peça nova fica salva no catálogo de CFTV e entra no pedido */
+    var destino = '';   // linha do catálogo onde a peça nova é salva ('' = a desta janela, ou a do orçamento)
+    var NOME_LINHA = { cftv: 'CFTV', serralheria: 'serralheria' };
+    var salvarEl = q('[data-new-salvar]');   // a caixa "salvar no catálogo" só existe em serviço: peça cadastrada vai sempre para o catálogo
+    function linhaDestino() { return destino || linhaModal || categoria; }
+    function outraLinha() { return !!destino && destino !== linhaModal; }
+    function rotuloAtual() { return outraLinha() ? 'peça de ' + (NOME_LINHA[destino] || destino) : rotulo; }
+    function soCatalogo() { var c = q('[data-new-no-pedido]'); return outraLinha() && !!c && !c.checked; }
+    function atualizarNota() {
+      var nota = q('[data-new-nota-txt]');
+      if (nota) nota.textContent = 'Fica salva no catálogo de ' + (NOME_LINHA[linhaDestino()] || 'peças') + '.';
+      var box = q('[data-new-pedido-box]'); if (box) box.hidden = !outraLinha();
+    }
+    function irParaAba(t) {
+      aba = t.getAttribute('data-add-tab');
+      destino = aba === 'new' ? (t.getAttribute('data-add-linha') || '') : '';
+      $$('[data-add-tab]', modal).forEach(function (x) { x.classList.toggle('on', x === t); });
+      $$('[data-tab-body]', modal).forEach(function (b) { b.hidden = b.getAttribute('data-tab-body') !== aba; });
+      atualizarNota(); sincronizar();
+    }
+    $$('[data-add-tab]', modal).forEach(function (t) { t.addEventListener('click', function () { irParaAba(t); }); });
+    var chkPedido = q('[data-new-no-pedido]');
+    if (chkPedido) chkPedido.addEventListener('change', sincronizar);
+    /* clique num cartão do catálogo marca/desmarca (um só ouvinte: vale também para os cartões criados depois) */
+    modal.addEventListener('click', function (e) {
+      var card = e.target.closest ? e.target.closest('[data-sel]') : null;
+      if (card && modal.contains(card)) { card.classList.toggle('marcado'); sincronizar(); }
     });
-    $$('[data-sel]', modal).forEach(function (card) { card.addEventListener('click', function () { card.classList.toggle('marcado'); sincronizar(); }); });
+
+    /* peça/serviço recém-salvo no catálogo: entra (ou tem o preço atualizado) na aba Catálogo desta janela na hora, sem recarregar a tela */
+    modal.__novoCard = function (it) {
+      function el(tag, cls, txt) { var x = document.createElement(tag); if (cls) x.className = cls; if (txt != null) x.textContent = txt; return x; }
+      var grupo = $('[data-grupo-tipo="' + (it.tipo || tipoBase) + '"]', modal) || $('[data-grupo-tipo="outro"]', modal) || $('[data-grupo-tipo]', modal);
+      if (!grupo) return;
+      var antigo = $$('[data-sel]', modal).filter(function (c) { return c.getAttribute('data-id') === String(it.id) && c.getAttribute('data-origem') === String(it.origem); })[0];
+      var c = el('div', 'pd-sel'); c.setAttribute('data-sel', '');
+      c.setAttribute('data-id', it.id); c.setAttribute('data-origem', it.origem || 'mobile'); c.setAttribute('data-linha-item', it.linha || 'cftv'); c.setAttribute('data-fora-linha', '0');
+      c.setAttribute('data-busca', norm(it.nome + ' ' + it.descricao + ' ' + (grupo.getAttribute('data-titulo') || '')));
+      if (it.foto_url) { var im = el('img'); im.src = it.foto_url; im.alt = ''; im.loading = 'lazy'; c.appendChild(im); } else c.appendChild(el('span', 'sem-img'));
+      var info = el('div', 'info'); info.appendChild(el('strong', '', it.nome));
+      if (it.descricao && it.descricao !== it.nome) info.appendChild(el('small', '', it.descricao));
+      c.appendChild(info); c.appendChild(el('span', 'chk', '✓'));
+      var pr = el('div', 'preco'); pr.appendChild(el('small', '', 'Preço por ' + (it.unidade || 'unidade') + ':')); pr.appendChild(el('strong', '', 'R$ ' + moneyBR(it.valor_unitario)));
+      c.appendChild(pr);
+      if (!ehModalServico) {
+        var es = el('div', 'preco'); es.style.cssText = 'border:0;padding-top:0;margin-top:0';
+        es.appendChild(el('span', 'est', 'Quantidade em estoque:')); es.appendChild(el('span', 'est', fmtQtd(it.quantidade_estoque || 0) + ' ' + (it.unidade || 'un')));
+        c.appendChild(es);
+      }
+      var marcadoAntes = !!antigo && antigo.classList.contains('marcado');
+      if (antigo) antigo.parentNode.replaceChild(c, antigo); else { var tit = $('.pd-grp', grupo); tit.insertAdjacentElement('afterend', c); }
+      sincronizarCard(c);
+      if (marcadoAntes && !c.classList.contains('marcado')) c.classList.add('marcado');   // não perde a escolha feita enquanto o aviso chegava
+      var n = $$('[data-sel]', grupo).length;
+      $('.pd-grp', grupo).textContent = (grupo.getAttribute('data-titulo') || '') + ' · ' + n;
+      grupo.hidden = false;
+      var vazio = $('[data-vazio]', modal); if (vazio) vazio.hidden = true;
+      sincronizar();
+    };
     q('[data-add-busca]').addEventListener('input', function (e) {
       var termo = norm(e.target.value).trim();
       $$('[data-sel]', modal).forEach(function (c) { c.hidden = (termo !== '' && norm(c.getAttribute('data-busca')).indexOf(termo) === -1) || c.getAttribute('data-fora-linha') === '1'; });
@@ -362,7 +439,7 @@
       fotoEl.addEventListener('change', function () {
         var nome = fotoEl.files && fotoEl.files[0] ? fotoEl.files[0].name : 'A foto vai para o catálogo';
         $('[data-new-foto-nome]', modal).textContent = nome;
-        if (fotoEl.files && fotoEl.files.length) q('[data-new-salvar]').checked = true;
+        if (fotoEl.files && fotoEl.files.length && salvarEl) salvarEl.checked = true;
       });
     }
 
@@ -387,24 +464,34 @@
       var un = q('[data-new-un]').value.trim() || 'un';
       var preco = parseBR(precoEl.value), qtd = Math.max(1, parseBR(qtdEl.value)), custo = parseBR(custoEl.value);
       var origemEl = q('[data-new-origem]');
-      adicionarItem({ tipo: tipoSel, desc: nome + (det ? ' — ' + det : ''), qtd: qtd, preco: preco, custo: custo, origem: origemEl ? origemEl.value : 'estoque', linha: linhaModal || categoria });
+      var lin = linhaDestino(), soCat = soCatalogo(), daOutraLinha = outraLinha();
+      if (!soCat) adicionarItem({ tipo: tipoSel, desc: nome + (det ? ' — ' + det : ''), qtd: qtd, preco: preco, custo: custo, origem: origemEl ? origemEl.value : 'estoque', linha: lin });
 
-      if (q('[data-new-salvar]').checked) {
+      /* peça cadastrada vai SEMPRE para o catálogo (a da aba "CFTV", para o catálogo de CFTV); serviço, só com a caixa marcada */
+      if (!ehModalServico || soCat || (salvarEl && salvarEl.checked)) {
         var fd = new FormData();
         fd.append('acao', 'catalogo_rapido'); fd.append('catalogo_tipo', tipoSel); fd.append('catalogo_nome', nome); fd.append('catalogo_descricao', det);
         fd.append('catalogo_unidade', un); fd.append('catalogo_valor', moneyBR(preco)); fd.append('catalogo_custo', moneyBR(custo));
-        fd.append('catalogo_linha', linhaModal || categoria);   // peça de serralheria vai para o catálogo de serralheria; serviço, para o tipo do orçamento
+        fd.append('catalogo_linha', lin);   // peça de serralheria vai para o catálogo de serralheria, a de CFTV para o de CFTV; serviço, para o tipo do orçamento
         var est = q('[data-new-estoque]'); fd.append('catalogo_quantidade_estoque', moneyBR(est ? parseBR(est.value) : 0));
         if (fotoEl && fotoEl.files && fotoEl.files[0]) fd.append('catalogo_foto', fotoEl.files[0]);
+        var oQue = ehModalServico ? 'Esse serviço' : 'Essa peça', ondeLinha = ehModalServico ? '' : ' de ' + (NOME_LINHA[lin] || lin);
         fetch('orcamento-novo.php', { method: 'POST', body: fd, credentials: 'same-origin' })
           .then(function (r) { return r.json(); })
-          .then(function (j) { toast(j && j.ok ? 'Salvo no catálogo.' : ((j && j.msg) || 'Não foi possível salvar no catálogo.'), j && j.ok ? 'ok' : 'err'); })
+          .then(function (j) {
+            if (j && j.ok) {
+              if (j.item) registrarNoCatalogo(j.item);
+              toast(j.existente ? oQue + ' já estava no catálogo: atualizei o preço.' : 'Salvo no catálogo' + ondeLinha + '.', 'ok');
+            } else toast((j && j.msg) || 'Não foi possível salvar no catálogo.', 'err');
+          })
           .catch(function () { toast('Não foi possível salvar no catálogo (sem conexão).', 'err'); });
       }
       $$('[data-new-nome],[data-new-det],[data-new-preco],[data-new-custo],[data-new-markup],[data-new-estoque]', modal).forEach(function (el) { el.value = ''; });
       if (fotoEl) { fotoEl.value = ''; var nm = $('[data-new-foto-nome]', modal); if (nm) nm.textContent = 'A foto vai para o catálogo'; }
       lucroEl.value = tipoBase !== 'servico' ? '30,00' : '';
-      q('[data-new-un]').value = 'un'; q('[data-new-tipo]').selectedIndex = 0; qtdEl.value = '1'; q('[data-new-salvar]').checked = false;
+      q('[data-new-un]').value = 'un'; q('[data-new-tipo]').selectedIndex = 0; qtdEl.value = '1'; if (salvarEl) salvarEl.checked = false;
+      if (chkPedido) chkPedido.checked = true;
+      if (daOutraLinha) irParaAba($('[data-add-tab="cat"]', modal));   // terminou o cadastro da outra linha: a janela volta para o Catálogo
       novoValor(); fechar(modal); atualizarListasAbertas();
     });
     sincronizar();
@@ -463,7 +550,7 @@
       '<div class="pd-step"><button type="button" class="menos" data-l-menos aria-label="Diminuir">−</button><input data-l-qtd inputmode="decimal" aria-label="Quantidade"><button type="button" class="mais" data-l-mais aria-label="Aumentar">＋</button></div>';
     c.appendChild(ctl);
     var precoIn = $('[data-l-preco]', ctl), qtdIn = $('[data-l-qtd]', ctl);
-    precoIn.value = moneyBR(l.d.preco); qtdIn.value = fmtQtd(l.d.qtd); $('small', ctl).textContent = 'por ' + un;
+    precoIn.value = moneyBR(l.d.preco); qtdIn.value = fmtQtd(l.d.qtd); $('small', ctl).textContent = 'por ' + (l.d.un ? unRotulo(l.d.un, 1) : un);
 
     if (!cfg.serv) { l.estEl = document.createElement('p'); l.estEl.className = 'pd-lc-est'; c.appendChild(l.estEl); }
     var ft = document.createElement('div'); ft.className = 'pd-lc-foot';
@@ -756,16 +843,19 @@
 
   /* ------------------------------------------------------------------ tipo do orçamento: CFTV | Serralheria */
   var inputCat = document.getElementById('categoriaInput');
-  function aplicarCategoria(nova, marcar) {
-    categoria = nova === 'serralheria' ? 'serralheria' : 'cftv';
-    if (inputCat) inputCat.value = categoria;
-    $$('[data-categoria]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-categoria') === categoria ? 'true' : 'false'); });
-    // a linha de peças do outro tipo some (a não ser que já tenha itens: nada fica escondido com dado dentro)
+  /* a linha de peças do outro tipo some, a não ser que já tenha itens: nada fica escondido com dado dentro */
+  function atualizarLinhas() {
     $$('[data-linha-row]').forEach(function (el) {
       var linha = el.getAttribute('data-linha-row'), box = el.classList.contains('pd-items') ? el : document.getElementById(linha === 'serralheria' ? 'itemsSerralheria' : 'itemsPecas');
       var temItem = !!box && $$('.pd-item', box).length > 0;
       el.hidden = linha !== categoria && !temItem;
     });
+  }
+  function aplicarCategoria(nova, marcar) {
+    categoria = nova === 'serralheria' ? 'serralheria' : 'cftv';
+    if (inputCat) inputCat.value = categoria;
+    $$('[data-categoria]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-categoria') === categoria ? 'true' : 'false'); });
+    atualizarLinhas();
     // serviços: cada cartão do catálogo é de uma linha (ou geral); mostra os do tipo escolhido + os gerais
     $$('#addServicoModal [data-sel]').forEach(function (c) {
       var l = c.getAttribute('data-linha-item') || 'geral';
@@ -776,6 +866,13 @@
     if (marcar) marcarAlterado();
   }
   $$('[data-categoria]').forEach(function (b) { b.addEventListener('click', function () { aplicarCategoria(b.getAttribute('data-categoria'), true); }); });
+
+  /* a calculadora por medida (vn-serr-medida.js) põe o resultado no pedido por aqui */
+  window.VNPedido = {
+    adicionar: function (d) { return adicionarItem(d); },
+    abrir: abrir, fechar: fechar, toast: toast, parseBR: parseBR, moneyBR: moneyBR, fmtQtd: fmtQtd,
+    categoria: function () { return categoria; }, unRotulo: unRotulo
+  };
 
   /* ------------------------------------------------------------------ início */
   todosItens().forEach(desenharItem);

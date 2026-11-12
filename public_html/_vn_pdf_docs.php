@@ -768,7 +768,9 @@ function vn_pdf_orcamento_v6(array $orc, string $titulo = '', ?array $marca = nu
     $itens = $orc['itens'] ?? [];
     if ($flag('mostrar_itens')) {
         $doc->section('Itens do orçamento');
-        $cols = [['h' => '#', 'w' => 28, 'a' => 'C', 'p' => 3], ['h' => 'Tipo', 'w' => 80], ['h' => 'Descrição', 'w' => '*'], ['h' => 'Qtd', 'w' => 44, 'a' => 'R']];
+        $temUn = false;   // serralheria por medida: a quantidade sai com a medida (6,3 m², 12 degraus...), então a coluna precisa de mais espaço
+        foreach ($itens as $it0) { if (!empty($it0['unidade'])) { $temUn = true; break; } }
+        $cols = [['h' => '#', 'w' => 28, 'a' => 'C', 'p' => 3], ['h' => 'Tipo', 'w' => 80], ['h' => 'Descrição', 'w' => '*'], ['h' => 'Qtd', 'w' => $temUn ? 78 : 44, 'a' => 'R']];
         if ($showValues && $showUnit) $cols[] = ['h' => 'Valor un.', 'w' => 72, 'a' => 'R'];
         if ($showValues && $showSub) $cols[] = ['h' => 'Subtotal', 'w' => 78, 'a' => 'R'];
         $rows = [];
@@ -778,6 +780,8 @@ function vn_pdf_orcamento_v6(array $orc, string $titulo = '', ?array $marca = nu
             $row = [(string)($i + 1), function_exists('vn_orc_tipo_label_v4') ? vn_orc_tipo_label_v4((string)($it['tipo'] ?? 'material')) : (string)($it['tipo'] ?? ''),
                 (string)($it['descricao'] ?? ''), rtrim(rtrim(number_format($q, 2, ',', '.'), '0'), ',')];
             if ($row[3] === '') $row[3] = '0';
+            $unQ = (!empty($it['unidade']) && function_exists('vn_serr_unidade_rotulo')) ? vn_serr_unidade_rotulo($it['unidade'], $q) : '';
+            if ($unQ !== '') $row[3] .= ' ' . $unQ;
             if ($showValues && $showUnit) $row[] = vn_pdf_money($it['valor_unitario'] ?? 0);
             if ($showValues && $showSub) $row[] = ['t' => vn_pdf_money($it['total'] ?? 0), 'b' => true];
             $rows[] = $row;
@@ -1088,7 +1092,7 @@ function vn_pdf_exemplo(string $tipo, string $linha, $db = null): string {
         ], $marca, $db);
     }
     $itens = $serr
-        ? [['tipo' => 'material', 'descricao' => 'Portão de correr em metalon 3,00 x 2,10 m, pintura eletrostática', 'quantidade' => 1, 'valor_unitario' => 4200, 'total' => 4200],
+        ? [['tipo' => 'servico', 'descricao' => 'Portão Deslizante — 3,00 × 2,10 m · nível reforçado', 'quantidade' => 6.3, 'unidade' => 'm2', 'valor_unitario' => 936, 'total' => 5896.8],
            ['tipo' => 'material', 'descricao' => 'Motor deslizante com 2 controles', 'quantidade' => 1, 'valor_unitario' => 1450, 'total' => 1450],
            ['tipo' => 'servico', 'descricao' => 'Instalação e acabamento', 'quantidade' => 1, 'valor_unitario' => 900, 'total' => 900]]
         : [['tipo' => 'equipamento', 'descricao' => 'Câmera IP 4MP bullet com visão noturna', 'quantidade' => 4, 'valor_unitario' => 350, 'total' => 1400],
