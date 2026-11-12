@@ -1112,14 +1112,17 @@ function vn_salvar_os_mobile(array $post): array {
     $dataAgendada = trim((string)($post['data_agendada'] ?? ''));
     $dataAgendadaDb = $dataAgendada ? date('Y-m-d H:i:s', strtotime($dataAgendada)) : null;
     $codigo = 'OS-MOB-' . date('Ymd-His');
+    $linhaServico = (($post['linha_servico'] ?? '') === 'serralheria') ? 'serralheria' : 'cftv';   // OS de CFTV (padrão) ou de serralheria
 
-    vn_exec('INSERT INTO vn_mobile_os (codigo_os, cliente_id, cliente_nome, endereco_id, endereco, tecnico_id, tecnico_nome, status, prioridade, problema, observacoes, data_agendada, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$codigo, $clienteId ?: null, $clienteNome, $enderecoId ?: null, $endereco, $tecId ?: null, $tecNome, 'Aberta', $prioridade, $problema, $obs, $dataAgendadaDb, $VN_USUARIO_ID, $VN_USUARIO_NOME, vn_now_sp()]);
+    vn_exec('INSERT INTO vn_mobile_os (codigo_os, cliente_id, cliente_nome, endereco_id, endereco, tecnico_id, tecnico_nome, status, prioridade, problema, observacoes, data_agendada, criado_por, criado_por_nome, criado_em, linha_servico) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$codigo, $clienteId ?: null, $clienteNome, $enderecoId ?: null, $endereco, $tecId ?: null, $tecNome, 'Aberta', $prioridade, $problema, $obs, $dataAgendadaDb, $VN_USUARIO_ID, $VN_USUARIO_NOME, vn_now_sp(), $linhaServico]);
     $mobileId = vn_last_id();
 
     $ordemId = 0;
     $avisos = [];
     if (vn_table_exists('ordens_servico')) {
+        vn_add_col_if_missing('ordens_servico', 'linha_servico', "VARCHAR(20) NOT NULL DEFAULT 'cftv'");
         $map = [
+            'linha_servico'=>$linhaServico,
             'codigo_os'=>$codigo, 'numero'=>$codigo, 'cliente_id'=>$clienteId ?: null, 'endereco_id'=>$enderecoId ?: null,
             'status'=>'aberta', 'status_pedido'=>'Em Aberto', 'situacao'=>'Aberta', 'status_visita'=>'pendente',
             'problema_relatado_cliente'=>$problema, 'problema_ordem'=>$problema, 'referencia_ordem'=>$endereco, 'local_atendimento'=>$endereco,
@@ -1140,7 +1143,9 @@ function vn_salvar_os_mobile(array $post): array {
         catch (Throwable $e) { $avisos[] = 'Foi salva na tabela mobile, mas não consegui espelhar em ordens_servico: ' . $e->getMessage(); }
     }
     if (vn_table_exists('os_visitas')) {
+        vn_add_col_if_missing('os_visitas', 'linha_servico', "VARCHAR(20) NOT NULL DEFAULT 'cftv'");
         $mapVis = [
+            'linha_servico'=>$linhaServico,
             'ordem_id_local'=>$ordemId ?: null, 'codigo_os'=>$codigo, 'status_visita'=>'pendente', 'status'=>'Aberta',
             'funcionario_id'=>$tecId ?: null, 'funcionario_nome'=>$tecNome, 'tecnico_id'=>$tecId ?: null, 'tecnico_nome'=>$tecNome,
             'cliente_nome'=>$clienteNome, 'endereco'=>$endereco, 'problema'=>$problema, 'comentario'=>'', 'criado_em'=>vn_now_sp(), 'atualizado_em'=>vn_now_sp()
@@ -1923,7 +1928,7 @@ function vn_render_saida_acoes_v1(array $s, array $responsaveis = [], array $cli
                         <select name="saida_cliente_id">
                             <option value="0">— Sem cliente —</option>
                             <?php foreach ($clientes as $c): ?>
-                                <option value="<?php echo (int)$c['id']; ?>" <?php echo ((int)$c['id'] === $clienteId ? 'selected' : ''); ?>><?php echo vn_h($c['nome']); ?></option>
+                                <option value="<?php echo (int)$c['id']; ?>" data-telefone="<?php echo vn_h((string)($c['telefone'] ?? '')); ?>" <?php echo ((int)$c['id'] === $clienteId ? 'selected' : ''); ?>><?php echo vn_h($c['nome']); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>

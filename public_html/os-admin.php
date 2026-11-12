@@ -822,6 +822,9 @@ function montarDadosInsertOS($dados)
         // Corretiva, Preventiva, Instalação, Vistoria... é o que a Área de OS mostra como tipo.
         'tipo_servico' => $dados['tipo_servico'] ?? null,
 
+        // CFTV (padrão) ou serralheria: separa as OS nas listas da Área de OS e em OS Concluídas.
+        'linha_servico' => $dados['linha_servico'] ?? 'cftv',
+
         'problema_relatado_cliente' => $dados['problema'] ?? null,
         'problema_ordem' => $dados['problema'] ?? null,
 
@@ -990,7 +993,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($error)) {
             $tipoServico = trim((string)($_POST['tipo_servico'] ?? 'Corretiva'));
             if (!in_array($tipoServico, $tiposValidos, true)) $tipoServico = 'Corretiva';
 
+            // Tipo da OS: CFTV ou serralheria
+            $linhaServico = (($_POST['linha_servico'] ?? '') === 'serralheria') ? 'serralheria' : 'cftv';
+
             // Bancos antigos não têm estas colunas: cria na hora para não perder o dado.
+            ensureColumn('ordens_servico', 'linha_servico', "VARCHAR(20) NOT NULL DEFAULT 'cftv'");
             ensureColumn('ordens_servico', 'tipo_servico', 'VARCHAR(120) NULL');
             ensureColumn('ordens_servico', 'data_agendamento', 'DATETIME NULL');
 
@@ -1000,6 +1007,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($error)) {
                 'endereco_id' => $enderecoId > 0 ? $enderecoId : null,
                 'data_agendamento' => $agendamento,
                 'tipo_servico' => $tipoServico,
+                'linha_servico' => $linhaServico,
                 'nome_cliente' => $nomeCliente,
                 'tecnico_id' => $tecnicoId > 0 ? $tecnicoId : null,
                 'tecnico_admin_id' => $tecnicoAdminId > 0 ? $tecnicoAdminId : null,
@@ -1016,7 +1024,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($error)) {
             $insert = montarDadosInsertOS($dadosOS);
             $idOS = dbInsert('ordens_servico', $insert);
 
-            $success = "Ordem de Serviço criada com sucesso! ID: " . $idOS;
+            $success = ($linhaServico === 'serralheria' ? "OS de Serralheria criada com sucesso! ID: " : "Ordem de Serviço criada com sucesso! ID: ") . $idOS;
 
             // Fotos/vídeos de orientação que o técnico vê ao abrir a OS.
             $enviadas = vn_salvar_fotos_ajuda_os((int)$idOS);
@@ -1515,12 +1523,15 @@ ob_start();
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 <?php
 $vnHeadExtra = ob_get_clean();
-vn_ui_shell_start('Gerar OS', 'gerar-os', ['head_extra' => $vnHeadExtra, 'legacy' => 'admin', 'js' => ['assets/js/vn-camera.js']]);
+// ?linha=serralheria (menu "Gerar OS de Serralheria") já abre com Serralheria marcada
+$linhaTela = (($_POST['linha_servico'] ?? ($_GET['linha'] ?? '')) === 'serralheria') ? 'serralheria' : 'cftv';
+$menuChave = (($_GET['linha'] ?? '') === 'serralheria') ? 'gerar-os-serralheria' : 'gerar-os';
+vn_ui_shell_start($linhaTela === 'serralheria' ? 'Gerar OS de Serralheria' : 'Gerar OS', $menuChave, ['head_extra' => $vnHeadExtra, 'legacy' => 'admin']);
 ?>
 <div class="content">
             <div class="page-title">
-                <h1>Abrir Nova Ordem de Serviço</h1>
-                <p>Preencha os dados abaixo para abrir uma nova ordem de serviço.</p>
+                <h1><?= $linhaTela === 'serralheria' ? 'Abrir Nova OS de Serralheria' : 'Abrir Nova Ordem de Serviço' ?></h1>
+                <p><?= $linhaTela === 'serralheria' ? 'Preencha os dados da ordem de serviço de serralheria. Ela aparece separada das OS de CFTV.' : 'Preencha os dados abaixo para abrir uma nova ordem de serviço.' ?></p>
             </div>
 
             <div class="card">
@@ -1556,6 +1567,21 @@ vn_ui_shell_start('Gerar OS', 'gerar-os', ['head_extra' => $vnHeadExtra, 'legacy
                         <label><i class="fas fa-map-marker-alt"></i> Endereço de atendimento</label>
                         <select id="enderecoSelect" name="endereco_id"></select>
                         <div class="resume-box" id="clientAddress">Selecione um cliente para carregar o endereço</div>
+                    </div>
+
+<style>
+.linha-os-op{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+.linha-os-op label{display:flex;align-items:center;justify-content:center;gap:8px;min-height:50px;margin:0;padding:8px 10px;border:1px solid var(--line,rgba(148,163,184,.4));border-radius:12px;cursor:pointer;font-weight:800;text-align:center}
+.linha-os-op input{position:absolute;opacity:0;pointer-events:none}
+.linha-os-op label:has(input:checked){border-color:#3b82f6;background:rgba(59,130,246,.16);box-shadow:0 0 0 2px rgba(59,130,246,.25)}
+.linha-os-op label.serr:has(input:checked){border-color:#f59e0b;background:rgba(245,158,11,.18);box-shadow:0 0 0 2px rgba(245,158,11,.28)}
+</style>
+                    <div class="full-width">
+                        <label><i class="fas fa-layer-group"></i> Tipo da OS</label>
+                        <div class="linha-os-op" role="radiogroup" aria-label="Tipo da OS">
+                            <label><input type="radio" name="linha_servico" value="cftv" <?= $linhaTela !== 'serralheria' ? 'checked' : '' ?>><i class="fas fa-video"></i> CFTV / segurança</label>
+                            <label class="serr"><input type="radio" name="linha_servico" value="serralheria" <?= $linhaTela === 'serralheria' ? 'checked' : '' ?>><i class="fas fa-hammer"></i> Serralheria</label>
+                        </div>
                     </div>
 
                     <div>
@@ -1641,7 +1667,7 @@ vn_ui_shell_start('Gerar OS', 'gerar-os', ['head_extra' => $vnHeadExtra, 'legacy
 
                     <div class="full-width">
                         <label><i class="fas fa-images"></i> Fotos de ajuda para o técnico</label>
-                        <input type="file" name="fotos_ajuda[]" accept="image/*,video/*" multiple data-vn-camera>
+                        <input type="file" name="fotos_ajuda[]" accept="image/*,video/*" multiple>
                         <div class="resume-box">Opcional. Fotos ou vídeos de orientação (local do equipamento, modelo da peça, caminho até o quadro...). O técnico vê essas imagens ao abrir a OS no celular.</div>
                     </div>
 
@@ -1715,4 +1741,4 @@ vn_ui_shell_start('Gerar OS', 'gerar-os', ['head_extra' => $vnHeadExtra, 'legacy
             });
         }
     </script>
-<?php vn_ui_shell_end('gerar-os'); ?>
+<?php vn_ui_shell_end($menuChave); ?>

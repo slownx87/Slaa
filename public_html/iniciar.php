@@ -285,6 +285,8 @@ function garantirColunasOSVN(mysqli $db): void {
         ['ordens_servico', 'data_agendamento', 'DATETIME NULL'],
         ['os_visitas', 'tipo_servico', 'VARCHAR(120) NULL'],
         ['os_visitas', 'tag_servico', 'VARCHAR(120) NULL'],
+        ['ordens_servico', 'linha_servico', "VARCHAR(20) NOT NULL DEFAULT 'cftv'"],   // OS de CFTV ou de serralheria
+        ['os_visitas', 'linha_servico', "VARCHAR(20) NOT NULL DEFAULT 'cftv'"],
     ] as [$tabela, $coluna, $def]) {
         ensureColumnVN($db, $tabela, $coluna, $def);
     }
@@ -1450,6 +1452,8 @@ function inserirOrdemServicoLocalVN(mysqli $db, array $dados, int $idTec, int $u
     $dataAgendada = trim((string)($dados['data_agendada'] ?? '')) ?: vn_os_now_sp();
 
     ensureColumnVN($db, 'ordens_servico', 'tipo_servico', 'VARCHAR(120) NULL');
+    ensureColumnVN($db, 'ordens_servico', 'linha_servico', "VARCHAR(20) NOT NULL DEFAULT 'cftv'");
+    $linhaServico = (($dados['linha_servico'] ?? '') === 'serralheria') ? 'serralheria' : 'cftv';
 
     $map = [
         'codigo_os' => $codigo,
@@ -1458,6 +1462,7 @@ function inserirOrdemServicoLocalVN(mysqli $db, array $dados, int $idTec, int $u
         'nome_cliente' => $dados['nome_cliente'] ?? null,
         'titulo' => 'Ordem de Serviço',
         'tipo_servico' => $tipoServico,
+        'linha_servico' => $linhaServico,
         'problema_relatado_cliente' => $problema,
         'problema_ordem' => $problema,
         'servico' => $problema,
@@ -1577,6 +1582,7 @@ function syncOrdensServicoParaVisitas(mysqli $db, string $cargo, int $idTec, int
         $status = normalizeOsStatus($statusRaw);
         $data = safeDateValue(firstValue($os, ['data_agendamento', 'data_agendada', 'data_abertura', 'data_pedido', 'data_cad_pedido', 'data_entrega', 'criado_em'], ''));
         $descricao = firstValue($os, ['problema_relatado_cliente', 'problema_ordem', 'titulo', 'servico_executado', 'obs_pedido', 'observacao_cliente', 'observacao_interna'], '');
+        $linhaOs = firstValue($os, ['linha_servico'], 'cftv') === 'serralheria' ? 'serralheria' : 'cftv';
 
         $exist = null;
         if ($ordemLocalId > 0) {
@@ -1609,10 +1615,10 @@ function syncOrdensServicoParaVisitas(mysqli $db, string $cargo, int $idTec, int
                 $extraTypes = 'ss';
             }
 
-            $up = $db->prepare("UPDATE os_visitas SET ordem_id_api=?, numero_os=?, cliente_id=?, cliente_nome=?, funcionario_id=?, funcionario_nome=?, titulo='Ordem de Serviço', tipo_servico=?, tag_servico=?, endereco=?, status_visita=?, data_agendada=COALESCE(?, data_agendada), descricao=? {$extraFinalizacao} WHERE id=? LIMIT 1");
+            $up = $db->prepare("UPDATE os_visitas SET ordem_id_api=?, numero_os=?, cliente_id=?, cliente_nome=?, funcionario_id=?, funcionario_nome=?, titulo='Ordem de Serviço', tipo_servico=?, tag_servico=?, endereco=?, status_visita=?, data_agendada=COALESCE(?, data_agendada), descricao=?, linha_servico=? {$extraFinalizacao} WHERE id=? LIMIT 1");
             if ($up) {
-                $paramsUp = [$ordemApi, $numeroOs, $clienteId, $clienteNome, $funcId, $funcNome, $tipoServico, $tag, $endereco, $status, $data, $descricao];
-                $typesUp = 'ssssisssssss';
+                $paramsUp = [$ordemApi, $numeroOs, $clienteId, $clienteNome, $funcId, $funcNome, $tipoServico, $tag, $endereco, $status, $data, $descricao, $linhaOs];
+                $typesUp = 'ssssissssssss';
                 if ($extraParams) {
                     $paramsUp = array_merge($paramsUp, $extraParams);
                     $typesUp .= $extraTypes;
@@ -1623,9 +1629,9 @@ function syncOrdensServicoParaVisitas(mysqli $db, string $cargo, int $idTec, int
                 $up->execute();
             }
         } else {
-            $in = $db->prepare("INSERT INTO os_visitas (ordem_id_local, ordem_id_api, numero_os, cliente_id, cliente_nome, funcionario_id, funcionario_nome, titulo, tipo_servico, tag_servico, endereco, status_visita, data_agendada, descricao) VALUES (?, ?, ?, ?, ?, ?, ?, 'Ordem de Serviço', ?, ?, ?, ?, ?, ?)");
+            $in = $db->prepare("INSERT INTO os_visitas (ordem_id_local, ordem_id_api, numero_os, cliente_id, cliente_nome, funcionario_id, funcionario_nome, titulo, tipo_servico, tag_servico, endereco, status_visita, data_agendada, descricao, linha_servico) VALUES (?, ?, ?, ?, ?, ?, ?, 'Ordem de Serviço', ?, ?, ?, ?, ?, ?, ?)");
             if ($in) {
-                $in->bind_param('issssisssssss', $ordemLocalId, $ordemApi, $numeroOs, $clienteId, $clienteNome, $funcId, $funcNome, $tipoServico, $tag, $endereco, $status, $data, $descricao);
+                $in->bind_param('issssissssssss', $ordemLocalId, $ordemApi, $numeroOs, $clienteId, $clienteNome, $funcId, $funcNome, $tipoServico, $tag, $endereco, $status, $data, $descricao, $linhaOs);
                 $in->execute();
             }
         }
@@ -2060,6 +2066,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
         $equipamento = vnClean($_POST['equipamento'] ?? '');
         $garantia = vnClean($_POST['garantia'] ?? '');
         $priority = (int)($_POST['priority'] ?? 0);
+        $linhaServico = (($_POST['linha_servico'] ?? '') === 'serralheria') ? 'serralheria' : 'cftv';   // OS de CFTV ou de serralheria
 
         if ($clienteId > 0) {
             $nomeLocal = buscarClienteNomeNovaOS($mysqli, $clienteId);
@@ -2126,6 +2133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
                 'endereco_id' => $enderecoId > 0 ? $enderecoId : null,
                 'nome_cliente' => $clienteNome,
                 'tipo_servico' => $tipoServico,
+                'linha_servico' => $linhaServico,
                 'data_agendada' => $dataAgendada,
                 'problema' => $descricao,
                 'equipamento' => $equipamento,
@@ -2140,8 +2148,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
         $stmt = $mysqli->prepare("
             INSERT INTO os_visitas 
-            (ordem_id_local, ordem_id_api, numero_os, cliente_id, cliente_nome, funcionario_id, funcionario_nome, titulo, tipo_servico, tag_servico, endereco, status_visita, data_agendada, descricao, observacao_interna)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (ordem_id_local, ordem_id_api, numero_os, cliente_id, cliente_nome, funcionario_id, funcionario_nome, titulo, tipo_servico, tag_servico, endereco, status_visita, data_agendada, descricao, observacao_interna, linha_servico)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
         $ordemApi = $ordemLocalId > 0 ? (string)$ordemLocalId : $numeroOs;
@@ -2150,7 +2158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
         $tag = $prioridadeTexto;
 
         $stmt->bind_param(
-            "issssisssssssss",
+            "issssissssssssss",
             $ordemLocalId,
             $ordemApi,
             $numeroOs,
@@ -2165,7 +2173,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             $status,
             $dataAgendada,
             $descricao,
-            $observacao
+            $observacao,
+            $linhaServico
         );
 
         $stmt->execute();
@@ -2954,6 +2963,7 @@ try {
                     'data_agendada' => $dataOs,
                     'criado_em' => firstValue($osDireta, ['criado_em', 'data_abertura', 'data_pedido'], $dataOs),
                     'descricao' => $descOs,
+                    'linha_servico' => firstValue($osDireta, ['linha_servico'], 'cftv') === 'serralheria' ? 'serralheria' : 'cftv',
                     'comentario' => firstValue($osDireta, ['observacao_interna', 'obs_interno_pedido'], ''),
                     '_arquivos' => [],
                     '_assinaturas' => [],
@@ -2997,7 +3007,7 @@ $logoSrc = 'vn.png';
 <!DOCTYPE html>
 <html lang="pt-BR" data-theme="<?= h($temaHtml) ?>">
 <head>
-    <?php echo vn_ui_head_tags(['title' => 'Ordens de Serviço', 'noindex' => true, 'icons' => false, 'theme_default' => $temaHtml, 'css' => ['assets/css/os-app-admin.css'], 'js' => ['assets/js/vn-camera.js']]); ?>
+    <?php echo vn_ui_head_tags(['title' => 'Ordens de Serviço', 'noindex' => true, 'icons' => false, 'theme_default' => $temaHtml, 'css' => ['assets/css/os-app-admin.css']]); ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 
@@ -3143,6 +3153,20 @@ $logoSrc = 'vn.png';
                 <button class="tab" data-tab="concluidas" onclick="setTab('concluidas')">Concluídas</button>
                 <button class="tab" data-tab="nao_realizadas" onclick="setTab('nao_realizadas')">Não realizadas</button>
                 <button class="tab" data-tab="todos" onclick="setTab('todos')">Todas</button>
+            </div>
+
+            <style>
+                .linhas-os{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+                .linha-chip{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:0 14px;border-radius:999px;border:1px solid rgba(148,163,184,.45);background:transparent;color:inherit;font:inherit;font-weight:800;font-size:.85rem;cursor:pointer}
+                .linha-chip .n{display:inline-block;min-width:22px;padding:1px 7px;border-radius:999px;background:rgba(148,163,184,.25);font-size:.72rem;text-align:center}
+                .linha-chip.active{border-color:#3b82f6;background:rgba(59,130,246,.16);box-shadow:0 0 0 2px rgba(59,130,246,.25)}
+                .linha-chip.serr.active{border-color:#f59e0b;background:rgba(245,158,11,.18);box-shadow:0 0 0 2px rgba(245,158,11,.28)}
+                .tipo-badge.serralheria{background:rgba(245,158,11,.2);color:#b45309;border-color:rgba(245,158,11,.5)}
+            </style>
+            <div class="linhas-os" role="group" aria-label="Tipo da OS">
+                <button type="button" class="linha-chip active" data-linha="" onclick="setLinha('')">Todas as áreas <span class="n" data-linha-n="">0</span></button>
+                <button type="button" class="linha-chip" data-linha="cftv" onclick="setLinha('cftv')"><i class="fas fa-video"></i> CFTV <span class="n" data-linha-n="cftv">0</span></button>
+                <button type="button" class="linha-chip serr" data-linha="serralheria" onclick="setLinha('serralheria')"><i class="fas fa-hammer"></i> Serralheria <span class="n" data-linha-n="serralheria">0</span></button>
             </div>
         </div>
 
@@ -3305,6 +3329,9 @@ const urlParams = new URLSearchParams(location.search);
 */
 let currentTab = urlParams.get('tab') || sessionStorage.getItem('vn_current_tab') || 'pendentes';
 if (!['pendentes', 'concluidas', 'nao_realizadas', 'preventivas', 'todos'].includes(currentTab)) currentTab = 'pendentes';
+/* Tipo da OS: '' = todas | cftv | serralheria (o link "OS de Serralheria" do menu abre com ?linha=serralheria) */
+let currentLinha = urlParams.get('linha') || sessionStorage.getItem('vn_current_linha') || '';
+if (!['', 'cftv', 'serralheria'].includes(currentLinha)) currentLinha = '';
 const urlSelectedId = Number(urlParams.get('os') || 0);
 const savedSelectedId = Number(sessionStorage.getItem('vn_selected_os') || 0);
 const preferredSelectedId = visitas.some(v => Number(v.id) === urlSelectedId) ? urlSelectedId : savedSelectedId;
@@ -3396,10 +3423,32 @@ function isPreventivaOS(v) {
 
 /* Selo do tipo de serviço: hoje só a preventiva ganha destaque próprio. */
 function seloTipoOS(v) {
+    let selo = '';
     if (isPreventivaOS(v)) {
-        return '<span class="tipo-badge preventiva"><i class="fas fa-calendar-check"></i> PREVENTIVA</span>';
+        selo += '<span class="tipo-badge preventiva"><i class="fas fa-calendar-check"></i> PREVENTIVA</span>';
     }
-    return '';
+    if (String(v.linha_servico || '') === 'serralheria') {
+        selo += '<span class="tipo-badge serralheria"><i class="fas fa-hammer"></i> SERRALHERIA</span>';
+    }
+    return selo;
+}
+
+function linhaDaOS(v) { return String(v.linha_servico || '') === 'serralheria' ? 'serralheria' : 'cftv'; }
+
+function setLinha(l) {
+    currentLinha = ['cftv', 'serralheria'].includes(l) ? l : '';
+    try { sessionStorage.setItem('vn_current_linha', currentLinha); } catch (e) {}
+    renderList();
+}
+
+function atualizarChipsLinha() {
+    const cont = { '': visitas.length, cftv: 0, serralheria: 0 };
+    visitas.forEach(v => { cont[linhaDaOS(v)]++; });
+    document.querySelectorAll('.linha-chip').forEach(b => {
+        b.classList.toggle('active', (b.dataset.linha || '') === currentLinha);
+        const n = b.querySelector('[data-linha-n]');
+        if (n) n.textContent = cont[b.dataset.linha || ''];
+    });
 }
 
 function statusLabel(s) {
@@ -3676,13 +3725,7 @@ document.addEventListener('click', function (e) {
     const painel = document.getElementById('calendarFilterPanel');
     if (!painel || painel.style.display === 'none') return;
 
-    /*
-       Ao tocar num dia, o calendario se redesenha e o botao do dia sai da tela (innerHTML = '').
-       Ai painel.contains(e.target) dava falso e o painel fechava sozinho a cada toque, impedindo
-       escolher um periodo (2 toques). composedPath() guarda o caminho de ANTES do redesenho.
-    */
-    const caminhoDoClique = typeof e.composedPath === 'function' ? e.composedPath() : [];
-    const clicouNoPainel = painel.contains(e.target) || caminhoDoClique.indexOf(painel) !== -1;
+    const clicouNoPainel = painel.contains(e.target);
     const clicouNoBotaoData = e.target.closest('.app-date-pill') || e.target.closest('[onclick*="abrirCalendarioFiltro"]');
 
     if (!clicouNoPainel && !clicouNoBotaoData) {
@@ -4046,6 +4089,7 @@ function filterVisitas() {
     const dataFim = document.getElementById('dataFimFiltro')?.value || '';
 
     return visitas.filter(v => {
+        if (currentLinha && linhaDaOS(v) !== currentLinha) return false;
         const s = v.status_visita;
         const dataOs = dataKeyVisita(v);
         let tabOk = true;
@@ -4114,6 +4158,7 @@ function filterVisitas() {
 
 function renderList() {
     tituloPeriodoTopo();
+    atualizarChipsLinha();
 
     const list = document.getElementById('visitList');
     const data = filterVisitas();
@@ -5125,6 +5170,14 @@ function openNovaOS() {
                 <div class="resume-box" id="novaEnderecoResumo">Selecione um cliente para carregar o endereço</div>
             </div>
 
+            <div>
+                <label><i class="fas fa-layer-group"></i> Tipo da OS</label>
+                <select class="input" id="novaLinhaServico">
+                    <option value="cftv" ${currentLinha !== 'serralheria' ? 'selected' : ''}>CFTV / segurança eletrônica</option>
+                    <option value="serralheria" ${currentLinha === 'serralheria' ? 'selected' : ''}>Serralheria</option>
+                </select>
+            </div>
+
             <div class="two-cols">
                 <div>
                     <label><i class="fas fa-screwdriver-wrench"></i> Tipo de serviço</label>
@@ -5196,6 +5249,7 @@ function salvarNovaOS() {
         endereco_id: document.getElementById('novaEnderecoId')?.value || '0',
         cliente_nome: clienteNome,
         tipo_servico: document.getElementById('novaTipoServico')?.value || 'Corretiva',
+        linha_servico: document.getElementById('novaLinhaServico')?.value || 'cftv',
         expectedService: document.getElementById('novaDescricao')?.value || '',
         equipamento: document.getElementById('novaEquipamento')?.value || '',
         garantia: document.getElementById('novaGarantia')?.value || '',
@@ -5517,9 +5571,6 @@ function prepararUploadMultiplo() {
     if (!input || !prev || !botao) return;
 
     const MAX_BYTES = 120 * 1024 * 1024;
-
-    /* Câmera própria: tira várias fotos seguidas (o campo de arquivo do celular só devolve 1 por vez). */
-    if (window.VNCamera) VNCamera.attach(input, { bloco: true });
 
     function tamanhoBonito(b) {
         if (b >= 1024 * 1024) return (b / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';

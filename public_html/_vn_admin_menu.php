@@ -20,13 +20,14 @@ if (!function_exists('vn_admin_menu_grupos')) {
                 ['pedidos',        'pedidos-dashboard.php',     'fa-calculator',           'receipt_long',               'Orçamentos & Pedidos'],
                 // Vendas de material, mensalidades e PIX avulso ficam dentro de Cobranças.
                 ['cobrancas',      'cobrancas.php',             'fa-money-bill-wave',      'payments',                   'Cobranças'],
-                ['contas-pagar',   'contas-pagar.php',          'fa-file-invoice-dollar',  'request_quote',              'A Pagar'],
                 ['relatorios',     'orcamentos-dashboard.php',  'fa-chart-column',         'bar_chart',                  'Relatórios Financeiros'],
                 ['leads',          'leads.php',                 'fa-bullhorn',             'campaign',                   'Contatos do site'],
             ],
             'Ordens de Serviço' => [
                 ['gerar-os',       'os-admin.php',              'fa-file-circle-plus',     'note_add',                   'Gerar OS'],
+                ['gerar-os-serralheria', 'os-admin.php?linha=serralheria', 'fa-hammer',     'build',                      'Gerar OS de Serralheria'],
                 ['area-os',        'iniciar.php',               'fa-screwdriver-wrench',   'construction',               'Área de OS'],
+                ['area-os-serralheria', 'iniciar.php?linha=serralheria&tab=todos', 'fa-hammer', 'handyman',              'OS de Serralheria'],
                 ['os-concluidas',  'os-concluidas.php',         'fa-file-circle-check',    'task',                       'OS Concluídas (PDF)'],
             ],
             'Estoque' => [
@@ -55,13 +56,15 @@ if (!function_exists('vn_admin_menu_grupos')) {
                 foreach ($itens as $i => $it) {
                     if ($it[0] === 'gerar-os') { $grupos[$titulo][$i][1] = 'os-funcionario.php'; }
                     if ($it[0] === 'area-os')  { $grupos[$titulo][$i][1] = 'iniciar-funcionario.php'; }
+                    if ($it[0] === 'gerar-os-serralheria') { $grupos[$titulo][$i][1] = 'os-funcionario.php?linha=serralheria'; }
+                    if ($it[0] === 'area-os-serralheria')  { $grupos[$titulo][$i][1] = 'iniciar-funcionario.php?linha=serralheria&tab=todos'; }
                 }
             }
         }
         if ($cargo !== 'admin' && function_exists('vn_role_allows')) {
             foreach ($grupos as $titulo => $itens) {
                 $grupos[$titulo] = array_values(array_filter($itens, static function ($it) use ($cargo) {
-                    return vn_role_allows($cargo, $it[1]);
+                    return vn_role_allows($cargo, explode('?', $it[1])[0]);   // o ?linha=... não conta na permissão da página
                 }));
                 if (!$grupos[$titulo]) {
                     unset($grupos[$titulo]);

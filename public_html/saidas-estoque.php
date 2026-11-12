@@ -208,7 +208,7 @@ vn_alerts($ok, $erro);
                     <select name="saida_cliente_id">
                         <option value="0">— Sem cliente / uso interno —</option>
                         <?php foreach ($clientesLista as $c): ?>
-                            <option value="<?php echo (int)$c['id']; ?>"><?php echo vn_h($c['nome']); ?></option>
+                            <option value="<?php echo (int)$c['id']; ?>" data-telefone="<?php echo vn_h((string)($c['telefone'] ?? '')); ?>"><?php echo vn_h($c['nome']); ?></option>
                         <?php endforeach; ?>
                     </select>
                 <?php else: ?>

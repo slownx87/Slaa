@@ -876,7 +876,7 @@ vn_alerts($ok, $erro);
             <div class="cb-f"><label for="cb-e-cli">Cliente *</label>
                 <select id="cb-e-cli" name="etq_cliente_id" required><option value="">Selecione um cliente…</option>
                     <?php foreach ($clientesLista as $c): $e = $etqMap[(int)$c['id']] ?? ''; ?>
-                        <option value="<?php echo (int)$c['id']; ?>"><?php echo vn_h((string)$c['nome']); ?><?php echo $e !== '' ? ' — ' . vn_h($e) : ''; ?></option>
+                        <option value="<?php echo (int)$c['id']; ?>" data-telefone="<?php echo vn_h((string)($c['telefone'] ?? '')); ?>"><?php echo vn_h((string)$c['nome']); ?><?php echo $e !== '' ? ' — ' . vn_h($e) : ''; ?></option>
                     <?php endforeach; ?>
                 </select></div>
             <div class="cb-f"><label for="cb-e-nome">Etiqueta (empresa ou grupo)</label>
@@ -934,7 +934,7 @@ vn_alerts($ok, $erro);
                 <div class="cb-f"><label for="cb-peca-cli">Cobrar de qual cliente? *</label>
                     <?php if ($clientesLista): ?>
                         <select name="peca_cliente_id" id="cb-peca-cli" required><option value="">Selecione um cliente…</option>
-                            <?php foreach ($clientesLista as $c): ?><option value="<?php echo (int)$c['id']; ?>"><?php echo vn_h((string)$c['nome']); ?><?php $e = $etqMap[(int)$c['id']] ?? ''; echo $e !== '' ? ' — ' . vn_h($e) : ''; ?></option><?php endforeach; ?>
+                            <?php foreach ($clientesLista as $c): ?><option value="<?php echo (int)$c['id']; ?>" data-telefone="<?php echo vn_h((string)($c['telefone'] ?? '')); ?>"><?php echo vn_h((string)$c['nome']); ?><?php $e = $etqMap[(int)$c['id']] ?? ''; echo $e !== '' ? ' — ' . vn_h($e) : ''; ?></option><?php endforeach; ?>
                         </select>
                     <?php else: ?>
                         <input name="peca_cliente_nome" id="cb-peca-cli" placeholder="Nome do cliente / condomínio" required>
