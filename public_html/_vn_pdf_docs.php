@@ -51,10 +51,22 @@ function vn_marca_tabela($db = null): void {
         linha VARCHAR(20) NOT NULL PRIMARY KEY,
         nome VARCHAR(120) NULL, slogan VARCHAR(160) NULL, cnpj VARCHAR(40) NULL, telefone VARCHAR(60) NULL,
         email VARCHAR(120) NULL, site VARCHAR(120) NULL, endereco VARCHAR(255) NULL, rodape VARCHAR(255) NULL,
-        logo VARCHAR(255) NULL, assinatura VARCHAR(255) NULL, cor1 VARCHAR(7) NULL, cor2 VARCHAR(7) NULL,
+        logo VARCHAR(255) NULL, assinatura VARCHAR(255) NULL, logo_nome TINYINT(1) NULL, cor1 VARCHAR(7) NULL, cor2 VARCHAR(7) NULL,
         atualizado_em DATETIME NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", [], $db);
+    // tabela criada na versão anterior: acrescenta "a logo já tem o nome da empresa" (sem permissão para alterar, o resto segue funcionando)
+    try {
+        if (!vn_marca_coluna('logo_nome', $db)) vn_marca_x('ALTER TABLE vn_pdf_marca ADD COLUMN logo_nome TINYINT(1) NULL', [], $db);
+    } catch (Throwable $e) { /* segue sem a coluna */ }
     $feito = true;
+}
+
+/** A tabela vn_pdf_marca tem esta coluna? (consulta guardada na memória durante a requisição) */
+function vn_marca_coluna(string $nome, $db = null): bool {
+    static $cache = [];
+    if (isset($cache[$nome]) && $cache[$nome]) return true;
+    $r = vn_marca_q("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vn_pdf_marca' AND COLUMN_NAME = ? LIMIT 1", [$nome], $db);
+    return $cache[$nome] = (bool)$r;
 }
 
 /* ---------- marca ---------- */
@@ -65,13 +77,13 @@ function vn_marca_linha_valida($l): string { return strtolower(trim((string)$l))
 /** O que vale enquanto ninguém salvou a marca em "Marca dos PDFs". */
 function vn_marca_padrao(string $linha): array {
     if ($linha === 'serralheria') {
-        // Só o nome: CNPJ, telefone e endereço da Expresso Serralheria não são inventados, entram em "Marca dos PDFs".
-        return ['nome' => 'Expresso Serralheria', 'slogan' => '', 'cnpj' => '', 'telefone' => '', 'email' => '', 'site' => '', 'endereco' => '', 'rodape' => '',
-            'logo' => '', 'assinatura' => '', 'cor1' => '#1f2933', 'cor2' => '#f97316'];
+        // Logo (recortada do material da própria Expresso) e frase vêm do material enviado; CNPJ, telefone e endereço não são inventados: entram em "Marca dos PDFs".
+        return ['nome' => 'Expresso Serralheria', 'slogan' => 'Soluções inteligentes em segurança', 'cnpj' => '', 'telefone' => '', 'email' => '', 'site' => '', 'endereco' => '', 'rodape' => '',
+            'logo' => 'imagens/expresso-serralheria.png', 'assinatura' => '', 'logo_nome' => 1, 'cor1' => '#0c0c0e', 'cor2' => '#e0ac2b'];
     }
     return ['nome' => 'VN System', 'slogan' => 'Manutenções e Instalações', 'cnpj' => '58.181.863/0001-92', 'telefone' => '(11) 96919-0724', 'email' => '', 'site' => '',
         'endereco' => 'Rua Ana Maria, 46 - São Bernardo do Campo/SP - CEP 09669-060', 'rodape' => '',
-        'logo' => 'vn-orcamento.png', 'assinatura' => 'assinatura-vnsystem.jpg', 'cor1' => '#1d4ed8', 'cor2' => '#0ea5e9'];
+        'logo' => 'vn-orcamento.png', 'assinatura' => 'assinatura-vnsystem.jpg', 'logo_nome' => 0, 'cor1' => '#1d4ed8', 'cor2' => '#0ea5e9'];
 }
 
 /** Caminho (relativo ao site) → arquivo no disco, só dentro do site e só imagem. */
@@ -83,7 +95,10 @@ function vn_marca_arquivo(string $rel): string {
     return is_file($f) ? $f : '';
 }
 
-/** Marca de uma linha ('cftv'|'serralheria'), já com arquivo da logo resolvido e cores válidas. */
+/**
+ * Marca de uma linha ('cftv'|'serralheria'), já com arquivo da logo resolvido e cores válidas.
+ * Logo e assinatura: vazio = vale a padrão; "-" = a pessoa tirou a imagem de propósito (fica sem).
+ */
 function vn_marca_get(string $linha = 'cftv', $db = null): array {
     $linha = vn_marca_linha_valida($linha);
     $b = vn_marca_padrao($linha);
@@ -97,7 +112,14 @@ function vn_marca_get(string $linha = 'cftv', $db = null): array {
         }
     } catch (Throwable $e) { /* sem banco/tabela: segue com a marca padrão */ }
     $pad = vn_marca_padrao($linha);
+    foreach (['logo', 'assinatura'] as $k) {
+        if (trim((string)$b[$k]) === '') $b[$k] = $pad[$k];
+        elseif (trim((string)$b[$k]) === '-') $b[$k] = '';
+    }
     foreach (['cor1', 'cor2'] as $k) if (!preg_match('/^#[0-9a-fA-F]{6}$/', (string)$b[$k])) $b[$k] = $pad[$k];
+    // cores que a versão anterior usava como padrão da Serralheria (grafite e laranja), nunca escolhidas por ninguém: passam para as da logo
+    if ($linha === 'serralheria' && strtolower((string)$b['cor1']) === '#1f2933' && strtolower((string)$b['cor2']) === '#f97316') { $b['cor1'] = $pad['cor1']; $b['cor2'] = $pad['cor2']; }
+    $b['logo_nome'] = (int)$b['logo_nome'];
     $b['linha'] = $linha;
     $b['logo_file'] = vn_marca_arquivo((string)$b['logo']);
     if ($b['logo_file'] === '' && !$b['salvo'] && $linha === 'cftv') $b['logo_file'] = vn_marca_arquivo('vn.png');
@@ -190,9 +212,15 @@ function vn_marca_cores_logo(string $file): ?array {
         for ($t = 0.0; $t <= 0.381; $t += 0.04) { $x = vn_pdf_mix($c, [0, 0, 0], $t); if (vn_pdf_contraste($x, $branco) >= 4.5) return $x; }
         return null;
     };
+    // cor clara (dourado, amarelo, laranja, prata) é ótima de destaque, mas ruim de fundo para texto branco: não serve de principal
+    $claro = function ($c) { return vn_pdf_lum($c) >= 0.28; };
     $c1 = null;
-    foreach ($ordem as $c) { $x = $escurecer($c); if ($x) { $c1 = $x; break; } }
-    if ($c1 === null) $c1 = $ordem[0];            // vira escura em vn_pdf_tema()
+    foreach ($ordem as $c) { if ($claro($c)) continue; $x = $escurecer($c); if ($x) { $c1 = $x; break; } }
+    if ($c1 === null) {
+        // só cores claras (ex.: logo dourada com fundo transparente): faixa quase preta, com um leve tom da cor da logo
+        [$hh, $s, $l] = vn_pdf_rgb_hsl($P ? $P['c'] : $ordem[0]);
+        $c1 = vn_pdf_hsl_rgb($hh, min(0.30, $s * 0.35), 0.07);
+    }
 
     // destaque: outra cor viva da logo; senão uma versão mais clara da principal; logo só preta/cinza: o cinza
     $c2 = null;
@@ -206,6 +234,47 @@ function vn_marca_cores_logo(string $file): ?array {
         else $c2 = vn_pdf_mix($c1, [255, 255, 255], 0.55);
     }
     return ['c1' => vn_pdf_hex($c1), 'c2' => vn_pdf_hex($c2)];
+}
+
+/** Luminância média (0..1) dos pixels visíveis da logo, ignorando fundo transparente e branco puro; null se não deu para ler. */
+function vn_marca_logo_luminancia(string $file): ?float {
+    if (!is_file($file) || !function_exists('imagecreatefromstring')) return null;
+    $bin = @file_get_contents($file);
+    $im = $bin ? @imagecreatefromstring($bin) : false;
+    if (!$im) return null;
+    $w = imagesx($im); $h = imagesy($im);
+    $k = min(1, 64 / max($w, $h, 1));
+    $nw = max(1, (int)round($w * $k)); $nh = max(1, (int)round($h * $k));
+    $sm = imagecreatetruecolor($nw, $nh);
+    imagealphablending($sm, false); imagesavealpha($sm, true);
+    imagefilledrectangle($sm, 0, 0, $nw, $nh, imagecolorallocatealpha($sm, 255, 255, 255, 127));
+    imagecopyresampled($sm, $im, 0, 0, 0, 0, $nw, $nh, $w, $h);
+    imagedestroy($im);
+    $soma = 0.0; $n = 0;
+    for ($y = 0; $y < $nh; $y++) {
+        for ($x = 0; $x < $nw; $x++) {
+            $c = imagecolorat($sm, $x, $y);
+            if ((($c >> 24) & 0x7F) > 70) continue;
+            $r = ($c >> 16) & 255; $g = ($c >> 8) & 255; $b = $c & 255;
+            if ($r > 240 && $g > 240 && $b > 240) continue;
+            $soma += vn_pdf_lum([$r, $g, $b]); $n++;
+        }
+    }
+    imagedestroy($sm);
+    return $n >= 12 ? $soma / $n : null;
+}
+
+/**
+ * A logo aparece melhor direto na faixa colorida (sem o quadrado branco)? Vale para logo clara (dourada, prateada, branca)
+ * sobre faixa escura: sobre o quadrado branco ela quase some. Logo escura ou colorida continua no quadrado branco.
+ */
+function vn_marca_logo_sobre_escuro(string $file, string $c1): bool {
+    $l = vn_marca_logo_luminancia($file);
+    if ($l === null) return false;
+    $f = vn_pdf_lum(vn_pdf_tema($c1, $c1)['c1']);
+    $contrasteFaixa = (max($l, $f) + 0.05) / (min($l, $f) + 0.05);
+    $contrasteBranco = 1.05 / ($l + 0.05);
+    return $contrasteFaixa > $contrasteBranco * 1.15;
 }
 
 function vn_pdf_iniciais(string $nome): string {
@@ -234,7 +303,9 @@ class VNPdfDoc extends VNPdf {
     public $doc;
     protected $logoImg = null;
     protected $assImg = null;
-    protected $pend = null;      // título de seção à espera do primeiro bloco
+    protected $logoDireto = false;   // logo clara: desenhada direto na faixa, sem o quadrado branco
+    protected $logoNome = false;     // a logo já traz o nome da empresa: o nome não se repete ao lado dela
+    protected $pend = null;          // título de seção à espera do primeiro bloco
 
     /**
      * $brand: vn_marca_get(). $doc: titulo (ex.: "Orçamento"), numero, sub (linha extra), data, selo (etiqueta destacada, ex.: "Válido até 20/12/2026").
@@ -246,6 +317,10 @@ class VNPdfDoc extends VNPdf {
         parent::__construct(['title' => trim($this->doc['titulo'] . ' ' . $this->doc['numero']), 'author' => (string)$brand['nome'], 'subject' => (string)$brand['nome']]);
         $this->mB = 56;
         if (!empty($brand['logo_file'])) $this->logoImg = $this->addImage($brand['logo_file'], ['max' => 520, 'trim' => true]);
+        if ($this->logoImg) {
+            $this->logoDireto = vn_marca_logo_sobre_escuro((string)$brand['logo_file'], (string)$this->t['c1']);
+            $this->logoNome = !empty($brand['logo_nome']);
+        }
         $this->setPageHook([$this, 'hookPagina']);
         $this->setFooterHook([$this, 'hookRodape']);
     }
@@ -258,25 +333,33 @@ class VNPdfDoc extends VNPdf {
         if ($n > 1) {
             $this->rect(0, 0, $W, 30, $t['c1']);
             $this->rect(0, 30, $W, 2.5, $t['c2']);
-            $this->text($this->mL, 19.5, vn_pdf_upper((string)$this->b['nome']), 8.5, 'B', '#ffffff', 'L', 0.8);
+            $this->text($this->mL, 19.5, $this->fit(vn_pdf_upper((string)$this->b['nome']), 230, 8.5, 'B', 0.8), 8.5, 'B', '#ffffff', 'L', 0.8);
             $dir = trim($this->doc['titulo'] . '  ' . $this->doc['numero']);
-            $this->text($W - $this->mR, 19.5, $this->fit($dir, 300, 8.5, 'B'), 8.5, 'B', '#ffffff', 'R');
+            $this->text($W - $this->mR, 19.5, $this->fit($dir, 260, 8.5, 'B'), 8.5, 'B', '#ffffff', 'R');
             $this->y = 50;
             return;
         }
-        $H = 112;
+        if ($this->logoImg && $this->logoDireto && $this->logoNome) $this->headerLogoLarga();
+        else $this->headerPadrao();
+    }
+
+    /** Faixa colorida do topo: painel diagonal mais claro à direita e filete de destaque embaixo. */
+    protected function faixa(float $H): void {
+        $t = $this->t; $W = self::PW;
         $this->rect(0, 0, $W, $H, $t['c1']);
         $this->poly([[$W - 250, 0], [$W, 0], [$W, $H], [$W - 305, $H]], $t['c1b']);
         $this->rect(0, $H, $W, 4.5, $t['c2']);
+    }
 
-        // selo da logo: quadrado branco com a logo (ou as iniciais da marca)
-        $bs = 66; $bx = $this->mL; $by = ($H - $bs) / 2;
-        $this->rrect($bx, $by, $bs, $bs, 11, '#ffffff');
-        if ($this->logoImg) $this->imageFit($this->logoImg, $bx + 6, $by + 6, $bs - 12, $bs - 12);
-        else $this->text($bx + $bs / 2, $this->mid($by + $bs / 2, 24), vn_pdf_iniciais((string)$this->b['nome']), 24, 'B', $t['c1'], 'C');
+    /** Cor dos textos pequenos sobre a faixa. */
+    protected function corSuave(): string { return vn_pdf_hex(vn_pdf_mix($this->t['c1'], '#ffffff', 0.82)); }
 
-        // bloco da direita (título do documento): mede primeiro, para o nome da empresa não encostar nele
-        $rx = $W - $this->mR;
+    /**
+     * Bloco da direita do cabeçalho: título do documento, número, data e selo de validade. Desenha e devolve a largura usada,
+     * para o lado esquerdo (nome, contatos) não encostar nele. $selTopo = altura em que o selo é desenhado.
+     */
+    protected function blocoDireita(float $selTopo): float {
+        $t = $this->t; $rx = self::PW - $this->mR; $soft = $this->corSuave();
         $tit = vn_pdf_upper(trim((string)$this->doc['titulo']));
         $ts = $this->fitSize($tit, 200, 20, 'B', 11);
         $numTxt = trim((string)$this->doc['numero']) !== '' ? $this->fit('Nº ' . $this->doc['numero'], 215, 10.5, 'B') : '';
@@ -286,20 +369,50 @@ class VNPdfDoc extends VNPdf {
         $selW = $sel !== '' ? $this->width($sel, 8, 'B') + 18 : 0;
         $rw = max($this->width($tit, $ts, 'B') + 0.4 * strlen($this->enc($tit)), $numTxt !== '' ? $this->width($numTxt, 10.5, 'B') : 0,
             $extraTxt !== '' ? $this->width($extraTxt, 8.4, 'R') : 0, $selW);
+        $yy = 33;
+        $this->text($rx, $yy, $tit, $ts, 'B', '#ffffff', 'R', 0.4);
+        if ($numTxt !== '') { $yy += 18; $this->text($rx, $yy, $numTxt, 10.5, 'B', vn_pdf_hex(vn_pdf_mix('#ffffff', $t['c1'], 0.08)), 'R'); }
+        if ($extraTxt !== '') { $yy += 14; $this->text($rx, $yy, $extraTxt, 8.4, 'R', $soft, 'R'); }
+        if ($sel !== '') {
+            $this->rrect($rx - $selW, $selTopo, $selW, 18, 9, $t['c2']);
+            $this->text($rx - $selW / 2, $this->mid($selTopo + 9, 8), $sel, 8, 'B', $t['on2'], 'C');
+        }
+        return $rw;
+    }
+
+    /** Cabeçalho comum: logo (em quadrado branco, ou direto na faixa se for clara), nome da empresa e contatos. */
+    protected function headerPadrao(): void {
+        $t = $this->t; $W = self::PW; $H = 112; $rx = $W - $this->mR;
+        $this->faixa($H);
+
+        $bs = 66; $bx = $this->mL; $by = ($H - $bs) / 2;
+        if ($this->logoImg && $this->logoDireto) {
+            $larg = $this->imageFit($this->logoImg, $bx, $by, 112, $bs, 0, 'L', 'C')[2];
+        } else {
+            // selo da logo: quadrado branco com a logo (ou as iniciais da marca)
+            $this->rrect($bx, $by, $bs, $bs, 11, '#ffffff');
+            if ($this->logoImg) $this->imageFit($this->logoImg, $bx + 6, $by + 6, $bs - 12, $bs - 12);
+            else $this->text($bx + $bs / 2, $this->mid($by + $bs / 2, 24), vn_pdf_iniciais((string)$this->b['nome']), 24, 'B', $t['c1'], 'C');
+            $larg = $bs;
+        }
+
+        // bloco da direita primeiro, para o nome da empresa não encostar nele
+        $rw = $this->blocoDireita($H - 29);
+        $selW = trim((string)$this->doc['selo']) !== '' ? $this->width(trim((string)$this->doc['selo']), 8, 'B') + 18 : 0;
 
         // nome e contatos (à esquerda, entre a logo e o bloco da direita)
-        $nx = $bx + $bs + 16;
+        $nx = $bx + $larg + 16;
         $nw = max(150, min(236, ($rx - $rw) - 22 - $nx));
         $nome = vn_pdf_upper(trim((string)$this->b['nome']));
-        // o nome usa o maior tamanho que caiba em até 2 linhas (14 pt de folga para o espaçamento entre letras)
+        // o nome usa o maior tamanho que caiba em até 2 linhas
         $linhas = null; $ns = 16;
         foreach ([16, 14.5, 13, 12, 11] as $tam) {
-            $l = $this->wrap($nome, $nw - 14, $tam, 'B');
+            $l = $this->wrap($nome, $nw, $tam, 'B', 0.5);
             if (count($l) <= 2) { $ns = $tam; $linhas = $l; break; }
         }
         if ($linhas === null) {
-            $ns = 11; $l = $this->wrap($nome, $nw - 14, 11, 'B');
-            $linhas = [$l[0], $this->fit(implode(' ', array_slice($l, 1)), $nw - 14, 11, 'B')];
+            $ns = 11; $l = $this->wrap($nome, $nw, 11, 'B', 0.5);
+            $linhas = [$l[0], $this->fit(implode(' ', array_slice($l, 1)), $nw, 11, 'B', 0.5)];
         }
         $info = [];
         if (trim((string)$this->b['slogan']) !== '') $info[] = [$this->fit((string)$this->b['slogan'], $nw, 8.4, 'I'), 'I', 8.4, 12.5];
@@ -316,17 +429,43 @@ class VNPdfDoc extends VNPdf {
         $y0 = max(10, ($H - $alt) / 2);
         foreach ($linhas as $ln) { $this->text($nx, $y0 + $ns * 0.86, $ln, $ns, 'B', '#ffffff', 'L', 0.5); $y0 += $ns + 3.5; }
         $y0 += 1;
-        $soft = vn_pdf_hex(vn_pdf_mix($t['c1'], '#ffffff', 0.82));
+        $soft = $this->corSuave();
         foreach ($info as $i) { $this->text($nx, $y0 + $i[2] * 0.88, $i[0], $i[2], $i[1], $soft); $y0 += $i[3]; }
+        $this->y = $H + 24;
+    }
 
-        // título do documento
-        $yy = 33;
-        $this->text($rx, $yy, $tit, $ts, 'B', '#ffffff', 'R', 0.4);
-        if ($numTxt !== '') { $yy += 18; $this->text($rx, $yy, $numTxt, 10.5, 'B', vn_pdf_hex(vn_pdf_mix('#ffffff', $t['c1'], 0.08)), 'R'); }
-        if ($extraTxt !== '') { $yy += 14; $this->text($rx, $yy, $extraTxt, 8.4, 'R', $soft, 'R'); }
-        if ($sel !== '') {
-            $this->rrect($rx - $selW, $H - 29, $selW, 18, 9, $t['c2']);
-            $this->text($rx - $selW / 2, $this->mid($H - 29 + 9, 8), $sel, 8, 'B', $t['on2'], 'C');
+    /**
+     * Cabeçalho para logo larga que já traz o nome (ex.: ícone + "EXPRESSO SERRALHERIA"): a logo vai grande, direto na faixa,
+     * a frase da empresa ao lado (na cor de destaque) e os contatos numa linha embaixo.
+     */
+    protected function headerLogoLarga(): void {
+        $t = $this->t; $W = self::PW; $rx = $W - $this->mR; $soft = $this->corSuave();
+        $partes = [];
+        if (trim((string)$this->b['cnpj']) !== '') $partes[] = 'CNPJ ' . trim((string)$this->b['cnpj']);
+        foreach (['telefone', 'email', 'site', 'endereco'] as $k) if (trim((string)$this->b[$k]) !== '') $partes[] = trim((string)$this->b[$k]);
+        $linhasContato = $partes ? array_slice($this->wrap(implode('  ·  ', $partes), $this->contentWidth(), 7.8, 'R'), 0, 2) : [];
+        $topo = 118;
+        $H = $topo + ($linhasContato ? count($linhasContato) * 11.4 + 16 : 0);
+        $this->faixa($H);
+
+        $by = 11; $alturaLogo = $topo - 22;
+        $r = $this->imageFit($this->logoImg, $this->mL, $by, 250, $alturaLogo, 0, 'L', 'C');
+        $rw = $this->blocoDireita($topo - 30);
+
+        // frase da empresa ao lado da logo, na cor de destaque
+        $sx = $r[0] + $r[2] + 20; $sw = ($rx - $rw) - 18 - $sx;
+        $frase = trim((string)$this->b['slogan']);
+        if ($frase !== '' && $sw > 70) {
+            $ls = array_slice($this->wrap(vn_pdf_upper($frase), $sw, 7.8, 'B', 0.9), 0, 3);
+            $yy = $by + $alturaLogo / 2 - count($ls) * 5.8;
+            foreach ($ls as $ln) { $this->text($sx, $yy + 9, $ln, 7.8, 'B', $t['c2'], 'L', 0.9); $yy += 11.6; }
+        }
+
+        // contatos numa linha (ou duas) no pé da faixa
+        if ($linhasContato) {
+            $this->line($this->mL, $topo + 2, $W - $this->mR, $topo + 2, vn_pdf_hex(vn_pdf_mix($t['c1'], '#ffffff', 0.2)), 0.6);
+            $yy = $topo + 15;
+            foreach ($linhasContato as $ln) { $this->text($this->mL, $yy, $ln, 7.8, 'R', $soft); $yy += 11.4; }
         }
         $this->y = $H + 24;
     }
@@ -925,9 +1064,11 @@ function vn_marca_salvar(string $linha, array $post, array $files, $db = null): 
         if ($cores) { $c1 = $cores['c1']; $c2 = $cores['c2']; $aviso = ' As cores do PDF foram tiradas da logo.'; }
         else $aviso = $arq === '' ? ' Sem logo, as cores escolhidas foram mantidas.' : ' Não consegui tirar as cores desta logo; mantive as cores escolhidas.';
     }
-    vn_marca_x('REPLACE INTO vn_pdf_marca (linha, nome, slogan, cnpj, telefone, email, site, endereco, rodape, logo, assinatura, cor1, cor2, atualizado_em)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-        [$linha, $d['nome'], $d['slogan'], $d['cnpj'], $d['telefone'], $d['email'], $d['site'], $d['endereco'], $d['rodape'], $logo, $assin, $c1, $c2], $db);
+    $cols = ['linha', 'nome', 'slogan', 'cnpj', 'telefone', 'email', 'site', 'endereco', 'rodape', 'logo', 'assinatura', 'cor1', 'cor2'];
+    // "-" guarda que a pessoa tirou a imagem de propósito (vazio quer dizer "vale a padrão")
+    $vals = [$linha, $d['nome'], $d['slogan'], $d['cnpj'], $d['telefone'], $d['email'], $d['site'], $d['endereco'], $d['rodape'], $logo !== '' ? $logo : '-', $assin !== '' ? $assin : '-', $c1, $c2];
+    if (vn_marca_coluna('logo_nome', $db)) { $cols[] = 'logo_nome'; $vals[] = !empty($post['logo_nome']) ? 1 : 0; }
+    vn_marca_x('REPLACE INTO vn_pdf_marca (' . implode(', ', $cols) . ', atualizado_em) VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ', NOW())', $vals, $db);
     return 'Marca salva. Os próximos PDFs já saem com ela.' . $aviso;
 }
 

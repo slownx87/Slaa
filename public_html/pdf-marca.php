@@ -65,6 +65,7 @@ unset($_SESSION['pm_flash']);
 
 $b = vn_marca_get($linha);
 $tema = vn_pdf_tema((string)$b['cor1'], (string)$b['cor2']);
+$logoDireto = $b['logo_file'] !== '' && vn_marca_logo_sobre_escuro((string)$b['logo_file'], (string)$b['cor1']);   // logo clara: vai direto na faixa
 $logoUrl = $b['logo_file'] !== '' ? ltrim(str_replace('\\', '/', (string)($b['logo'] !== '' ? $b['logo'] : 'vn.png')), '/') : '';
 $assUrl = $b['assinatura_file'] !== '' ? ltrim(str_replace('\\', '/', (string)$b['assinatura']), '/') : '';
 $faltaDados = $linha === 'serralheria' && !$b['salvo'];
@@ -96,10 +97,10 @@ vn_ui_shell_start('Marca dos PDFs', 'marca', [
 </nav>
 
 <?php if ($faltaDados): ?>
-    <div class="vn-alert warn" role="note">Ainda não há CNPJ, telefone nem endereço da Expresso Serralheria: os PDFs saem só com o nome. Preencha abaixo e envie a logo.</div>
+    <div class="vn-alert warn" role="note">Ainda não há CNPJ, telefone nem endereço da Expresso Serralheria: os PDFs saem só com a logo e a frase. Preencha os dados abaixo.</div>
 <?php endif; ?>
 
-<section class="pm-prev" id="pmPrev" aria-label="Prévia do cabeçalho do PDF"
+<section class="pm-prev<?php echo $logoDireto ? ' pm-direto' : ''; echo ($logoDireto && !empty($b['logo_nome'])) ? ' pm-logonome' : ''; ?>" id="pmPrev" aria-label="Prévia do cabeçalho do PDF"
          style="--pm-c1:<?php echo vn_h($tema['c1']); ?>;--pm-c2:<?php echo vn_h($tema['c2']); ?>;--pm-on2:<?php echo vn_h($tema['on2']); ?>">
     <div class="pm-prev-band">
         <div class="pm-prev-logo">
@@ -141,6 +142,7 @@ vn_ui_shell_start('Marca dos PDFs', 'marca', [
                     <label for="pmLogo">Logo (PNG com fundo transparente fica melhor)</label>
                     <input type="file" name="logo" id="pmLogo" accept="image/png,image/jpeg,image/webp">
                 </div>
+                <label class="vn-check"><input type="checkbox" name="logo_nome" value="1" id="pmLogoNome"<?php echo !empty($b['logo_nome']) ? ' checked' : ''; ?>> A logo já traz o nome da empresa (não repetir o nome ao lado dela)</label>
                 <?php if ($logoUrl !== ''): ?>
                     <label class="vn-check"><input type="checkbox" name="remover_logo" value="1" id="pmRemoverLogo"> Tirar a logo</label>
                 <?php endif; ?>

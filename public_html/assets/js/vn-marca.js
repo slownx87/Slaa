@@ -14,11 +14,46 @@
   function hex(c) { return '#' + c.map(function (v) { v = Math.max(0, Math.min(255, Math.round(v))); return (v < 16 ? '0' : '') + v.toString(16); }).join(''); }
   function escurecer(c) { for (var i = 0; i < 40 && contrasteBranco(c) < 4.5; i++) c = c.map(function (v) { return v * 0.93; }); return c; }
 
+  /* Luminância média dos pixels visíveis da logo (sem transparência nem branco puro): a mesma conta do PDF. */
+  var lumCache = {};
+  function lumLogo(img) {
+    var chave = img.currentSrc || img.src;
+    if (chave in lumCache) return lumCache[chave];
+    var r = null;
+    try {
+      if (img.naturalWidth > 0) {
+        var s = 64, k = Math.min(1, s / Math.max(img.naturalWidth, img.naturalHeight));
+        var cw = Math.max(1, Math.round(img.naturalWidth * k)), ch = Math.max(1, Math.round(img.naturalHeight * k));
+        var cv = d.createElement('canvas'); cv.width = cw; cv.height = ch;
+        var cx = cv.getContext('2d'); cx.drawImage(img, 0, 0, cw, ch);
+        var px = cx.getImageData(0, 0, cw, ch).data, soma = 0, n = 0;
+        for (var i = 0; i < px.length; i += 4) {
+          if (px[i + 3] < 114) continue;                                      // transparente
+          if (px[i] > 240 && px[i + 1] > 240 && px[i + 2] > 240) continue;    // branco
+          soma += lum([px[i], px[i + 1], px[i + 2]]); n++;
+        }
+        r = n >= 12 ? soma / n : null;
+      }
+    } catch (e) { r = null; }
+    lumCache[chave] = r;
+    return r;
+  }
+  /* Logo clara sobre faixa escura fica melhor direto na faixa (no quadrado branco ela quase some). */
+  function modo() {
+    var img = $('pmPrevImg'), direto = false;
+    if (!img.hidden && img.getAttribute('src')) {
+      var l = lumLogo(img), f = lum(escurecer(rgb($('pmCor1').value)));
+      if (l !== null) direto = (Math.max(l, f) + 0.05) / (Math.min(l, f) + 0.05) > (1.05 / (l + 0.05)) * 1.15;
+    }
+    prev.classList.toggle('pm-direto', direto);
+    prev.classList.toggle('pm-logonome', direto && $('pmLogoNome').checked);
+  }
   function cores() {
     var c1 = escurecer(rgb($('pmCor1').value)), c2 = rgb($('pmCor2').value);
     prev.style.setProperty('--pm-c1', hex(c1));
     prev.style.setProperty('--pm-c2', hex(c2));
     prev.style.setProperty('--pm-on2', contrasteBranco(c2) >= 3.2 ? '#ffffff' : '#111827');
+    modo();
   }
   function iniciais(nome) {
     var p = String(nome || '').trim().split(/\s+/).filter(Boolean).slice(0, 2);
@@ -42,7 +77,10 @@
       img.hidden = !tem;
       alt.hidden = tem;
     });
+    modo();
   }
+  $('pmPrevImg').addEventListener('load', modo);
+  $('pmLogoNome').addEventListener('change', modo);
 
   ['pmNome', 'pmSlogan', 'pmCnpj', 'pmTel'].forEach(function (id) { $(id).addEventListener('input', textos); });
   ['pmCor1', 'pmCor2'].forEach(function (id) {

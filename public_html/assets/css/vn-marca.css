@@ -28,6 +28,11 @@
   color:var(--pm-c1);font-weight:800;font-size:1.35rem;
 }
 .pm-prev-logo img{width:100%;height:100%;object-fit:contain;padding:5px;display:block}
+/* logo clara (dourada, branca...): vai direto na faixa, sem o quadrado branco; se ela já traz o nome, o nome não se repete */
+.pm-prev.pm-direto .pm-prev-logo{background:none;width:auto;height:62px;border-radius:0;overflow:visible}
+.pm-prev.pm-direto .pm-prev-logo img{width:auto;height:100%;max-width:150px;padding:0}
+.pm-prev.pm-logonome .pm-prev-name strong{display:none}
+.pm-prev.pm-logonome .pm-prev-name small:nth-of-type(1){color:var(--pm-c2);font-weight:800;font-style:normal;letter-spacing:.08em;text-transform:uppercase;opacity:1}
 .pm-prev-name{display:flex;flex-direction:column;gap:2px;min-width:0}
 .pm-prev-name strong{font-size:1.05rem;letter-spacing:.03em;overflow-wrap:anywhere;line-height:1.2}
 .pm-prev-name small{font-size:.72rem;opacity:.85;line-height:1.35;overflow-wrap:anywhere}

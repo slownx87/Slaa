@@ -221,31 +221,31 @@ class VNPdf {
     }
 
     /** Largura do texto em pontos (tabelas de largura da Helvetica; confere com o resultado de um leitor de PDF). */
-    public function width($s, float $size, string $style = 'R'): float {
+    public function width($s, float $size, string $style = 'R', float $cs = 0.0): float {
         $b = $this->enc((string)$s);
         $t = $style === 'B' || $style === 'BI' ? self::$LB : ($style === 'I' ? self::$LI : self::$LR);
         $w = 0;
         for ($i = 0, $n = strlen($b); $i < $n; $i++) $w += $t[ord($b[$i])];
-        return $w * $size / 1000;
+        return $w * $size / 1000 + $cs * strlen($b);      // $cs = espaçamento extra entre letras (o mesmo de text())
     }
 
     /** Quebra o texto em linhas que cabem em $maxW. Respeita "\n"; palavra maior que a linha é cortada. */
-    public function wrap($s, float $maxW, float $size, string $style = 'R'): array {
+    public function wrap($s, float $maxW, float $size, string $style = 'R', float $cs = 0.0): array {
         $s = str_replace(["\r\n", "\r", "\xC2\xA0"], ["\n", "\n", ' '], (string)$s);
         if ($maxW < 4) return [trim($s)];
-        $space = $this->width(' ', $size, $style);
+        $space = $this->width(' ', $size, $style, $cs);
         $out = [];
         foreach (explode("\n", $s) as $para) {
             $words = preg_split('/\s+/u', trim($para), -1, PREG_SPLIT_NO_EMPTY);
             if (!$words) { $out[] = ''; continue; }
             $line = ''; $lw = 0.0;
             foreach ($words as $word) {
-                $ww = $this->width($word, $size, $style);
+                $ww = $this->width($word, $size, $style, $cs);
                 if ($ww > $maxW) {
                     if ($line !== '') { $out[] = $line; $line = ''; $lw = 0.0; }
                     $piece = ''; $pw = 0.0;
                     foreach (preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
-                        $cw = $this->width($ch, $size, $style);
+                        $cw = $this->width($ch, $size, $style, $cs);
                         if ($pw + $cw > $maxW && $piece !== '') { $out[] = $piece; $piece = ''; $pw = 0.0; }
                         $piece .= $ch; $pw += $cw;
                     }
@@ -262,14 +262,14 @@ class VNPdf {
     }
 
     /** Corta com "…" para caber numa linha só. */
-    public function fit($s, float $maxW, float $size, string $style = 'R'): string {
+    public function fit($s, float $maxW, float $size, string $style = 'R', float $cs = 0.0): string {
         $s = trim(preg_replace('/\s+/u', ' ', (string)$s));
-        if ($this->width($s, $size, $style) <= $maxW) return $s;
+        if ($this->width($s, $size, $style, $cs) <= $maxW) return $s;
         $chars = preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY);
-        $ell = '…'; $ew = $this->width($ell, $size, $style);
+        $ell = '…'; $ew = $this->width($ell, $size, $style, $cs);
         $out = ''; $w = 0.0;
         foreach ($chars as $ch) {
-            $cw = $this->width($ch, $size, $style);
+            $cw = $this->width($ch, $size, $style, $cs);
             if ($w + $cw + $ew > $maxW) break;
             $out .= $ch; $w += $cw;
         }
