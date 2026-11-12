@@ -89,7 +89,7 @@ $chartCores = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#e11d48', '#0891b2']
 </style>
 
 <section class="vn-page-head"><div><span class="vn-kicker">Financeiro</span><h2>Relatórios financeiros do mês.</h2><p>Gráficos e valores no mesmo estilo do resumo de Cobranças: orçado × lucro, status dos pedidos, estoque parado, o que há para receber e as contas a pagar.</p></div></section>
-<form class="vn-filter" method="get"><label>Mês<select name="mes" onchange="this.form.submit()"><?php echo vn_mes_options_html($mes); ?></select></label></form>
+<form class="vn-filter" method="get"><?php echo vn_mes_picker_html($mes); ?></form>
 
 <?php fin_render_topo($fin, $mes); ?>
 
