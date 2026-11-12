@@ -134,6 +134,7 @@ function pv_kv(string $rotulo, string $valor, bool $pre = false): string {
 
 vn_ui_shell_start('Pedido ' . $numero, 'pedidos', [
     'css' => ['assets/css/vn-pedidos.css'],
+    'js'  => ['assets/js/vn-download.js'],
     'head_extra' => '<style>@media(max-width:900px){.vn-top,.vn-tabbar{display:none!important}.vn-content-wrap{padding:0 14px!important}}</style>',
 ]);
 vn_alerts($ok, $erro);
@@ -308,7 +309,7 @@ vn_alerts($ok, $erro);
         <div class="pl-sheet-b">
             <h4 class="pv-q">Qual documento<br>você quer gerar?</h4><p class="pv-qs">Geralmente, apenas o título muda. O que aparece no documento você define em <strong>Editar → Documento (PDF)</strong>.</p>
             <div class="pv-docs">
-                <?php foreach (vn_pedido_documentos() as $slug => $tit): ?><a target="_blank" rel="noopener" href="orcamento-pdf.php?id=<?php echo $id; ?>&amp;doc=<?php echo vn_h($slug); ?>"><?php echo vn_h($tit); ?></a><?php endforeach; ?>
+                <?php foreach (vn_pedido_documentos() as $slug => $tit): ?><a target="_blank" rel="noopener" data-baixar href="orcamento-pdf.php?id=<?php echo $id; ?>&amp;doc=<?php echo vn_h($slug); ?>"><?php echo vn_h($tit); ?></a><?php endforeach; ?>
             </div>
         </div>
     </div></dialog>

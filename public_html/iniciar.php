@@ -1868,7 +1868,20 @@ endstream");
     public function output(): string { $this->finishPages(); $font=$this->addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'); $bold=$this->addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'); $pagesId=$this->reserveObject(); $pageIds=[]; foreach($this->pages as $page){ $content=$page['content']; $cid=$this->addObject('<< /Length '.strlen($content)." >>\nstream\n".$content.'endstream'); $xObj=''; if(!empty($page['xobjects'])){ $items=[]; foreach($page['xobjects'] as $name=>$oid)$items[]="/{$name} {$oid} 0 R"; $xObj='/XObject << '.implode(' ',$items).' >>'; } $res="<< /Font << /F1 {$font} 0 R /F2 {$bold} 0 R >> {$xObj} >>"; $pid=$this->addObject("<< /Type /Page /Parent {$pagesId} 0 R /MediaBox [0 0 {$this->w} {$this->h}] /Resources {$res} /Contents {$cid} 0 R >>"); $pageIds[]="{$pid} 0 R"; } $this->setObject($pagesId,'<< /Type /Pages /Kids ['.implode(' ',$pageIds).'] /Count '.count($pageIds).' >>'); $catalog=$this->addObject("<< /Type /Catalog /Pages {$pagesId} 0 R >>"); $pdf="%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"; $offs=[0]; foreach($this->objects as $id=>$body){ $offs[$id]=strlen($pdf); $pdf.="{$id} 0 obj\n{$body}\nendobj\n"; } $xref=strlen($pdf); $pdf.='xref\n0 '.(count($this->objects)+1)."\n0000000000 65535 f \n"; for($i=1;$i<=count($this->objects);$i++) $pdf.=sprintf("%010d 00000 n \n",$offs[$i]); return $pdf."trailer\n<< /Size ".(count($this->objects)+1)." /Root {$catalog} 0 R >>\nstartxref\n{$xref}\n%%EOF"; }
 }
 
+/* PDF da OS: layout novo, com a marca da área (CFTV ou Serralheria). Se algo falhar, o layout clássico logo abaixo continua valendo. */
 function gerar_pdf_visita_vn(array $payload, array $empresa_pdf): string {
+    if (is_file(__DIR__ . '/_vn_pdf_docs.php')) {
+        try {
+            require_once __DIR__ . '/_vn_pdf_docs.php';
+            return vn_pdf_os_v6($payload, null, $GLOBALS['mysqli'] ?? null);
+        } catch (Throwable $e) {
+            error_log('PDF da OS (layout novo) falhou, usando o clássico: ' . $e->getMessage());
+        }
+    }
+    return gerar_pdf_visita_vn_classico($payload, $empresa_pdf);
+}
+
+function gerar_pdf_visita_vn_classico(array $payload, array $empresa_pdf): string {
     $pdf = new VNSimplePDFMobile();
     $azul=[29,78,216]; $azul2=[37,99,235]; $azulClaro=[239,246,255]; $texto=[30,58,138]; $linha=[191,219,254];
     $m=36; $pageW=$pdf->w; $pageH=$pdf->h; $y=28;
@@ -1995,9 +2008,12 @@ if (isset($_GET['baixar_pdf_os'])) {
             'assinaturaCliente' => pdf_assinatura_para_vertical_vn($assinaturasPdf['cliente']['assinatura_base64'] ?? ''),
             'assinaturaTecnico' => pdf_assinatura_para_vertical_vn($assinaturasPdf['tecnico']['assinatura_base64'] ?? ''),
             'nomeClienteAss' => $assinaturasPdf['cliente']['nome_assinante'] ?? '',
+            'linha' => (($visitaPdf['linha_servico'] ?? '') === 'serralheria') ? 'serralheria' : 'cftv',
+            'tipoServico' => $visitaPdf['tipo_servico'] ?? '',
         ];
         $pdfBin = gerar_pdf_visita_vn($payload, $empresa_pdf);
-        $nome = 'OS-' . pdf_nome_arquivo_vn($payload['numeroOS']) . '.pdf';
+        $nomeBase = pdf_nome_arquivo_vn($payload['numeroOS']);
+        $nome = (stripos($nomeBase, 'OS-') === 0 ? '' : 'OS-') . $nomeBase . '.pdf';
         while (ob_get_level() > 0) ob_end_clean();
         header('Content-Type: application/pdf');
         header('Content-Disposition: attachment; filename="' . $nome . '"');
@@ -3007,7 +3023,7 @@ $logoSrc = 'vn.png';
 <!DOCTYPE html>
 <html lang="pt-BR" data-theme="<?= h($temaHtml) ?>">
 <head>
-    <?php echo vn_ui_head_tags(['title' => 'Ordens de Serviço', 'noindex' => true, 'icons' => false, 'theme_default' => $temaHtml, 'css' => ['assets/css/os-app-admin.css']]); ?>
+    <?php echo vn_ui_head_tags(['title' => 'Ordens de Serviço', 'noindex' => true, 'icons' => false, 'theme_default' => $temaHtml, 'css' => ['assets/css/os-app-admin.css'], 'js' => ['assets/js/vn-download.js']]); ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 
@@ -5302,6 +5318,8 @@ function baixarPdfOS() {
     url.hash = '';
     url.searchParams.set('baixar_pdf_os', String(selectedId));
     url.searchParams.set('t', Date.now().toString());
+    // Baixa o arquivo sem sair do app (o app instalado não abre PDF numa aba); sem o ajudante, abre o link normal.
+    if (window.VN && typeof VN.baixar === 'function') { VN.baixar(url.toString()); return; }
     window.location.href = url.toString();
 }
 

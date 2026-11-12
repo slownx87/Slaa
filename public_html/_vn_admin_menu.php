@@ -46,6 +46,7 @@ if (!function_exists('vn_admin_menu_grupos')) {
             'Cadastros' => [
                 ['clientes',       'clientes-admin.php',        'fa-building',             'apartment',                  'Clientes'],
                 ['usuarios',       'usuarios.php',              'fa-users',                'group',                      'Usuários'],
+                ['marca',          'pdf-marca.php',             'fa-palette',              'label',                      'Marca dos PDFs'],
             ],
         ];
 

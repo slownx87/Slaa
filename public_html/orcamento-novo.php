@@ -194,6 +194,7 @@ function pd_chave(string $nome, string $rotulo, string $marcado): string {
 
 vn_ui_shell_start($orcamentoEdit ? 'Editar Pedido' : 'Novo Pedido', 'novo', [
     'css' => ['assets/css/vn-pedido.css'],
+    'js'  => ['assets/js/vn-download.js'],
     'head_extra' => '<style>@media(max-width:900px){.vn-top,.vn-mobile-nav{display:none!important}.vn-content-wrap{padding:0 14px!important}}</style>',
 ]);
 vn_alerts($ok, $erro);
@@ -219,7 +220,7 @@ vn_alerts($ok, $erro);
     <div class="pd-title">
         <div><h1>Pedido n. <?php echo vn_h($numeroPedido); ?></h1><span class="d"><?php echo $orcamentoEdit ? vn_h(vn_date_br(substr((string)($orcamentoEdit['criado_em'] ?? ''), 0, 10))) : date('d/m/Y'); ?></span></div>
         <div class="pd-title-acts">
-            <?php if ($orcamentoEdit): ?><a class="vn-btn" target="_blank" rel="noopener" href="orcamento-pdf.php?id=<?php echo (int)$orcamentoEdit['id']; ?>"><?php echo pd_ico('picture_as_pdf'); ?>Baixar PDF</a><?php endif; ?>
+            <?php if ($orcamentoEdit): ?><a class="vn-btn" target="_blank" rel="noopener" data-baixar href="orcamento-pdf.php?id=<?php echo (int)$orcamentoEdit['id']; ?>"><?php echo pd_ico('picture_as_pdf'); ?>Baixar PDF</a><?php endif; ?>
             <a class="vn-btn" href="<?php echo $orcamentoEdit ? 'pedido.php?id=' . (int)$orcamentoEdit['id'] : 'pedidos-dashboard.php'; ?>" data-sair><?php echo pd_ico('close'); ?>Fechar</a>
         </div>
     </div>

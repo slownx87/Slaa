@@ -140,7 +140,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') !== '' && $t
         $url = 'os-pdf-publico.php?t=' . rawurlencode(osc_token($vid));
         if ($modelo !== '') $url .= '&modelo=' . rawurlencode($modelo);
         if ($acao === 'gerar_preventiva') $url .= '&tipo=preventiva';
-        header('Location: ' . $url);
+        // O PDF de verdade (arquivo): baixa também dentro do app instalado, onde "imprimir a página" não funciona.
+        $pdfUrl = $url . '&formato=pdf';
+        if (!empty($_POST['ajax'])) {
+            $numOs = '';
+            try { $q = $pdo->prepare('SELECT numero_os FROM os_visitas WHERE id = ? LIMIT 1'); $q->execute([$vid]); $numOs = trim((string)$q->fetchColumn()); } catch (Throwable $e) { /* sem número: usa o id */ }
+            $slug = trim((string)preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $numOs !== '' ? $numOs : (string)$vid)), '-');
+            if ($slug === '') $slug = (string)$vid;
+            header('Content-Type: application/json; charset=UTF-8');
+            echo json_encode(['ok' => true, 'pdf' => $pdfUrl, 'nome' => (stripos($slug, 'OS-') === 0 ? '' : 'OS-') . $slug . ($acao === 'gerar_preventiva' ? '-preventiva' : '') . '.pdf'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        header('Location: ' . $pdfUrl);
         exit;
     }
 }
@@ -374,7 +385,7 @@ ob_start();
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 <?php
 $vnHeadExtra = ob_get_clean();
-vn_ui_shell_start('OS Concluídas', 'os-concluidas', ['head_extra' => $vnHeadExtra, 'legacy' => 'admin']);
+vn_ui_shell_start('OS Concluídas', 'os-concluidas', ['head_extra' => $vnHeadExtra, 'legacy' => 'admin', 'js' => ['assets/js/vn-download.js']]);
 ?>
 <div class="content">
             <div class="page-title">
@@ -478,7 +489,7 @@ vn_ui_shell_start('OS Concluídas', 'os-concluidas', ['head_extra' => $vnHeadExt
                 <h2 id="pdfModalTitulo">Gerar PDF</h2>
                 <button type="button" class="x" onclick="oscFechar()">✕</button>
             </div>
-            <p class="hint">Equipamento e garantia já vêm da OS. O valor só aparece na versão <strong>preventiva</strong> — a OS normal continua o relatório técnico puro.</p>
+            <p class="hint">Equipamento e garantia já vêm da OS. O valor só aparece na versão <strong>preventiva</strong> — a OS normal continua o relatório técnico puro. O PDF é baixado direto no aparelho.</p>
 
             <form method="post" action="os-concluidas.php">
                 <input type="hidden" name="visita_id" id="pdfVisitaId" value="">
@@ -527,8 +538,8 @@ vn_ui_shell_start('OS Concluídas', 'os-concluidas', ['head_extra' => $vnHeadExt
                 </div>
 
                 <div class="osc-modal-actions">
-                    <button type="submit" class="btn" onclick="document.getElementById('pdfAcao').value='gerar_normal'">Gerar OS normal</button>
-                    <button type="submit" class="btn btn-prev" onclick="document.getElementById('pdfAcao').value='gerar_preventiva'">Gerar preventiva</button>
+                    <button type="submit" class="btn" onclick="document.getElementById('pdfAcao').value='gerar_normal'">Baixar OS normal (PDF)</button>
+                    <button type="submit" class="btn btn-prev" onclick="document.getElementById('pdfAcao').value='gerar_preventiva'">Baixar preventiva (PDF)</button>
                 </div>
             </form>
         </div>
@@ -554,5 +565,39 @@ vn_ui_shell_start('OS Concluídas', 'os-concluidas', ['head_extra' => $vnHeadExt
         document.getElementById('pdfModal').addEventListener('click', function (e) {
             if (e.target === this) oscFechar();
         });
+
+        /*
+           Gerar PDF: salva as opções, recebe o endereço do PDF e BAIXA o arquivo aqui mesmo (VN.baixar).
+           O app instalado no celular não consegue imprimir a página nem abrir PDF numa aba (o Android manda
+           para o Chrome); já baixar um arquivo funciona. Sem JavaScript, o formulário envia normal e o
+           servidor redireciona para o mesmo PDF.
+        */
+        (function () {
+            var form = document.querySelector('#pdfModal form');
+            if (!form || !window.fetch || !window.FormData) return;
+            function aviso(msg, tipo) { if (window.VN && VN.toast) VN.toast(msg, tipo); else window.alert(msg); }
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var botoes = form.querySelectorAll('button[type="submit"]');
+                var fd = new FormData(form);
+                fd.append('ajax', '1');
+                botoes.forEach(function (b) { b.disabled = true; });
+                window.fetch(form.getAttribute('action') || 'os-concluidas.php', {
+                    method: 'POST', body: fd, credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+                }).then(function (r) {
+                    return r.json().catch(function () { throw new Error('Sua sessão pode ter expirado. Entre de novo e tente outra vez.'); });
+                }).then(function (j) {
+                    if (!j || !j.ok || !j.pdf) throw new Error('Não consegui gerar o PDF. Atualize a página e tente de novo.');
+                    oscFechar();
+                    if (window.VN && typeof VN.baixar === 'function') return VN.baixar(j.pdf, j.nome || '');
+                    window.location.href = j.pdf;
+                }).catch(function (err) {
+                    aviso(err && err.message ? err.message : 'Não consegui gerar o PDF.', 'err');
+                }).then(function () {
+                    botoes.forEach(function (b) { b.disabled = false; });
+                });
+            });
+        })();
     </script>
 <?php vn_ui_shell_end('os-concluidas'); ?>

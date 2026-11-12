@@ -2998,6 +2998,15 @@ function vn_pdf_orcamento_mobile_v4(int $id, string $titulo = ''): string {
     $orc = vn_orcamento_mobile_get_v4($id);
     if (!$orc) throw new Exception('Orçamento não encontrado.');
     if (vn_clean($orc['endereco'] ?? '') === '') $orc['endereco'] = vn_buscar_endereco_cliente_por_id(0, (int)($orc['cliente_id'] ?? 0));
+    // Layout novo, com a marca da categoria do orçamento (CFTV ou Serralheria). Se algo falhar, o layout clássico abaixo continua valendo.
+    if (is_file(__DIR__ . '/_vn_pdf_docs.php')) {
+        try {
+            require_once __DIR__ . '/_vn_pdf_docs.php';
+            return vn_pdf_orcamento_v6($orc, $titulo);
+        } catch (Throwable $e) {
+            error_log('PDF do orçamento (layout novo) falhou, usando o clássico: ' . $e->getMessage());
+        }
+    }
     $pdf = new VNMobPdfV5();
     // Cabeçalho com os dados da empresa; o título do documento (Proposta, Fatura...) só aparece quando escolhido em "gerar documento".
     $pdf->header($titulo);
