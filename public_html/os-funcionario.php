@@ -1165,8 +1165,8 @@ vn_ui_shell_start($linhaTela === 'serralheria' ? 'Gerar OS de Serralheria' : 'Ge
 
 <style>
 .linha-os-op{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
-.linha-os-op label{display:flex;align-items:center;justify-content:center;gap:8px;min-height:50px;margin:0;padding:8px 10px;border:1px solid var(--line,rgba(148,163,184,.4));border-radius:12px;cursor:pointer;font-weight:800;text-align:center}
-.linha-os-op input{position:absolute;opacity:0;pointer-events:none}
+.linha-os-op label{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;min-height:50px;margin:0;padding:8px 10px;border:1px solid var(--line,rgba(148,163,184,.4));border-radius:12px;cursor:pointer;font-weight:800;text-align:center}
+.linha-os-op input{position:absolute!important;left:0;top:0;width:1px!important;height:1px!important;min-width:0!important;min-height:0!important;margin:0!important;padding:0!important;border:0!important;opacity:0;pointer-events:none}   /* o CSS antigo dá width:100% a todo input: sem isto o campo invisível alargava a página */
 .linha-os-op label:has(input:checked){border-color:#3b82f6;background:rgba(59,130,246,.16);box-shadow:0 0 0 2px rgba(59,130,246,.25)}
 .linha-os-op label.serr:has(input:checked){border-color:#f59e0b;background:rgba(245,158,11,.18);box-shadow:0 0 0 2px rgba(245,158,11,.28)}
 </style>

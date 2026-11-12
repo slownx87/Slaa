@@ -275,6 +275,39 @@ try {
             $ok = $pago ? 'Mensalidade do mês marcada como paga.' : 'Pagamento desfeito, mês voltou a pendente.';
         }
 
+        /* ---- Editar mensalidade na própria janela: cliente, serviço, valor, dia, contato, PIX e observação ---- */
+        if ($acao === 'editar_mensalidade') {
+            $midEd = (int)($_POST['mensalidade_id'] ?? 0);
+            $mEd = vn_fetch_one('SELECT * FROM vn_mensalidades WHERE id = ?', [$midEd]);
+            if (!$mEd) throw new Exception('Mensalidade não encontrada.');
+            $nomeEd = vn_clean($_POST['cliente_nome'] ?? '');
+            if ($nomeEd === '') throw new Exception('Informe o nome do cliente.');
+            $valorEd = vn_money_db($_POST['valor_mensal'] ?? '0');
+            if ($valorEd <= 0) throw new Exception('Informe o valor da mensalidade.');
+            $diaEd = (int)($_POST['dia_vencimento'] ?? 10);
+            if ($diaEd < 1 || $diaEd > 31) $diaEd = (int)$mEd['dia_vencimento'];
+            $catEd = vn_clean($_POST['categoria'] ?? '');
+            if ($catEd === '') $catEd = 'Mensalidade';
+            vn_exec('UPDATE vn_mensalidades SET cliente_nome = ?, categoria = ?, telefone = ?, chave_pix = ?, valor_mensal = ?, dia_vencimento = ?, observacao = ? WHERE id = ?',
+                [$nomeEd, $catEd, vn_clean($_POST['telefone'] ?? ''), vn_clean($_POST['chave_pix'] ?? ''), $valorEd, $diaEd, trim((string)($_POST['observacao'] ?? '')), $midEd]);
+            // os meses que ainda não foram pagos passam a usar o novo valor e o novo dia; os pagos não mudam
+            foreach (vn_fetch_all('SELECT * FROM vn_mensalidade_pagamentos WHERE mensalidade_id = ? AND pago = 0', [$midEd]) as $pgEd) {
+                vn_exec('UPDATE vn_mensalidade_pagamentos SET valor = ?, vencimento = ? WHERE id = ?',
+                    [$valorEd, vn_mens_vencimento((string)$pgEd['competencia'], $diaEd), (int)$pgEd['id']]);
+            }
+            $ok = 'Mensalidade de ' . $nomeEd . ' atualizada.';
+        }
+
+        /* ---- Pausar / reativar mensalidade (pausada não gera meses novos) ---- */
+        if ($acao === 'alternar_mensalidade') {
+            $midAl = (int)($_POST['mensalidade_id'] ?? 0);
+            $mAl = vn_fetch_one('SELECT * FROM vn_mensalidades WHERE id = ?', [$midAl]);
+            if (!$mAl) throw new Exception('Mensalidade não encontrada.');
+            $novoAl = ((int)$mAl['ativo'] === 1) ? 0 : 1;
+            vn_exec('UPDATE vn_mensalidades SET ativo = ? WHERE id = ?', [$novoAl, $midAl]);
+            $ok = $novoAl ? 'Mensalidade reativada. Os próximos meses voltam a ser gerados.' : 'Mensalidade pausada. Não gera mais cobrança nos próximos meses.';
+        }
+
         /* ---- Etiquetas de cliente (grupo/empresa) ---- */
 
         if ($acao === 'salvar_etiqueta') {
@@ -513,7 +546,7 @@ try {
     // Mensalidades: tudo que está em aberto (de qualquer mês, para não esconder atraso) + o que foi pago nos últimos 60 dias.
     $mensRows = vn_fetch_all(
         'SELECT p.id AS pagamento_id, p.competencia, p.valor, p.vencimento, p.pago, p.pago_em,
-                m.id AS mensalidade_id, m.ativo, m.cliente_id, m.cliente_nome, m.categoria, m.telefone, m.chave_pix, m.dia_vencimento, m.observacao
+                m.id AS mensalidade_id, m.ativo, m.cliente_id, m.cliente_nome, m.categoria, m.telefone, m.chave_pix, m.dia_vencimento, m.observacao, m.valor_mensal
          FROM vn_mensalidade_pagamentos p
          JOIN vn_mensalidades m ON m.id = p.mensalidade_id
          WHERE (p.pago = 0 AND p.competencia <= ?) OR (p.pago = 1 AND p.pago_em >= ?)

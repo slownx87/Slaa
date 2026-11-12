@@ -337,6 +337,8 @@ function vn_mes_picker_html(string $selecionado, array $opc = []): string {
             . '.vn-mes .vn-mes-nav:disabled{opacity:.4;cursor:not-allowed}'
             . '.vn-mes select:focus-visible,.vn-mes .vn-mes-nav:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(37,99,235,.28)}'
             . '@media(max-width:480px){.vn-mes select{font-size:16px;min-height:48px}.vn-mes .vn-mes-nav{min-height:48px}}'
+            . '.vn-mes select{min-width:0}'
+            . '@media(max-width:380px){.vn-mes{gap:4px}.vn-mes select{padding:8px 4px}.vn-mes .vn-mes-a{width:80px}.vn-mes .vn-mes-nav{flex-basis:40px;width:40px}}'
             . '</style>'
             . '<script>window.vnMes=window.vnMes||function(el,passo){'
             . 'var w=el.closest("[data-vn-mes]");if(!w)return;'

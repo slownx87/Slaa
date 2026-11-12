@@ -250,12 +250,16 @@ if (!function_exists('cb_janela_parcela')) {
 }
 
 if (!function_exists('cb_janela_mensalidade')) {
+    /* Detalhe de uma mensalidade: pagar/desfazer, cobrar, editar na própria janela (ver ⇄ editar), pausar/reativar. */
     function cb_janela_mensalidade(array $it, string $hoje): string {
         $r = $it['raw'];
         $pago = $it['estado'] === 'paga';
+        $mid = (int)($r['mensalidade_id'] ?? 0);
+        $ativa = (int)($r['ativo'] ?? 1) === 1;
+        $valorMensal = (float)($r['valor_mensal'] ?? $r['valor'] ?? 0);
         $sit = $pago ? 'Paga' . (!empty($r['pago_em']) ? ' em ' . vn_date_br($r['pago_em']) : '')
                      : cb_quando((string)$it['venc'], $hoje);
-        $corpo = '<div class="cb-facts">'
+        $ver = '<div data-vista="ver"><div class="cb-facts">'
             . cb_fato('Serviço', vn_h(vn_mens_categoria($r)))
             . cb_fato('Mês', vn_h(substr((string)$r['competencia'], 5, 2) . '/' . substr((string)$r['competencia'], 0, 4)))
             . cb_fato('Valor', vn_h(vn_money($r['valor'])))
@@ -264,12 +268,34 @@ if (!function_exists('cb_janela_mensalidade')) {
             . cb_fato('Telefone', ($r['telefone'] ?? '') !== '' ? vn_h((string)$r['telefone']) : '—')
             . cb_fato('Chave PIX', ($r['chave_pix'] ?? '') !== '' ? vn_h((string)$r['chave_pix']) : '—')
             . cb_fato('Todo mês', 'dia ' . (int)($r['dia_vencimento'] ?? 0)) . '</div>'
-            . (!empty($r['observacao']) ? '<p class="cb-note">' . vn_h((string)$r['observacao']) . '</p>' : '')
-            . ((int)($r['ativo'] ?? 1) !== 1 ? '<p class="cb-note">Esta mensalidade está pausada: não gera mais meses novos. Reative em Mensalidades.</p>' : '');
+            . (!empty($r['observacao']) ? '<p class="cb-note" style="margin-top:12px">' . vn_h((string)$r['observacao']) . '</p>' : '')
+            . (!$ativa ? '<p class="cb-note" style="margin-top:12px">Esta mensalidade está pausada: não gera mais meses novos. Use "Reativar" abaixo para voltar.</p>' : '')
+            . '</div>';
+
+        $edicao = '<form method="post" class="cb-form" data-async data-vista="editar" hidden>'
+            . '<input type="hidden" name="acao" value="editar_mensalidade"><input type="hidden" name="mensalidade_id" value="' . $mid . '">'
+            . '<div class="cb-f full"><label>Cliente *</label><input name="cliente_nome" required value="' . vn_h((string)$r['cliente_nome']) . '"></div>'
+            . '<div class="cb-f full"><label>Serviço cobrado</label><input name="categoria" list="cb-cat-lista" maxlength="80" value="' . vn_h((string)($r['categoria'] ?? '')) . '" placeholder="Ex.: Portaria remota, Monitoramento…"></div>'
+            . '<div class="cb-f"><label>Valor mensal (R$) *</label><input name="valor_mensal" inputmode="decimal" required autocomplete="off" value="' . vn_h(number_format($valorMensal, 2, ',', '.')) . '"></div>'
+            . '<div class="cb-f"><label>Vence todo dia *</label><input name="dia_vencimento" type="number" min="1" max="31" required inputmode="numeric" value="' . (int)($r['dia_vencimento'] ?? 10) . '"></div>'
+            . '<div class="cb-f"><label>WhatsApp / telefone</label><input name="telefone" inputmode="tel" value="' . vn_h((string)($r['telefone'] ?? '')) . '"></div>'
+            . '<div class="cb-f"><label>Chave PIX</label><input name="chave_pix" value="' . vn_h((string)($r['chave_pix'] ?? '')) . '" placeholder="CPF, e-mail, telefone ou aleatória"></div>'
+            . '<div class="cb-f full"><label>Observação</label><textarea name="observacao">' . vn_h((string)($r['observacao'] ?? '')) . '</textarea></div>'
+            . '<p class="cb-note full">Os meses que ainda não foram pagos passam a usar o novo valor e o novo dia de vencimento. Os já pagos não mudam.</p>'
+            . '<div class="cb-f full" style="flex-direction:row;gap:8px"><button type="submit" class="cb-btn pri" style="min-height:46px">Salvar alterações</button>'
+            . '<button type="button" class="cb-btn" style="min-height:46px" data-vista-ir="ver">Cancelar</button></div></form>';
+
+        $pausar = '<form method="post" data-async'
+            . ($ativa ? ' data-danger data-confirm="Pausar esta mensalidade? Ela deixa de gerar cobrança nos próximos meses. Dá para reativar depois."' : '') . '>'
+            . '<input type="hidden" name="acao" value="alternar_mensalidade"><input type="hidden" name="mensalidade_id" value="' . $mid . '">'
+            . '<button type="submit" class="cb-btn"' . ($ativa ? ' data-confirm-ok="Pausar"' : '') . '>' . cb_ico($ativa ? 'schedule' : 'refresh') . ($ativa ? 'Pausar' : 'Reativar') . '</button></form>';
+
         $rodape = ($pago ? cb_form_pago($it, 0, 'Desfazer pagamento', '', 'history')
                          : cb_form_pago($it, 1, 'Marcar como pago', 'pri') . cb_btn_wpp($it['wpp']) . cb_btn_pix($it['pix']))
-            . '<a class="cb-btn push" href="mensalidades.php">' . cb_ico('edit') . 'Editar ou pausar</a>';
-        return cb_janela('d-' . $it['key'], vn_h((string)$r['cliente_nome']) . cb_tag($it['etq']), 'Mensalidade · ' . vn_h(vn_mens_categoria($r)), $corpo, $rodape);
+            . '<button type="button" class="cb-btn" data-vista-ir="editar">' . cb_ico('edit') . 'Editar</button>'
+            . $pausar
+            . '<a class="cb-btn push" href="mensalidades.php">' . cb_ico('event_repeat') . 'Histórico e exclusão</a>';
+        return cb_janela('d-' . $it['key'], vn_h((string)$r['cliente_nome']) . cb_tag($it['etq']), 'Mensalidade · ' . vn_h(vn_mens_categoria($r)), $ver . $edicao, $rodape);
     }
 }
 

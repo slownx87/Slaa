@@ -46,7 +46,11 @@
       '.vnsb-busca{display:flex;align-items:center;gap:10px;margin:0 14px 6px;padding:0 14px;flex:0 0 auto;border:1px solid var(--line-strong,#d1d5db);border-radius:12px;background:var(--surface-2,#f3f4f6)}' +
       '.vnsb-busca:focus-within{border-color:var(--primary,#2563eb);box-shadow:var(--ring,0 0 0 3px rgba(37,99,235,.28))}' +
       '.vnsb-busca svg{flex:0 0 auto;width:20px;height:20px;opacity:.65}' +
-      '.vnsb-inp{flex:1;min-width:0;min-height:50px;border:0;outline:0;background:transparent;color:inherit;font:inherit;font-size:16px}' +
+      /* O campo é blindado (!important): as telas antigas (Gerar OS, Nova OS...) têm CSS de "input" que dava borda, fundo, margem e largura própria
+         ao campo de dentro da barra — ele virava uma segunda barra e passava da borda da tela. */
+      '.vnsb-dlg .vnsb-inp{flex:1 1 auto!important;min-width:0!important;width:auto!important;max-width:none!important;min-height:50px!important;height:auto!important;margin:0!important;padding:0!important;' +
+        'border:0!important;border-radius:0!important;outline:0!important;box-shadow:none!important;background:transparent!important;color:inherit!important;font:inherit!important;font-size:16px!important;-webkit-appearance:none;appearance:none}' +
+      '.vnsb-dlg .vnsb-inp:focus{border:0!important;box-shadow:none!important;background:transparent!important;outline:0!important}' +
       '.vnsb-inp::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none}' +
       '.vnsb-cont{padding:2px 20px 6px;font-size:.78rem;font-weight:700;color:var(--muted,#6b7280);flex:0 0 auto}' +
       '.vnsb-lista{list-style:none;margin:0;padding:0 8px 12px;flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
