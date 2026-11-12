@@ -3,7 +3,8 @@
    - janelas: nova/editar conta, pagar, fotos e contas fixas (usa <dialog>)
    - repetir: escolher "Todo mês" etc. na conta nova; editar/parar numa conta que se repete
    - campo de valor com máscara (1.250,00)
-   - fotos: pré-visualização, redução no celular antes de enviar e galeria com ampliação
+   - fotos e PDFs: pré-visualização, redução das fotos no celular antes de enviar e galeria com ampliação
+   - quem vê a conta: pública (todos os administradores) ou privada (só o dono); a última escolha fica lembrada
    Sem JS os formulários ainda enviam normalmente; o JS só deixa tudo mais leve.
    ========================================================================= */
 (function () {
@@ -32,7 +33,12 @@
     $$('input[type="file"]', form).forEach(function (i) { i.value = ''; });
     $$('[data-cp-previews]', form).forEach(function (p) { revogar(p); p.innerHTML = ''; });
   }
-  function urlFoto(id, mini) { return 'contas-pagar-foto.php?id=' + encodeURIComponent(id) + (mini ? '&mini=1' : ''); }
+  function urlFoto(id, mini, baixar) { return 'contas-pagar-foto.php?id=' + encodeURIComponent(id) + (mini ? '&mini=1' : '') + (baixar ? '&baixar=1' : ''); }
+  function ehPdf(f) { return !!f && f.formato === 'pdf'; }
+  function tamanhoTxt(b) { b = +b || 0; return b >= 1048576 ? (b / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; }
+  /* Última escolha de "quem vê" (só neste aparelho): quem cadastra sempre pública não precisa trocar toda vez. */
+  function visLembrada() { try { var v = window.localStorage.getItem('vn.cp.vis'); return v === 'publico' ? 'publico' : 'privado'; } catch (e) { return 'privado'; } }
+  function visGuardar(v) { try { window.localStorage.setItem('vn.cp.vis', v === 'publico' ? 'publico' : 'privado'); } catch (e) {} }
   function dinheiro(txt) { return 'R$ ' + txt; }
   function dataBR(iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; }
   /* Código único de cada abertura de janela: se o envio for repetido (toque duplo, falha de rede), o servidor recusa o 2º. */
@@ -68,6 +74,13 @@
     setVal(formConta, 'categoria', nova ? '' : c.categoria);
     setVal(formConta, 'codigo', nova ? '' : c.codigo);
     setVal(formConta, 'observacao', nova ? '' : c.observacao);
+    // quem vê: conta nova usa a última escolha; só o dono (ou o administrador principal) muda a de uma conta existente
+    var selVis = formConta.elements.visibilidade;
+    if (selVis) {
+      selVis.value = nova ? visLembrada() : (c.vis === 'publico' ? 'publico' : 'privado');
+      selVis.disabled = !nova && c.pode_vis === false;
+      textoVis();
+    }
     // forma de pagamento, repetir e fotos: só na conta nova (fotos de uma conta existente: pela janela "Fotos")
     setVal(formConta, 'condicao', 'avista');
     setVal(formConta, 'entrada_tipo', '');
@@ -114,6 +127,17 @@
     contaAberta = nova ? null : c;
     abrir(dlgConta);
   }
+  function textoVis() {
+    var sel = formConta.elements.visibilidade, aj = $('[data-cp-vis-ajuda]', dlgConta);
+    if (!sel || !aj) return;
+    aj.textContent = sel.disabled ? 'Só quem cadastrou a conta (ou o administrador principal) pode mudar isso.'
+      : sel.value === 'publico' ? 'Pública: todos os administradores veem esta conta.'
+      : 'Privada: só você vê esta conta (e o administrador principal).';
+  }
+  if (formConta.elements.visibilidade) {
+    formConta.elements.visibilidade.addEventListener('change', function () { if (contaNova) visGuardar(this.value); textoVis(); });
+  }
+
   /* ------------------------------------------------------------ à vista x parcelado (e repetir) */
   var contaNova = true;
   var contaAberta = null;   // conta que está na janela de edição
@@ -242,12 +266,12 @@
     var f = document.createElement('form');
     f.method = 'post';
     f.setAttribute('data-danger', '');
-    f.setAttribute('data-confirm', 'Excluir esta foto? Isso não pode ser desfeito.');
-    [['acao', 'del_foto'], ['foto_id', foto.id], ['ver', root.getAttribute('data-ver') || ''], ['q', root.getAttribute('data-q') || '']].forEach(function (par) {
+    f.setAttribute('data-confirm', ehPdf(foto) ? 'Excluir este PDF? Isso não pode ser desfeito.' : 'Excluir esta foto? Isso não pode ser desfeito.');
+    [['acao', 'del_foto'], ['foto_id', foto.id], ['ver', root.getAttribute('data-ver') || ''], ['q', root.getAttribute('data-q') || ''], ['de', root.getAttribute('data-de') || '']].forEach(function (par) {
       var i = document.createElement('input'); i.type = 'hidden'; i.name = par[0]; i.value = par[1]; f.appendChild(i);
     });
     var b = document.createElement('button');
-    b.type = 'submit'; b.setAttribute('aria-label', 'Excluir foto'); b.title = 'Excluir foto';
+    b.type = 'submit'; b.setAttribute('aria-label', ehPdf(foto) ? 'Excluir PDF' : 'Excluir foto'); b.title = ehPdf(foto) ? 'Excluir PDF' : 'Excluir foto';
     b.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">delete</span>';
     f.appendChild(b);
     return f;
@@ -259,7 +283,7 @@
     if (!fotos.length) {
       var vazio = document.createElement('div');
       vazio.className = 'cp-sem-fotos';
-      vazio.textContent = 'Nenhuma foto ainda. Tire uma foto ou escolha da galeria abaixo.';
+      vazio.textContent = 'Nenhum anexo ainda. Tire uma foto, escolha da galeria ou escolha um PDF abaixo.';
       galeria.appendChild(vazio);
       return;
     }
@@ -270,14 +294,35 @@
       var h = document.createElement('h5'); h.textContent = TIPOS[tipo] + ' (' + doTipo.length + ')'; grupo.appendChild(h);
       var grade = document.createElement('div'); grade.className = 'cp-fotos';
       doTipo.forEach(function (foto) {
-        var box = document.createElement('div'); box.className = 'cp-foto';
-        var abrirBtn = document.createElement('button');
-        abrirBtn.type = 'button'; abrirBtn.className = 'cp-abrir';
-        abrirBtn.setAttribute('aria-label', 'Ampliar foto ' + (foto.nome || ''));
-        var img = document.createElement('img'); img.loading = 'lazy'; img.alt = foto.nome || 'Foto'; img.src = urlFoto(foto.id, true);
-        abrirBtn.appendChild(img);
-        abrirBtn.addEventListener('click', function () { abrirViewer(fotos, fotos.indexOf(foto)); });
-        box.appendChild(abrirBtn);
+        var box = document.createElement('div'); box.className = 'cp-foto' + (ehPdf(foto) ? ' cp-foto-pdf' : '');
+        if (ehPdf(foto)) {
+          // PDF: ícone + nome + Abrir / Baixar (o Baixar funciona dentro do app instalado, sem ir para o Chrome)
+          var cartao = document.createElement('div'); cartao.className = 'cp-pdf';
+          cartao.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">picture_as_pdf</span>';
+          var nm = document.createElement('strong'); nm.textContent = foto.nome || 'documento.pdf'; nm.title = foto.nome || '';
+          var info = document.createElement('small'); info.textContent = 'PDF' + (foto.tamanho ? ' · ' + tamanhoTxt(foto.tamanho) : '');
+          cartao.appendChild(nm); cartao.appendChild(info);
+          var acoes = document.createElement('div'); acoes.className = 'cp-pdf-acoes';
+          var ver = document.createElement('a'); ver.className = 'vn-mini-btn'; ver.href = urlFoto(foto.id, false); ver.target = '_blank'; ver.rel = 'noopener';
+          ver.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">visibility</span>Abrir';
+          var bx = document.createElement('a'); bx.className = 'vn-mini-btn'; bx.href = urlFoto(foto.id, false, true);
+          bx.setAttribute('data-baixar', ''); bx.setAttribute('data-nome', foto.nome || 'documento.pdf');
+          bx.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">download</span>Baixar';
+          acoes.appendChild(ver); acoes.appendChild(bx);
+          cartao.appendChild(acoes);
+          box.appendChild(cartao);
+        } else {
+          var abrirBtn = document.createElement('button');
+          abrirBtn.type = 'button'; abrirBtn.className = 'cp-abrir';
+          abrirBtn.setAttribute('aria-label', 'Ampliar foto ' + (foto.nome || ''));
+          var img = document.createElement('img'); img.loading = 'lazy'; img.alt = foto.nome || 'Foto'; img.src = urlFoto(foto.id, true);
+          abrirBtn.appendChild(img);
+          abrirBtn.addEventListener('click', function () {
+            var imgs = fotos.filter(function (x) { return !ehPdf(x); });   // o visualizador só passa entre fotos
+            abrirViewer(imgs, imgs.indexOf(foto));
+          });
+          box.appendChild(abrirBtn);
+        }
         var f = formDeletar(foto); f.appendChild(Object.assign(document.createElement('input'), { type: 'hidden', name: 'conta_id', value: contaFotos.id }));
         box.appendChild(f);
         grade.appendChild(box);
@@ -293,7 +338,7 @@
     setVal(formFotos, 'conta_id', c.id);
     setVal(formFotos, 'token', novoToken());
     setVal(formFotos, 'tipo', c.pago ? 'comprovante' : 'conta');
-    $('#cpFotosTitulo', dlgFotos).textContent = 'Fotos — ' + c.descricao;
+    $('#cpFotosTitulo', dlgFotos).textContent = 'Anexos — ' + c.descricao;
     $('[data-cp-resumo]', dlgFotos).textContent = dinheiro(c.valor) + (c.pago ? ' · paga em ' + dataBR(c.pago_em) + (c.forma && FORMAS[c.forma] ? ' (' + FORMAS[c.forma] + ')' : '') : ' · vence ' + dataBR(c.vencimento));
     desenharGaleria();
     abrir(dlgFotos);
@@ -353,7 +398,7 @@
     if (t.tagName === 'DIALOG' && t.classList.contains('cp-dlg')) fechar(t);
   });
 
-  /* ------------------------------------------------------------ fotos: pré-visualização */
+  /* ------------------------------------------------------------ anexos: pré-visualização */
   function revogar(box) { $$('img', box).forEach(function (i) { try { URL.revokeObjectURL(i.src); } catch (e) {} }); }
   root.addEventListener('change', function (e) {
     var inp = e.target;
@@ -363,10 +408,16 @@
     revogar(box);
     box.innerHTML = '';
     Array.prototype.slice.call(inp.files || []).slice(0, 20).forEach(function (f) {
-      if (!/^image\//.test(f.type)) return;
-      var img = document.createElement('img');
-      img.alt = f.name; img.src = URL.createObjectURL(f);
-      box.appendChild(img);
+      if (/^image\//.test(f.type)) {
+        var img = document.createElement('img');
+        img.alt = f.name; img.src = URL.createObjectURL(f);
+        box.appendChild(img);
+      } else if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '')) {
+        var t = document.createElement('span'); t.className = 'cp-pdf-previa'; t.title = f.name;
+        t.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">picture_as_pdf</span>';
+        var n = document.createElement('small'); n.textContent = f.name; t.appendChild(n);
+        box.appendChild(t);
+      }
     });
   });
 

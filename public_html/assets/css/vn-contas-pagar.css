@@ -1,5 +1,5 @@
 /* =========================================================================
-   VN System — A Pagar (contas-pagar.php) · v1
+   VN System — A Pagar (contas-pagar.php) · v2 (PDF + conta pública/privada)
    Só usa tokens do vn-ui.css (claro/escuro). Componentes base: vn-card, vn-panel, vn-table, vn-dialog...
    ========================================================================= */
 
@@ -21,6 +21,11 @@
   border-radius:var(--radius);background:var(--surface);color:var(--text);font:inherit;font-size:.9rem;
 }
 .cp-busca input[type="search"]:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring)}
+.cp-busca select{
+  flex:0 1 190px;min-width:0;min-height:40px;padding:8px 10px;border:1px solid var(--line-strong);
+  border-radius:var(--radius);background:var(--surface);color:var(--text);font:inherit;font-size:.88rem;font-weight:700;
+}
+.cp-busca select:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring)}
 
 /* ------------------------------------------------------------ lista */
 .cp-table .num strong{white-space:nowrap}
@@ -106,6 +111,8 @@
   .cp-tools{flex-direction:column;align-items:stretch}
   .cp-busca{flex:0 0 auto;justify-content:stretch}   /* sem isso o flex-basis de 280px virava ALTURA na coluna */
   .cp-busca input[type="search"]{max-width:none}
+  .cp-busca{flex-wrap:wrap}
+  .cp-busca select{flex:1 1 100%}
   .cp-dlg,.cp-dlg-wide{width:calc(100vw - 16px);max-height:92vh}
   .cp-obs{max-width:none}
   .cp-row.atrasada td:first-child,.cp-row.hoje td:first-child{box-shadow:none}
@@ -148,3 +155,26 @@ html[data-theme="dark"] .cp-num{color:#bfdbfe;background:rgba(59,130,246,.16);bo
 /* ------------------------------------------------------------ parcelado: prévia "Entrada + N × valor" */
 .cp-resumo-parc{padding:10px 12px;border-radius:var(--radius);background:var(--primary-softer);border:1px solid var(--primary-soft);color:var(--primary-ink);font-weight:800;font-size:.9rem;line-height:1.45}
 html[data-theme="dark"] .cp-resumo-parc{color:#bfdbfe;background:rgba(59,130,246,.16);border-color:rgba(59,130,246,.4)}
+
+/* ------------------------------------------------------------ quem vê a conta: pública / privada */
+.cp-vis{display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:2px 8px 2px 6px;border-radius:999px;font-size:.72rem;font-weight:800;align-self:flex-start;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--text-soft);max-width:100%}
+.cp-vis .material-symbols-outlined{font-size:.95rem;flex:0 0 auto}
+.cp-vis.privada{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-text)}
+.cp-vis.publica{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok-text)}
+.cp-ajuda{display:block;margin-top:6px;color:var(--muted);font-weight:600;font-size:.78rem;line-height:1.4}
+.cp-dlg select:disabled{opacity:.7;cursor:not-allowed}
+
+/* ------------------------------------------------------------ anexos em PDF */
+.cp-pdf-mini{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:0;width:42px;height:42px;border-radius:6px;background:var(--danger-bg);color:var(--danger-text);border:1px solid var(--danger-line);font-size:.62rem;font-weight:900;letter-spacing:.04em}
+.cp-pdf-mini .material-symbols-outlined{font-size:1.3rem;line-height:1}
+.cp-previews .cp-pdf-previa{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:84px;min-height:68px;padding:6px;border-radius:8px;border:1px solid var(--danger-line);background:var(--danger-bg);color:var(--danger-text);text-align:center}
+.cp-pdf-previa .material-symbols-outlined{font-size:1.5rem}
+.cp-pdf-previa small{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.66rem;font-weight:700;color:var(--text-soft)}
+.cp-foto-pdf{aspect-ratio:auto;min-height:150px;display:flex}
+.cp-pdf{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;width:100%;padding:12px 10px;text-align:center}
+.cp-pdf>.material-symbols-outlined{font-size:2.2rem;color:var(--danger-text)}
+.cp-pdf strong{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem;font-weight:800;color:var(--text)}
+.cp-pdf small{color:var(--muted);font-weight:700;font-size:.72rem}
+.cp-pdf-acoes{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:6px}
+.cp-pdf-acoes .vn-mini-btn{padding:4px 8px;min-height:32px}
+[data-baixar][aria-busy="true"]{opacity:.6;pointer-events:none}

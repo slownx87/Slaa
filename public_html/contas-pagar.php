@@ -5,11 +5,12 @@
     - cadastro (descrição, fornecedor, valor, vencimento, código do boleto/PIX);
     - lista por urgência (atrasadas, esta semana, mais adiante) e as já pagas;
     - "Pagar": registra data, valor e forma, e já aceita a foto do comprovante;
-    - fotos em qualquer conta (boleto, nota, comprovante), tiradas na hora ou da galeria;
+    - fotos e PDFs em qualquer conta (boleto, nota, comprovante), tirados na hora ou escolhidos no aparelho;
+    - cada conta é Pública (todos os administradores veem) ou Privada (só o dono vê; o usuário principal vê tudo);
     - contas que se repetem (aluguel, internet...): as próximas aparecem sozinhas; "Contas fixas" mostra e para;
     - contas parceladas: à vista ou parcelado, com entrada (em % ou em R$) e o restante em N parcelas.
     Dados e fotos: _vn_contas_pagar_lib.php. Tela: assets/css/vn-contas-pagar.css e assets/js/vn-contas-pagar.js.
-    Só admin abre (funcionário e cliente ficam barrados por vn_role_pages).
+    Só admin abre (funcionário e cliente ficam barrados por vn_role_pages). Quem vê o quê: cp_sql_visivel() na biblioteca.
 */
 require_once __DIR__ . '/_vn_orcamento_layout.php';
 require_once __DIR__ . '/_vn_contas_pagar_lib.php';
@@ -18,20 +19,32 @@ const CP_VER = ['abertas', 'atrasadas', 'semana', 'pagas', 'todas'];
 
 function cp_ver(string $v): string { return in_array($v, CP_VER, true) ? $v : 'abertas'; }
 
-function cp_url(string $ver, string $q, int $fotos = 0): string
+const CP_DE = ['todas', 'minhas', 'publicas', 'privadas'];
+
+function cp_de(string $v): string { return in_array($v, CP_DE, true) ? $v : 'todas'; }
+
+function cp_url(string $ver, string $q, int $fotos = 0, string $de = 'todas'): string
 {
     $p = [];
     if ($ver !== 'abertas') $p['ver'] = $ver;
     if ($q !== '') $p['q'] = $q;
+    if ($de !== 'todas') $p['de'] = $de;
     if ($fotos > 0) $p['fotos'] = $fotos;
     return 'contas-pagar.php' . ($p ? '?' . http_build_query($p) : '');
 }
 
-/* "3 fotos anexadas." e, se alguma não entrou, o motivo. Devolve [tipo do aviso, texto]. */
+/* "2 fotos e 1 PDF anexados." e, se algum não entrou, o motivo. Devolve [tipo do aviso, texto]. */
 function cp_texto_fotos(array $r): array
 {
     $txt = '';
-    if ($r['salvas'] > 0) $txt = $r['salvas'] === 1 ? '1 foto anexada.' : $r['salvas'] . ' fotos anexadas.';
+    if ($r['salvas'] > 0) {
+        $partes = [];
+        if (($r['fotos'] ?? 0) > 0) $partes[] = $r['fotos'] . ($r['fotos'] === 1 ? ' foto' : ' fotos');
+        if (($r['pdfs'] ?? 0) > 0) $partes[] = $r['pdfs'] . ($r['pdfs'] === 1 ? ' PDF' : ' PDFs');
+        // só fotos: "2 fotos anexadas."; só PDF ou misturado: "1 PDF anexado." / "1 foto e 2 PDFs anexados."
+        $soFotos = ($r['pdfs'] ?? 0) === 0;
+        $txt = implode(' e ', $partes) . ($r['salvas'] === 1 ? ($soFotos ? ' anexada.' : ' anexado.') : ($soFotos ? ' anexadas.' : ' anexados.'));
+    }
     if ($r['falhas']) $txt = trim($txt . ' Não entrou: ' . implode(' ', array_slice($r['falhas'], 0, 3)));
     return [$r['falhas'] ? ($r['salvas'] > 0 ? 'warn' : 'err') : 'ok', $txt];
 }
@@ -39,6 +52,8 @@ function cp_texto_fotos(array $r): array
 $hoje = date('Y-m-d');
 $ver = cp_ver((string)($_GET['ver'] ?? 'abertas'));
 $q = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 80);
+$de = cp_de((string)($_GET['de'] ?? 'todas'));
+$eu = cp_usuario();
 
 /* ------------------------------------------------------------------ ações (POST) */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -46,6 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $msg = '';
     $verVolta = cp_ver((string)($_POST['ver'] ?? 'abertas'));
     $qVolta = mb_substr(trim((string)($_POST['q'] ?? '')), 0, 80);
+    $deVolta = cp_de((string)($_POST['de'] ?? 'todas'));
     $abrirFotos = 0;
     $tokenUsado = '';
     $feito = false;   // a operação (criar, pagar, anexar) chegou a acontecer?
@@ -57,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Fotos grandes demais para o limite do servidor chegam como POST vazio.
         if ($acao === '' && empty($_POST) && empty($_FILES) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
-            throw new CpErro('As fotos juntas passaram do limite de envio do servidor (' . ini_get('post_max_size') . '). Envie menos fotos de cada vez.');
+            throw new CpErro('Os arquivos juntos passaram do limite de envio do servidor (' . ini_get('post_max_size') . '). Envie menos arquivos de cada vez.');
         }
 
         if ($acao === 'salvar_conta') {
@@ -84,7 +100,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg = $nova ? 'Conta adicionada.' : 'Conta atualizada.' . ($aplicar ? ' As próximas repetições também foram atualizadas.' : '');
             }
             $feito = true;
-            if ($nova) { $verVolta = 'abertas'; $qVolta = ''; }
+            if ($nova) {
+                $verVolta = 'abertas'; $qVolta = ''; $deVolta = 'todas';
+                $msg .= ($dados['visibilidade'] ?? 'privado') === 'publico' ? ' Ela é pública: todos os administradores veem.' : ' Ela é privada: só você vê.';
+            }
             if (!empty($_FILES['fotos'])) {
                 $r = cp_salvar_fotos($contaId, 'conta', $_FILES['fotos']);
                 if ($r['salvas'] || $r['falhas']) { [$tipoAviso, $extra] = cp_texto_fotos($r); $msg .= ' ' . $extra; if ($tipoAviso === 'err') $tipoAviso = 'warn'; }
@@ -103,17 +122,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = 'Pagamento desfeito: a conta voltou para "em aberto".';
         } elseif ($acao === 'add_fotos') {
             if (!cp_conta($contaId)) throw new CpErro('Conta não encontrada.');
-            if (empty($_FILES['fotos'])) throw new CpErro('Escolha ou tire pelo menos uma foto.');
-            $tokenUsado = cp_token_usar((string)($_POST['token'] ?? ''), 'Essas fotos já foram enviadas. Veja na conta.');
+            if (empty($_FILES['fotos'])) throw new CpErro('Escolha ou tire pelo menos uma foto, ou escolha um PDF.');
+            $tokenUsado = cp_token_usar((string)($_POST['token'] ?? ''), 'Esses arquivos já foram enviados. Veja na conta.');
             $r = cp_salvar_fotos($contaId, (string)($_POST['tipo'] ?? 'conta'), $_FILES['fotos']);
             $feito = $r['salvas'] > 0;
             [$tipoAviso, $msg] = cp_texto_fotos($r);
-            if ($msg === '') throw new CpErro('Escolha ou tire pelo menos uma foto.');
+            if ($msg === '') throw new CpErro('Escolha ou tire pelo menos uma foto, ou escolha um PDF.');
             $abrirFotos = $contaId;
         } elseif ($acao === 'del_foto') {
             $contaId = cp_excluir_foto((int)($_POST['foto_id'] ?? 0));
-            if ($contaId <= 0) throw new CpErro('Foto não encontrada.');
-            $msg = 'Foto removida.';
+            if ($contaId <= 0) throw new CpErro('Anexo não encontrado.');
+            $msg = 'Anexo removido.';
             $abrirFotos = $contaId;
         } elseif ($acao === 'parar_recorrente') {
             $recId = (int)($_POST['rec_id'] ?? 0);
@@ -146,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $_SESSION['cp_flash'] = ['tipo' => $tipoAviso, 'msg' => $msg];
-    $destino = cp_url($verVolta, $qVolta, $abrirFotos);
+    $destino = cp_url($verVolta, $qVolta, $abrirFotos, $deVolta);
     if (vn_is_ajax()) {
         header('Content-Type: application/json; charset=UTF-8');
         echo json_encode(['ok' => $tipoAviso !== 'err', 'msg' => $msg, 'redirect' => $destino], JSON_UNESCAPED_UNICODE);
@@ -169,7 +188,7 @@ try {
     if ($enxutas) $flash = ['tipo' => 'ok', 'msg' => 'Arrumei as contas que se repetem: cada uma agora só aparece ' . CP_ANTECEDENCIA_DIAS . ' dias antes de vencer (removi ' . (int)$enxutas . ' conta(s) que estavam adiantadas; elas voltam sozinhas na data certa).'];
     cp_gerar_recorrentes($hoje);           // cria as contas repetidas que chegaram a 7 dias do vencimento
     $resumo = cp_resumo($hoje);
-    $contas = cp_listar($ver, $q, $hoje);
+    $contas = cp_listar($ver, $q, $hoje, $de);
     $fotosPorConta = cp_fotos_das_contas(array_column($contas, 'id'));
     $series = cp_recorrentes_ativas();
     $parcelamentos = cp_resumo_parcelamentos(array_column($contas, 'parcelamento_id'));
@@ -197,11 +216,11 @@ $formas = cp_formas();
 
 vn_ui_shell_start('A Pagar', 'contas-pagar', [
     'css' => ['assets/css/vn-contas-pagar.css'],
-    'js'  => ['assets/js/vn-contas-pagar.js'],
+    'js'  => ['assets/js/vn-download.js', 'assets/js/vn-contas-pagar.js'],
     'sub' => 'Contas e boletos da empresa',
 ]);
 ?>
-<div id="cpRoot" class="cp" data-hoje="<?php echo vn_h($hoje); ?>" data-ver="<?php echo vn_h($ver); ?>" data-q="<?php echo vn_h($q); ?>"<?php echo !empty($_GET['fotos']) ? ' data-abrir-fotos="' . (int)$_GET['fotos'] . '"' : ''; ?>>
+<div id="cpRoot" class="cp" data-hoje="<?php echo vn_h($hoje); ?>" data-ver="<?php echo vn_h($ver); ?>" data-q="<?php echo vn_h($q); ?>" data-de="<?php echo vn_h($de); ?>"<?php echo !empty($_GET['fotos']) ? ' data-abrir-fotos="' . (int)$_GET['fotos'] . '"' : ''; ?>>
 
 <?php if ($flash && !empty($flash['msg'])): $ft = in_array($flash['tipo'] ?? '', ['ok', 'warn', 'err'], true) ? $flash['tipo'] : 'ok'; ?>
     <div class="vn-alert <?php echo $ft; ?>" role="status"><?php echo vn_h($flash['msg']); ?></div>
@@ -214,7 +233,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
     <div>
         <span class="vn-kicker">Contas a pagar</span>
         <h2>O que falta pagar.</h2>
-        <p>Cadastre as contas e boletos, marque quando pagar e guarde a foto da conta e do comprovante junto de cada uma.</p>
+        <p>Cadastre as contas e boletos, marque quando pagar e guarde a foto ou o PDF da conta e do comprovante junto de cada uma. Cada conta é <strong>pública</strong> (todos os administradores veem) ou <strong>privada</strong> (só você vê).</p>
     </div>
     <div class="vn-actions">
         <button type="button" class="vn-btn vn-btn-primary" data-cp-nova><span class="material-symbols-outlined" aria-hidden="true">add</span>Nova conta</button>
@@ -253,22 +272,29 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
     <div class="cp-tools">
         <nav class="vn-segment" aria-label="Filtrar contas">
             <?php foreach ($abas as $k => [$rot, $campo]): ?>
-                <a href="<?php echo vn_h(cp_url($k, $q)); ?>"<?php echo $k === $ver ? ' class="active" aria-current="page"' : ''; ?>><?php echo vn_h($rot); ?> <small><?php echo (int)($resumo[$campo] ?? 0); ?></small></a>
+                <a href="<?php echo vn_h(cp_url($k, $q, 0, $de)); ?>"<?php echo $k === $ver ? ' class="active" aria-current="page"' : ''; ?>><?php echo vn_h($rot); ?> <small><?php echo (int)($resumo[$campo] ?? 0); ?></small></a>
             <?php endforeach; ?>
         </nav>
         <form class="cp-busca" method="get" action="contas-pagar.php" role="search">
             <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>">
+            <select name="de" aria-label="De quem são as contas" onchange="this.form.submit()">
+                <option value="todas"<?php echo $de === 'todas' ? ' selected' : ''; ?>>Todas as que posso ver</option>
+                <option value="minhas"<?php echo $de === 'minhas' ? ' selected' : ''; ?>>Só as minhas</option>
+                <option value="publicas"<?php echo $de === 'publicas' ? ' selected' : ''; ?>>Só as públicas</option>
+                <option value="privadas"<?php echo $de === 'privadas' ? ' selected' : ''; ?>>Só as privadas</option>
+            </select>
             <input type="search" name="q" value="<?php echo vn_h($q); ?>" placeholder="Buscar conta, fornecedor…" aria-label="Buscar conta" maxlength="80">
             <button type="submit" class="vn-mini-btn"><span class="material-symbols-outlined" aria-hidden="true">search</span>Buscar</button>
-            <?php if ($q !== ''): ?><a class="vn-mini-btn" href="<?php echo vn_h(cp_url($ver, '')); ?>">Limpar</a><?php endif; ?>
+            <?php if ($q !== '' || $de !== 'todas'): ?><a class="vn-mini-btn" href="<?php echo vn_h(cp_url($ver, '')); ?>">Limpar</a><?php endif; ?>
         </form>
     </div>
+    <?php if ($eu['super']): ?><p class="cp-nota">Você é o administrador principal: vê todas as contas, inclusive as privadas dos outros usuários (aparecem com o nome do dono).</p><?php endif; ?>
 
 <?php if (!$contas): ?>
     <div class="vn-empty"><span class="material-symbols-outlined" aria-hidden="true">request_quote</span><?php echo vn_h($q !== '' ? 'Nenhuma conta encontrada para essa busca.' : $vazio[$ver]); ?></div>
 <?php else: ?>
     <table class="vn-table cp-table">
-        <thead><tr><th>Conta</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th>Fotos</th><th>Ações</th></tr></thead>
+        <thead><tr><th>Conta</th><th>Vencimento</th><th class="num">Valor</th><th>Situação</th><th>Anexos</th><th>Ações</th></tr></thead>
         <tbody>
         <?php foreach ($contas as $c):
             $id = (int)$c['id'];
@@ -282,6 +308,9 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 ? cp_rotulo_parcela($c['parcela_num'] !== null ? (int)$c['parcela_num'] : null, $c['parcela_ordem'] !== null ? (int)$c['parcela_ordem'] : null, $c['parcela_qtd'] !== null ? (int)$c['parcela_qtd'] : null)
                 : null;
             $parcNumero = !empty($c['parcelamento_id']) ? cp_numero_parcela($c['parcela_ordem'] !== null ? (int)$c['parcela_ordem'] : null, $c['parcela_qtd'] !== null ? (int)$c['parcela_qtd'] : null) : null;
+            $visPriv = (string)($c['visibilidade'] ?? 'publico') === 'privado';
+            $donoNome = trim((string)($c['dono_nome'] ?: ($c['dono_usuario'] ?? '')));
+            $souDono = (int)($c['dono_id'] ?? 0) > 0 && (int)$c['dono_id'] === $eu['id'];
             $rotulosEstado = ['paga' => ['pago', 'Paga'], 'atrasada' => ['atrasada', 'Atrasada'], 'hoje' => ['hoje', 'Vence hoje'], 'semana' => ['pendente', 'Esta semana'], 'futura' => ['', 'A vencer']];
             $dados = [
                 'id' => $id,
@@ -297,6 +326,8 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 'valor_pago' => number_format((float)($c['valor_pago'] ?? $c['valor']), 2, ',', '.'),
                 'forma' => (string)($c['forma_pagamento'] ?? ''),
                 'fotos' => $fotos,
+                'vis' => $visPriv ? 'privado' : 'publico',
+                'pode_vis' => cp_pode_mudar_visibilidade($c),
                 'rec' => $recRotulo === null ? null : ['rotulo' => $recRotulo, 'ativa' => (int)$c['rec_ativa']],
                 'parc' => $parcRotulo === null ? null : [
                     'rotulo' => $parcRotulo,
@@ -313,6 +344,8 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                     <?php if ($sub): ?><span class="vn-row-sub"><?php echo vn_h(implode(' · ', $sub)); ?></span><?php endif; ?>
                     <?php if ($recRotulo !== null): ?><span class="cp-rec"><span class="material-symbols-outlined" aria-hidden="true">event_repeat</span><?php echo vn_h($recRotulo . ((int)$c['rec_ativa'] ? '' : ' · encerrada')); ?></span><?php endif; ?>
                     <?php if ($parcRotulo !== null): ?><span class="cp-rec"><span class="material-symbols-outlined" aria-hidden="true">payments</span><?php echo vn_h($parcRotulo); ?></span><?php endif; ?>
+                    <?php if ($visPriv): ?><span class="cp-vis privada" title="Só o dono vê esta conta"><span class="material-symbols-outlined" aria-hidden="true">lock</span>Privada<?php echo (!$souDono && $donoNome !== '') ? ' · ' . vn_h($donoNome) : ''; ?></span>
+                    <?php elseif ((int)($c['dono_id'] ?? 0) > 0): ?><span class="cp-vis publica" title="Todos os administradores veem esta conta"><span class="material-symbols-outlined" aria-hidden="true">groups</span>Pública<?php echo (!$souDono && $donoNome !== '') ? ' · ' . vn_h($donoNome) : ''; ?></span><?php endif; ?>
                     <?php if (!empty($c['observacao'])): ?><span class="vn-row-sub cp-obs"><?php echo vn_h(mb_strimwidth((string)$c['observacao'], 0, 90, '…')); ?></span><?php endif; ?>
                 </div></td>
                 <td data-label="Vencimento"><div class="cp-bloco">
@@ -329,21 +362,24 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                     <?php if ($paga && $c['valor_pago'] !== null && abs((float)$c['valor_pago'] - (float)$c['valor']) >= 0.005): ?><span class="vn-row-sub">Pago: <?php echo vn_money($c['valor_pago']); ?></span><?php endif; ?>
                 </div></td>
                 <td data-label="Situação"><span class="vn-badge <?php echo vn_h($rotulosEstado[$estado][0]); ?>"><?php echo vn_h($rotulosEstado[$estado][1]); ?></span></td>
-                <td data-label="Fotos">
+                <td data-label="Anexos">
                     <?php if ($fotos): ?>
-                        <button type="button" class="cp-thumbs" data-cp-acao="fotos" aria-label="Ver as <?php echo count($fotos); ?> foto(s) de <?php echo vn_h($c['descricao']); ?>">
-                            <?php foreach (array_slice($fotos, 0, 3) as $f): ?><img loading="lazy" alt="" src="contas-pagar-foto.php?id=<?php echo (int)$f['id']; ?>&amp;mini=1"><?php endforeach; ?>
+                        <button type="button" class="cp-thumbs" data-cp-acao="fotos" aria-label="Ver os <?php echo count($fotos); ?> anexo(s) de <?php echo vn_h($c['descricao']); ?>">
+                            <?php foreach (array_slice($fotos, 0, 3) as $f): ?>
+                                <?php if (($f['formato'] ?? 'img') === 'pdf'): ?><span class="cp-pdf-mini" title="<?php echo vn_h($f['nome']); ?>"><span class="material-symbols-outlined" aria-hidden="true">picture_as_pdf</span>PDF</span>
+                                <?php else: ?><img loading="lazy" alt="" src="contas-pagar-foto.php?id=<?php echo (int)$f['id']; ?>&amp;mini=1"><?php endif; ?>
+                            <?php endforeach; ?>
                             <?php if (count($fotos) > 3): ?><span class="cp-mais">+<?php echo count($fotos) - 3; ?></span><?php endif; ?>
                         </button>
                     <?php else: ?>
-                        <button type="button" class="vn-mini-btn" data-cp-acao="fotos"><span class="material-symbols-outlined" aria-hidden="true">photo_camera</span>Anexar foto</button>
+                        <button type="button" class="vn-mini-btn" data-cp-acao="fotos"><span class="material-symbols-outlined" aria-hidden="true">photo_camera</span>Anexar foto ou PDF</button>
                     <?php endif; ?>
                 </td>
                 <td data-label="Ações"><div class="vn-actions">
                     <?php if ($paga): ?>
                         <form method="post" data-danger data-confirm="Desfazer o pagamento de &quot;<?php echo vn_h($c['descricao']); ?>&quot;? A conta volta para &quot;em aberto&quot;.">
                             <input type="hidden" name="acao" value="desfazer_pagamento"><input type="hidden" name="conta_id" value="<?php echo $id; ?>">
-                            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+                            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
                             <button type="submit" class="vn-mini-btn"><span class="material-symbols-outlined" aria-hidden="true">history</span>Desfazer</button>
                         </form>
                     <?php else: ?>
@@ -369,7 +405,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
         <input type="hidden" name="acao" value="salvar_conta">
         <input type="hidden" name="conta_id" value="0">
         <input type="hidden" name="token" value="">
-        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
         <div class="vn-dialog-head"><h4 id="cpContaTitulo" data-cp-titulo>Nova conta</h4></div>
         <div class="vn-dialog-body">
             <div class="vn-form-grid">
@@ -396,6 +432,9 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 <div class="vn-field" data-cp-so-nova data-cp-repetir data-cp-vezes hidden><label for="cpVezes">Quantas vezes?</label><input id="cpVezes" name="vezes" inputmode="numeric" maxlength="3" autocomplete="off" placeholder="Vazio = sem data final"></div>
                 <div class="vn-field full"><label for="cpCodigo">Código do boleto ou PIX copia e cola</label><input id="cpCodigo" name="codigo" maxlength="512" autocomplete="off" placeholder="Opcional (para copiar na hora de pagar)"></div>
                 <div class="vn-field full"><label for="cpObs">Observação</label><textarea id="cpObs" name="observacao" maxlength="2000" rows="2" placeholder="Opcional"></textarea></div>
+                <div class="vn-field full"><label for="cpVis">Quem pode ver esta conta</label>
+                    <select id="cpVis" name="visibilidade"><?php foreach (cp_visibilidades() as $k => $rot): ?><option value="<?php echo vn_h($k); ?>"><?php echo vn_h($rot); ?></option><?php endforeach; ?></select>
+                    <small class="cp-ajuda" data-cp-vis-ajuda>Privada: aparece só para você (e para o administrador principal). Pública: todos os administradores veem.</small></div>
                 <div class="vn-field full cp-rec-box" data-cp-rec-box hidden>
                     <p><span class="material-symbols-outlined" aria-hidden="true">event_repeat</span><span data-cp-rec-texto></span></p>
                     <label class="cp-check"><input type="checkbox" name="aplicar_proximas" value="1"> Aplicar o que mudei (nome, valor, fornecedor, categoria, observação) também às próximas repetições</label>
@@ -407,8 +446,8 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                     <button type="button" class="vn-mini-btn" data-cp-cancelar-parc><span class="material-symbols-outlined" aria-hidden="true">close</span>Cancelar parcelamento</button>
                 </div>
                 <div class="vn-field full" data-cp-so-nova>
-                    <label for="cpFotosConta">Fotos da conta (boleto, nota…)</label>
-                    <input id="cpFotosConta" type="file" name="fotos[]" accept="image/*" multiple data-cp-fotos>
+                    <label for="cpFotosConta">Fotos ou PDF da conta (boleto, nota…)</label>
+                    <input id="cpFotosConta" type="file" name="fotos[]" accept="image/*,application/pdf,.pdf" multiple data-cp-fotos>
                     <div class="cp-previews" data-cp-previews></div>
                 </div>
             </div>
@@ -423,15 +462,15 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
     </form>
     <form method="post" id="cpFormCancelarParc" data-danger data-confirm="Cancelar o parcelamento? As parcelas que ainda não foram pagas (e não têm foto) serão removidas. As pagas ficam." hidden>
         <input type="hidden" name="acao" value="cancelar_parcelamento"><input type="hidden" name="conta_id" value="0">
-        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
     </form>
     <form method="post" id="cpFormParar" data-danger data-confirm="Parar de repetir esta conta? As próximas contas que ainda não foram pagas (e não têm foto) serão removidas. Esta e as anteriores ficam." hidden>
         <input type="hidden" name="acao" value="parar_recorrente"><input type="hidden" name="conta_id" value="0">
-        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
     </form>
     <form method="post" id="cpFormExcluir" data-danger data-confirm="Excluir esta conta e as fotos dela? Isso não pode ser desfeito." hidden>
         <input type="hidden" name="acao" value="excluir_conta"><input type="hidden" name="conta_id" value="0">
-        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
     </form>
 </dialog>
 
@@ -450,7 +489,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 </div>
                 <form method="post" data-danger data-confirm="Parar de repetir &quot;<?php echo vn_h($r['descricao']); ?>&quot;? As contas futuras que ainda não foram pagas (e não têm foto) serão removidas.">
                     <input type="hidden" name="acao" value="parar_recorrente"><input type="hidden" name="rec_id" value="<?php echo (int)$r['id']; ?>">
-                    <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+                    <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
                     <button type="submit" class="vn-mini-btn"><span class="material-symbols-outlined" aria-hidden="true">close</span>Parar</button>
                 </form>
             </div>
@@ -465,13 +504,13 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
         <p style="margin:0">Esta conta se repete. O que você quer fazer?</p>
         <form method="post" class="cp-opcao">
             <input type="hidden" name="acao" value="excluir_conta"><input type="hidden" name="conta_id" value="0">
-            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
             <button type="submit" class="vn-btn vn-btn-danger vn-btn-block"><span class="material-symbols-outlined" aria-hidden="true">delete</span>Excluir só esta</button>
             <small>A conta do próximo mês continua e aparece 7 dias antes de vencer.</small>
         </form>
         <form method="post" class="cp-opcao">
             <input type="hidden" name="acao" value="excluir_conta"><input type="hidden" name="parar_repeticao" value="1"><input type="hidden" name="conta_id" value="0">
-            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
             <button type="submit" class="vn-btn vn-btn-danger vn-btn-block"><span class="material-symbols-outlined" aria-hidden="true">delete</span>Excluir e parar de repetir</button>
             <small>Remove esta e as próximas que ainda não foram pagas. Nenhuma conta nova será criada.</small>
         </form>
@@ -484,7 +523,7 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
         <input type="hidden" name="acao" value="pagar">
         <input type="hidden" name="conta_id" value="0">
         <input type="hidden" name="token" value="">
-        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+        <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
         <div class="vn-dialog-head"><h4 id="cpPagarTitulo">Registrar pagamento</h4><p class="cp-dlg-sub" data-cp-resumo></p></div>
         <div class="vn-dialog-body">
             <div class="vn-form-grid">
@@ -493,8 +532,8 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
                 <div class="vn-field full"><label for="cpForma">Como pagou?</label>
                     <select id="cpForma" name="forma_pagamento"><option value="">Não informar</option><?php foreach ($formas as $k => $rot): ?><option value="<?php echo vn_h($k); ?>"><?php echo vn_h($rot); ?></option><?php endforeach; ?></select></div>
                 <div class="vn-field full">
-                    <label for="cpFotosPagar">Foto do comprovante</label>
-                    <input id="cpFotosPagar" type="file" name="fotos[]" accept="image/*" multiple data-cp-fotos>
+                    <label for="cpFotosPagar">Foto ou PDF do comprovante</label>
+                    <input id="cpFotosPagar" type="file" name="fotos[]" accept="image/*,application/pdf,.pdf" multiple data-cp-fotos>
                     <div class="cp-previews" data-cp-previews></div>
                 </div>
             </div>
@@ -507,22 +546,22 @@ vn_ui_shell_start('A Pagar', 'contas-pagar', [
 </dialog>
 
 <dialog class="vn-dialog cp-dlg cp-dlg-wide" id="cpDlgFotos" aria-labelledby="cpFotosTitulo">
-    <div class="vn-dialog-head"><h4 id="cpFotosTitulo">Fotos</h4><p class="cp-dlg-sub" data-cp-resumo></p></div>
+    <div class="vn-dialog-head"><h4 id="cpFotosTitulo">Fotos e PDFs</h4><p class="cp-dlg-sub" data-cp-resumo></p></div>
     <div class="vn-dialog-body">
         <div class="cp-galeria" data-cp-galeria></div>
         <form method="post" enctype="multipart/form-data" class="cp-envio" data-cp-form>
             <input type="hidden" name="acao" value="add_fotos">
             <input type="hidden" name="conta_id" value="0">
             <input type="hidden" name="token" value="">
-            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>">
+            <input type="hidden" name="ver" value="<?php echo vn_h($ver); ?>"><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><input type="hidden" name="de" value="<?php echo vn_h($de); ?>">
             <div class="vn-form-grid">
-                <div class="vn-field"><label for="cpTipoFoto">Tipo da foto</label>
+                <div class="vn-field"><label for="cpTipoFoto">Tipo do anexo</label>
                     <select id="cpTipoFoto" name="tipo"><?php foreach (cp_tipos_foto() as $k => $rot): ?><option value="<?php echo vn_h($k); ?>"><?php echo vn_h($rot); ?></option><?php endforeach; ?></select></div>
-                <div class="vn-field"><label for="cpFotosAdd">Tirar foto ou escolher da galeria</label>
-                    <input id="cpFotosAdd" type="file" name="fotos[]" accept="image/*" multiple data-cp-fotos></div>
+                <div class="vn-field"><label for="cpFotosAdd">Tirar foto, escolher da galeria ou um PDF</label>
+                    <input id="cpFotosAdd" type="file" name="fotos[]" accept="image/*,application/pdf,.pdf" multiple data-cp-fotos></div>
             </div>
             <div class="cp-previews" data-cp-previews></div>
-            <div class="cp-envio-acoes"><button type="submit" class="vn-btn vn-btn-primary" data-cp-enviar><span class="material-symbols-outlined" aria-hidden="true">upload</span>Enviar fotos</button></div>
+            <div class="cp-envio-acoes"><button type="submit" class="vn-btn vn-btn-primary" data-cp-enviar><span class="material-symbols-outlined" aria-hidden="true">upload</span>Enviar anexos</button></div>
         </form>
     </div>
     <div class="vn-dialog-foot"><button type="button" class="vn-btn" data-cp-fechar>Fechar</button></div>

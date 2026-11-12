@@ -10,7 +10,8 @@
 
     Fotos ficam em uploads/contas_pagar/<id da conta>/ (fora do alcance direto do navegador: a pasta
     recebe um .htaccess "Require all denied" e as imagens só saem por contas-pagar-foto.php).
-    Cada foto tem um tipo: 'conta' (boleto, nota, foto da conta) ou 'comprovante' (prova do pagamento).
+    Cada anexo tem um tipo: 'conta' (boleto, nota, foto da conta) ou 'comprovante' (prova do pagamento), e um
+    formato: 'img' (foto JPG/PNG/WebP) ou 'pdf' (boleto/nota/comprovante em PDF).
 
     Contas parceladas: "Parcelado" cria, de uma vez, a entrada (opcional, em % ou em R$) e as parcelas do restante.
     Cada pagamento é UMA conta comum (paga, tem fotos, pode ser editada) ligada às outras por parcelamento_id e
@@ -27,8 +28,71 @@
 class CpErro extends Exception {}
 
 const CP_FOTOS_MAX_POR_CONTA = 20;
-const CP_FOTO_MAX_BYTES = 15 * 1024 * 1024;
+const CP_FOTO_MAX_BYTES = 15 * 1024 * 1024;   // vale para foto e para PDF
 const CP_ANTECEDENCIA_DIAS = 7;    // cada conta repetida é criada quantos dias antes de vencer
+const CP_SUPER_USUARIO = 'slownx';  // este usuário enxerga TODAS as contas, inclusive as privadas dos outros
+
+/* ------------------------------------------------------------------ quem está usando / quem vê o quê */
+/*
+   Cada conta tem um dono (quem cadastrou) e uma visibilidade:
+     publico  = todos os administradores veem (como era antes);
+     privado  = só o dono vê. Nem os outros administradores. Exceção: CP_SUPER_USUARIO vê tudo.
+   Contas antigas, sem dono, ficam públicas.
+*/
+function cp_usuario(): array
+{
+    $login = strtolower(trim((string)($_SESSION['usuario'] ?? ($_SESSION['admin'] ?? ''))));
+    return [
+        'id'      => (int)($_SESSION['admin_id'] ?? ($_SESSION['id'] ?? 0)),
+        'usuario' => $login,
+        'nome'    => trim((string)($_SESSION['nome'] ?? ($_SESSION['usuario'] ?? ''))),
+        'super'   => $login !== '' && $login === CP_SUPER_USUARIO,
+    ];
+}
+
+function cp_visibilidades(): array
+{
+    return ['privado' => 'Privada (só eu vejo)', 'publico' => 'Pública (todos os administradores veem)'];
+}
+
+/* Trecho de SQL (e parâmetros) que deixa passar só as contas que quem está usando pode ver. $a = apelido da tabela. */
+function cp_sql_visivel(string $a = 'c'): array
+{
+    $u = cp_usuario();
+    if ($u['super']) return ['1 = 1', []];
+    return ["($a.visibilidade <> 'privado' OR ($a.dono_id IS NOT NULL AND $a.dono_id = ?))", [$u['id']]];
+}
+
+function cp_pode_ver(array $conta): bool
+{
+    $u = cp_usuario();
+    if ($u['super']) return true;
+    if ((string)($conta['visibilidade'] ?? 'publico') !== 'privado') return true;
+    return $u['id'] > 0 && (int)($conta['dono_id'] ?? 0) === $u['id'];
+}
+
+/* Só o dono (ou o usuário principal) muda a visibilidade de uma conta. */
+function cp_pode_mudar_visibilidade(array $conta): bool
+{
+    $u = cp_usuario();
+    if ($u['super']) return true;
+    $dono = (int)($conta['dono_id'] ?? 0);
+    return $dono === 0 ? $u['id'] > 0 : $dono === $u['id'];   // conta antiga (sem dono): qualquer administrador
+}
+
+/* Dono + visibilidade que uma conta nova recebe. */
+function cp_dono_novo(?string $visibilidade): array
+{
+    $u = cp_usuario();
+    $vis = isset(cp_visibilidades()[(string)$visibilidade]) ? (string)$visibilidade : 'privado';
+    if ($u['id'] <= 0) $vis = 'publico';   // sem dono identificado não existe "privada": ninguém (além do principal) conseguiria ver
+    return [
+        'dono_id'      => $u['id'] > 0 ? $u['id'] : null,
+        'dono_usuario' => $u['usuario'] !== '' ? mb_substr($u['usuario'], 0, 80) : null,
+        'dono_nome'    => $u['nome'] !== '' ? mb_substr($u['nome'], 0, 120) : null,
+        'visibilidade' => $vis,
+    ];
+}
 
 function cp_frequencias(): array
 {
@@ -79,6 +143,10 @@ function cp_ensure_tables(): void
         parcela_total INT NULL,
         parcela_ordem INT NULL,
         parcela_qtd INT NULL,
+        dono_id INT NULL,
+        dono_usuario VARCHAR(80) NULL,
+        dono_nome VARCHAR(120) NULL,
+        visibilidade VARCHAR(10) NOT NULL DEFAULT 'publico',
         criado_em DATETIME NOT NULL,
         INDEX (pago, vencimento),
         INDEX (pago_em),
@@ -97,6 +165,10 @@ function cp_ensure_tables(): void
         proximo_n INT NOT NULL DEFAULT 0,
         total_vezes INT NULL,
         ativa TINYINT(1) NOT NULL DEFAULT 1,
+        dono_id INT NULL,
+        dono_usuario VARCHAR(80) NULL,
+        dono_nome VARCHAR(120) NULL,
+        visibilidade VARCHAR(10) NOT NULL DEFAULT 'publico',
         criado_em DATETIME NOT NULL,
         INDEX (ativa)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -108,6 +180,13 @@ function cp_ensure_tables(): void
     vn_add_col_if_missing('vn_contas_pagar', 'parcela_total', 'INT NULL');
     vn_add_col_if_missing('vn_contas_pagar', 'parcela_ordem', 'INT NULL');
     vn_add_col_if_missing('vn_contas_pagar', 'parcela_qtd', 'INT NULL');
+    // Dono e visibilidade (contas antigas ficam públicas, sem dono)
+    foreach (['vn_contas_pagar', 'vn_contas_pagar_recorrentes'] as $tab) {
+        vn_add_col_if_missing($tab, 'dono_id', 'INT NULL, ADD INDEX idx_dono (dono_id)');
+        vn_add_col_if_missing($tab, 'dono_usuario', 'VARCHAR(80) NULL');
+        vn_add_col_if_missing($tab, 'dono_nome', 'VARCHAR(120) NULL');
+        vn_add_col_if_missing($tab, 'visibilidade', "VARCHAR(10) NOT NULL DEFAULT 'publico'");
+    }
     // Parcelamentos criados antes da numeração "1/5": entrada vira 1, as parcelas seguem 2, 3... (ou 1, 2... sem entrada)
     vn_exec('UPDATE vn_contas_pagar c
              JOIN (SELECT parcelamento_id, MAX(CASE WHEN parcela_num = 0 THEN 1 ELSE 0 END) AS ent
@@ -120,9 +199,13 @@ function cp_ensure_tables(): void
         tipo VARCHAR(20) NOT NULL DEFAULT 'conta',
         caminho VARCHAR(255) NOT NULL,
         nome_original VARCHAR(190) NULL,
+        formato VARCHAR(8) NOT NULL DEFAULT 'img',
+        tamanho INT NULL,
         criado_em DATETIME NOT NULL,
         INDEX (conta_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    vn_add_col_if_missing('vn_contas_pagar_fotos', 'formato', "VARCHAR(8) NOT NULL DEFAULT 'img'");   // 'img' (foto) ou 'pdf'
+    vn_add_col_if_missing('vn_contas_pagar_fotos', 'tamanho', 'INT NULL');
     $feito = true;
 }
 
@@ -162,6 +245,7 @@ function cp_resumo(string $hoje): array
     $fim7 = date('Y-m-d', strtotime($hoje . ' +7 days'));
     $mesIni = substr($hoje, 0, 8) . '01';
     $mesFim = date('Y-m-t', strtotime($mesIni));
+    [$visSql, $visPar] = cp_sql_visivel('c');
     $r = vn_fetch_one(
         "SELECT
             COALESCE(SUM(CASE WHEN pago = 0 THEN 1 ELSE 0 END), 0) AS q_abertas,
@@ -173,20 +257,26 @@ function cp_resumo(string $hoje): array
             COALESCE(SUM(CASE WHEN pago = 1 THEN 1 ELSE 0 END), 0) AS q_pagas,
             COALESCE(SUM(CASE WHEN pago = 1 AND pago_em >= ? AND pago_em <= ? THEN COALESCE(valor_pago, valor) ELSE 0 END), 0) AS v_pago_mes,
             COUNT(*) AS q_todas
-         FROM vn_contas_pagar",
-        [$hoje, $hoje, $hoje, $fim7, $hoje, $fim7, $mesIni, $mesFim]
+         FROM vn_contas_pagar c WHERE $visSql",
+        array_merge([$hoje, $hoje, $hoje, $fim7, $hoje, $fim7, $mesIni, $mesFim], $visPar)
     ) ?: [];
     foreach (['q_abertas', 'q_atrasadas', 'q_semana', 'q_pagas', 'q_todas'] as $k) $r[$k] = (int)($r[$k] ?? 0);
     foreach (['v_abertas', 'v_atrasadas', 'v_semana', 'v_pago_mes'] as $k) $r[$k] = (float)($r[$k] ?? 0);
     return $r;
 }
 
-/* $ver: abertas | atrasadas | semana | pagas | todas. $q: texto de busca. */
-function cp_listar(string $ver, string $q, string $hoje): array
+/* $ver: abertas | atrasadas | semana | pagas | todas. $q: texto de busca. $de: todas | minhas | publicas | privadas. */
+function cp_listar(string $ver, string $q, string $hoje, string $de = 'todas'): array
 {
     $fim7 = date('Y-m-d', strtotime($hoje . ' +7 days'));
-    $where = [];
-    $params = [];
+    [$visSql, $visPar] = cp_sql_visivel('c');
+    $where = [$visSql];
+    $params = $visPar;
+    switch ($de) {
+        case 'minhas':   $where[] = 'c.dono_id = ?'; $params[] = cp_usuario()['id']; break;
+        case 'publicas': $where[] = "c.visibilidade <> 'privado'"; break;
+        case 'privadas': $where[] = "c.visibilidade = 'privado'"; break;
+    }
     $ordem = 'c.pago ASC, c.vencimento ASC, c.id ASC';
     switch ($ver) {
         case 'atrasadas': $where[] = 'c.pago = 0 AND c.vencimento < ?'; $params[] = $hoje; break;
@@ -207,9 +297,12 @@ function cp_listar(string $ver, string $q, string $hoje): array
     return vn_fetch_all($sql, $params);
 }
 
+/* A conta, só se quem está usando pode vê-la (privada de outro usuário = "não encontrada"). */
 function cp_conta(int $id): ?array
 {
-    return $id > 0 ? vn_fetch_one('SELECT * FROM vn_contas_pagar WHERE id = ?', [$id]) : null;
+    if ($id <= 0) return null;
+    $c = vn_fetch_one('SELECT * FROM vn_contas_pagar WHERE id = ?', [$id]);
+    return ($c && cp_pode_ver($c)) ? $c : null;
 }
 
 /* Fotos das contas informadas, agrupadas por conta: [conta_id => [foto, ...]]. */
@@ -219,8 +312,11 @@ function cp_fotos_das_contas(array $ids): array
     if (!$ids) return [];
     $marcas = implode(',', array_fill(0, count($ids), '?'));
     $out = [];
-    foreach (vn_fetch_all("SELECT id, conta_id, tipo, nome_original FROM vn_contas_pagar_fotos WHERE conta_id IN ($marcas) ORDER BY id", $ids) as $f) {
-        $out[(int)$f['conta_id']][] = ['id' => (int)$f['id'], 'tipo' => (string)$f['tipo'], 'nome' => (string)($f['nome_original'] ?? '')];
+    foreach (vn_fetch_all("SELECT id, conta_id, tipo, nome_original, formato, tamanho FROM vn_contas_pagar_fotos WHERE conta_id IN ($marcas) ORDER BY id", $ids) as $f) {
+        $out[(int)$f['conta_id']][] = [
+            'id' => (int)$f['id'], 'tipo' => (string)$f['tipo'], 'nome' => (string)($f['nome_original'] ?? ''),
+            'formato' => ((string)($f['formato'] ?? 'img')) === 'pdf' ? 'pdf' : 'img', 'tamanho' => (int)($f['tamanho'] ?? 0),
+        ];
     }
     return $out;
 }
@@ -252,6 +348,8 @@ function cp_validar_conta(array $post): array
         'vencimento' => $venc,
         'codigo'     => $limpa(preg_replace('/\s+/', '', (string)($post['codigo'] ?? '')), 512),
         'observacao' => $limpa($post['observacao'] ?? '', 2000),
+        // null = o formulário não mandou (ou mandou algo inválido): numa conta nova vira "privada", numa existente não muda
+        'visibilidade' => isset(cp_visibilidades()[(string)($post['visibilidade'] ?? '')]) ? (string)$post['visibilidade'] : null,
     ];
 }
 
@@ -268,6 +366,17 @@ function cp_salvar_conta(int $id, array $d, bool $aplicarProximas = false): int
         if (!$atual) throw new CpErro('Conta não encontrada.');
         vn_exec('UPDATE vn_contas_pagar SET descricao = ?, fornecedor = ?, categoria = ?, valor = ?, vencimento = ?, codigo = ?, observacao = ? WHERE id = ?',
             [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['vencimento'], $d['codigo'], $d['observacao'], $id]);
+        // mudar público/privado: só o dono (ou o usuário principal); vale para toda a repetição / parcelamento da conta
+        if (!empty($d['visibilidade']) && $d['visibilidade'] !== (string)($atual['visibilidade'] ?? 'publico') && cp_pode_mudar_visibilidade($atual)) {
+            vn_exec('UPDATE vn_contas_pagar SET visibilidade = ? WHERE id = ?', [$d['visibilidade'], $id]);
+            if ((int)($atual['recorrente_id'] ?? 0) > 0) {
+                vn_exec('UPDATE vn_contas_pagar SET visibilidade = ? WHERE recorrente_id = ?', [$d['visibilidade'], (int)$atual['recorrente_id']]);
+                vn_exec('UPDATE vn_contas_pagar_recorrentes SET visibilidade = ? WHERE id = ?', [$d['visibilidade'], (int)$atual['recorrente_id']]);
+            }
+            if ((int)($atual['parcelamento_id'] ?? 0) > 0) {
+                vn_exec('UPDATE vn_contas_pagar SET visibilidade = ? WHERE parcelamento_id = ?', [$d['visibilidade'], (int)$atual['parcelamento_id']]);
+            }
+        }
         if ($aplicarProximas && (int)($atual['recorrente_id'] ?? 0) > 0) {
             $rec = (int)$atual['recorrente_id'];
             vn_exec('UPDATE vn_contas_pagar_recorrentes SET descricao = ?, fornecedor = ?, categoria = ?, valor = ?, observacao = ? WHERE id = ?',
@@ -282,8 +391,11 @@ function cp_salvar_conta(int $id, array $d, bool $aplicarProximas = false): int
         }
         return $id;
     }
-    vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, codigo, observacao, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['vencimento'], $d['codigo'], $d['observacao'], date('Y-m-d H:i:s')]);
+    $dono = cp_dono_novo($d['visibilidade'] ?? null);
+    vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, codigo, observacao, dono_id, dono_usuario, dono_nome, visibilidade, criado_em)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['vencimento'], $d['codigo'], $d['observacao'],
+         $dono['dono_id'], $dono['dono_usuario'], $dono['dono_nome'], $dono['visibilidade'], date('Y-m-d H:i:s')]);
     return vn_last_id();
 }
 
@@ -350,8 +462,9 @@ function cp_token_liberar(string $token): void
 */
 function cp_conta_igual_recente(array $d): ?int
 {
-    $r = vn_fetch_one('SELECT id FROM vn_contas_pagar WHERE descricao = ? AND vencimento = ? AND criado_em >= ? LIMIT 1',
-        [$d['descricao'], $d['vencimento'], date('Y-m-d H:i:s', time() - 30)]);
+    $u = cp_usuario();
+    $r = vn_fetch_one('SELECT id FROM vn_contas_pagar WHERE descricao = ? AND vencimento = ? AND criado_em >= ? AND dono_id <=> ? LIMIT 1',
+        [$d['descricao'], $d['vencimento'], date('Y-m-d H:i:s', time() - 30), $u['id'] > 0 ? $u['id'] : null]);
     return $r ? (int)$r['id'] : null;
 }
 
@@ -434,14 +547,15 @@ function cp_criar_parcelamento(array $d, array $plano): int
     $criadas = [];
     $grupo = null;
     $qtd = count($plano['itens']);                       // todos os pagamentos: entrada (se houver) + parcelas
+    $dono = cp_dono_novo($d['visibilidade'] ?? null);
     $deslocamento = $plano['entrada'] > 0 ? 1 : 0;      // com entrada: entrada = 1/N, parcela 1 = 2/N...
     try {
         foreach ($plano['itens'] as $it) {
             $ordem = $it['num'] + $deslocamento;
-            vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, codigo, observacao, parcelamento_id, parcela_num, parcela_total, parcela_ordem, parcela_qtd, criado_em)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, codigo, observacao, parcelamento_id, parcela_num, parcela_total, parcela_ordem, parcela_qtd, dono_id, dono_usuario, dono_nome, visibilidade, criado_em)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [$d['descricao'], $d['fornecedor'], $d['categoria'], $it['valor'], $it['venc'], $grupo === null ? $d['codigo'] : null, $d['observacao'],
-                 $grupo, $it['num'], $plano['n'], $ordem, $qtd, date('Y-m-d H:i:s')]);
+                 $grupo, $it['num'], $plano['n'], $ordem, $qtd, $dono['dono_id'], $dono['dono_usuario'], $dono['dono_nome'], $dono['visibilidade'], date('Y-m-d H:i:s')]);
             $id = vn_last_id();
             $criadas[] = $id;
             if ($grupo === null) {                       // o grupo é o id da primeira conta
@@ -537,9 +651,11 @@ function cp_rotulo_repeticao(string $freq, ?int $total, ?int $ocorrencia): strin
 */
 function cp_criar_recorrente(array $d, string $freq, ?int $vezes, string $hoje): int
 {
-    vn_exec('INSERT INTO vn_contas_pagar_recorrentes (descricao, fornecedor, categoria, valor, observacao, frequencia, primeira, proximo_n, total_vezes, ativa, criado_em)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?)',
-        [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['observacao'], $freq, $d['vencimento'], $vezes, date('Y-m-d H:i:s')]);
+    $dono = cp_dono_novo($d['visibilidade'] ?? null);
+    vn_exec('INSERT INTO vn_contas_pagar_recorrentes (descricao, fornecedor, categoria, valor, observacao, frequencia, primeira, proximo_n, total_vezes, ativa, dono_id, dono_usuario, dono_nome, visibilidade, criado_em)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?, ?, ?, ?, ?)',
+        [$d['descricao'], $d['fornecedor'], $d['categoria'], $d['valor'], $d['observacao'], $freq, $d['vencimento'], $vezes,
+         $dono['dono_id'], $dono['dono_usuario'], $dono['dono_nome'], $dono['visibilidade'], date('Y-m-d H:i:s')]);
     $recId = vn_last_id();
     cp_gerar_recorrentes($hoje, $recId, true);
     // o código do boleto vale só para a primeira conta (os próximos boletos têm outro código)
@@ -577,9 +693,10 @@ function cp_gerar_recorrentes(string $hoje, ?int $so = null, bool $forcarPrimeir
             try {
                 $ja = vn_fetch_one('SELECT id FROM vn_contas_pagar WHERE recorrente_id = ? AND ocorrencia = ?', [$rid, $n]);
                 if (!$ja) {
-                    vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, observacao, recorrente_id, ocorrencia, criado_em)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                        [$r['descricao'], $r['fornecedor'], $r['categoria'], $r['valor'], $venc, $r['observacao'], $rid, $n, date('Y-m-d H:i:s')]);
+                    vn_exec('INSERT INTO vn_contas_pagar (descricao, fornecedor, categoria, valor, vencimento, observacao, recorrente_id, ocorrencia, dono_id, dono_usuario, dono_nome, visibilidade, criado_em)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        [$r['descricao'], $r['fornecedor'], $r['categoria'], $r['valor'], $venc, $r['observacao'], $rid, $n,
+                         $r['dono_id'], $r['dono_usuario'], $r['dono_nome'], (string)($r['visibilidade'] ?? 'publico'), date('Y-m-d H:i:s')]);
                     $criadas++;
                 }
             } catch (Throwable $e) {
@@ -636,9 +753,10 @@ function cp_ajuste_unico(string $chave, callable $fn)
 /* Repetições ativas, para a lista "Contas fixas": modelo + próxima conta ainda não paga. */
 function cp_recorrentes_ativas(): array
 {
+    [$visSql, $visPar] = cp_sql_visivel('r');
     return vn_fetch_all(
-        'SELECT r.*, (SELECT MIN(c.vencimento) FROM vn_contas_pagar c WHERE c.recorrente_id = r.id AND c.pago = 0) AS proxima
-         FROM vn_contas_pagar_recorrentes r WHERE r.ativa = 1 ORDER BY r.descricao'
+        "SELECT r.*, (SELECT MIN(c.vencimento) FROM vn_contas_pagar c WHERE c.recorrente_id = r.id AND c.pago = 0) AS proxima
+         FROM vn_contas_pagar_recorrentes r WHERE r.ativa = 1 AND $visSql ORDER BY r.descricao", $visPar
     );
 }
 
@@ -658,8 +776,8 @@ function cp_proxima_a_criar(array $r): ?array
 */
 function cp_parar_recorrente(int $recId, string $depoisDe): int
 {
-    $r = vn_fetch_one('SELECT id FROM vn_contas_pagar_recorrentes WHERE id = ?', [$recId]);
-    if (!$r) throw new CpErro('Essa repetição não existe mais.');
+    $r = vn_fetch_one('SELECT id, visibilidade, dono_id FROM vn_contas_pagar_recorrentes WHERE id = ?', [$recId]);
+    if (!$r || !cp_pode_ver($r)) throw new CpErro('Essa repetição não existe mais.');
     vn_exec('UPDATE vn_contas_pagar_recorrentes SET ativa = 0 WHERE id = ?', [$recId]);
     $removidas = 0;
     foreach (vn_fetch_all(
@@ -687,7 +805,8 @@ function cp_rel_limites(string $mes): array
 function cp_rel_pago_no_mes(string $mes): array
 {
     [$ini, $fim] = cp_rel_limites($mes);
-    $r = vn_fetch_one('SELECT COALESCE(SUM(COALESCE(valor_pago, valor)), 0) AS t, COUNT(*) AS q FROM vn_contas_pagar WHERE pago = 1 AND pago_em >= ? AND pago_em <= ?', [$ini, $fim]) ?: [];
+    [$visSql, $visPar] = cp_sql_visivel('c');
+    $r = vn_fetch_one("SELECT COALESCE(SUM(COALESCE(valor_pago, valor)), 0) AS t, COUNT(*) AS q FROM vn_contas_pagar c WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql", array_merge([$ini, $fim], $visPar)) ?: [];
     return ['total' => (float)($r['t'] ?? 0), 'qtd' => (int)($r['q'] ?? 0)];
 }
 
@@ -695,9 +814,10 @@ function cp_rel_pago_no_mes(string $mes): array
 function cp_rel_pago_por_categoria(string $mes): array
 {
     [$ini, $fim] = cp_rel_limites($mes);
+    [$visSql, $visPar] = cp_sql_visivel('c');
     $out = [];
-    foreach (vn_fetch_all("SELECT COALESCE(NULLIF(TRIM(categoria), ''), 'Sem categoria') AS cat, SUM(COALESCE(valor_pago, valor)) AS t, COUNT(*) AS q
-                           FROM vn_contas_pagar WHERE pago = 1 AND pago_em >= ? AND pago_em <= ? GROUP BY cat ORDER BY t DESC", [$ini, $fim]) as $r) {
+    foreach (vn_fetch_all("SELECT COALESCE(NULLIF(TRIM(c.categoria), ''), 'Sem categoria') AS cat, SUM(COALESCE(c.valor_pago, c.valor)) AS t, COUNT(*) AS q
+                           FROM vn_contas_pagar c WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql GROUP BY cat ORDER BY t DESC", array_merge([$ini, $fim], $visPar)) as $r) {
         $out[] = ['categoria' => (string)$r['cat'], 'total' => (float)$r['t'], 'qtd' => (int)$r['q']];
     }
     return $out;
@@ -708,9 +828,10 @@ function cp_rel_pago_por_mes(string $mesIni, string $mesFim): array
 {
     [$ini] = cp_rel_limites($mesIni);
     [, $fim] = cp_rel_limites($mesFim);
+    [$visSql, $visPar] = cp_sql_visivel('c');
     $out = [];
-    foreach (vn_fetch_all("SELECT DATE_FORMAT(pago_em, '%Y-%m') AS m, SUM(COALESCE(valor_pago, valor)) AS t FROM vn_contas_pagar
-                           WHERE pago = 1 AND pago_em >= ? AND pago_em <= ? GROUP BY m", [$ini, $fim]) as $r) {
+    foreach (vn_fetch_all("SELECT DATE_FORMAT(c.pago_em, '%Y-%m') AS m, SUM(COALESCE(c.valor_pago, c.valor)) AS t FROM vn_contas_pagar c
+                           WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql GROUP BY m", array_merge([$ini, $fim], $visPar)) as $r) {
         $out[(string)$r['m']] = (float)$r['t'];
     }
     return $out;
@@ -720,9 +841,10 @@ function cp_rel_pago_por_mes(string $mesIni, string $mesFim): array
 function cp_rel_proximas(int $limite = 8): array
 {
     $limite = max(1, min(50, $limite));
+    [$visSql, $visPar] = cp_sql_visivel('c');
     return vn_fetch_all("SELECT c.id, c.descricao, c.fornecedor, c.categoria, c.valor, c.vencimento, c.pago, c.parcela_num, c.parcela_ordem, c.parcela_qtd,
                                 (SELECT COUNT(*) FROM vn_contas_pagar_fotos f WHERE f.conta_id = c.id) AS fotos
-                         FROM vn_contas_pagar c WHERE c.pago = 0 ORDER BY c.vencimento ASC, c.id ASC LIMIT $limite");
+                         FROM vn_contas_pagar c WHERE c.pago = 0 AND $visSql ORDER BY c.vencimento ASC, c.id ASC LIMIT $limite", $visPar);
 }
 
 /* ------------------------------------------------------------------ fotos */
@@ -791,14 +913,15 @@ function cp_miniatura_criar(string $origem, string $destino, int $max = 360): bo
 }
 
 /*
-   Guarda as fotos enviadas ($files = $_FILES['fotos'], com vários arquivos). Só entram JPG, PNG e WebP
-   de verdade (confere o conteúdo, não só o nome). Devolve ['salvas' => n, 'falhas' => [mensagens]].
+   Guarda os anexos enviados ($files = $_FILES['fotos'], com vários arquivos): fotos (JPG, PNG, WebP) e PDF.
+   Confere o CONTEÚDO, não só o nome: foto precisa ser imagem de verdade; PDF precisa começar com "%PDF-".
+   Devolve ['salvas' => n, 'fotos' => n, 'pdfs' => n, 'falhas' => [mensagens]].
 */
 function cp_salvar_fotos(int $contaId, string $tipo, array $files): array
 {
     require_once __DIR__ . '/_vn_media.php';
     if (!isset(cp_tipos_foto()[$tipo])) $tipo = 'conta';
-    $res = ['salvas' => 0, 'falhas' => []];
+    $res = ['salvas' => 0, 'fotos' => 0, 'pdfs' => 0, 'falhas' => []];
     if (empty($files['name'])) return $res;
 
     // um arquivo só (name = texto) vira lista de um
@@ -807,18 +930,18 @@ function cp_salvar_fotos(int $contaId, string $tipo, array $files): array
     }
 
     $existentes = (int)(vn_fetch_one('SELECT COUNT(*) AS q FROM vn_contas_pagar_fotos WHERE conta_id = ?', [$contaId])['q'] ?? 0);
-    $extPorMime = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    $extPorMime = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'application/pdf' => 'pdf'];
     $dir = cp_fotos_dir($contaId);
 
     foreach ($files['name'] as $i => $nomeArq) {
         $erro = (int)($files['error'][$i] ?? UPLOAD_ERR_NO_FILE);
         if ($erro === UPLOAD_ERR_NO_FILE) continue;
         $nome = preg_replace('/[^a-zA-Z0-9._ -]/', '_', basename((string)$nomeArq));
-        $rotulo = $nome !== '' ? $nome : 'foto';
+        $rotulo = $nome !== '' ? $nome : 'arquivo';
 
         if ($erro === UPLOAD_ERR_INI_SIZE || $erro === UPLOAD_ERR_FORM_SIZE) { $res['falhas'][] = "$rotulo: passou do tamanho que o servidor aceita."; continue; }
         if ($erro !== UPLOAD_ERR_OK) { $res['falhas'][] = "$rotulo: o envio falhou, tente de novo."; continue; }
-        if ($existentes + $res['salvas'] >= CP_FOTOS_MAX_POR_CONTA) { $res['falhas'][] = 'Limite de ' . CP_FOTOS_MAX_POR_CONTA . ' fotos por conta.'; break; }
+        if ($existentes + $res['salvas'] >= CP_FOTOS_MAX_POR_CONTA) { $res['falhas'][] = 'Limite de ' . CP_FOTOS_MAX_POR_CONTA . ' anexos por conta.'; break; }
 
         $tmp = (string)($files['tmp_name'][$i] ?? '');
         if ($tmp === '' || !is_uploaded_file($tmp)) { $res['falhas'][] = "$rotulo: arquivo inválido."; continue; }
@@ -827,7 +950,14 @@ function cp_salvar_fotos(int $contaId, string $tipo, array $files): array
 
         $mime = '';
         if (function_exists('finfo_open') && ($fi = finfo_open(FILEINFO_MIME_TYPE))) { $mime = (string)finfo_file($fi, $tmp); finfo_close($fi); }
-        if (!isset($extPorMime[$mime]) || !@getimagesize($tmp)) { $res['falhas'][] = "$rotulo: só aceita foto (JPG, PNG ou WebP)."; continue; }
+        $ehPdf = $mime === 'application/pdf' || $mime === 'application/x-pdf';
+        if ($ehPdf) {
+            $ini = (string)@file_get_contents($tmp, false, null, 0, 1024);      // o "%PDF-" pode vir depois de poucos bytes de lixo
+            if (strpos($ini, '%PDF-') === false) { $res['falhas'][] = "$rotulo: o PDF está corrompido."; continue; }
+            $mime = 'application/pdf';
+        } elseif (!isset($extPorMime[$mime]) || !@getimagesize($tmp)) {
+            $res['falhas'][] = "$rotulo: só aceita foto (JPG, PNG ou WebP) ou PDF."; continue;
+        }
 
         cp_fotos_preparar_base();
         if (!is_dir($dir) && !@mkdir($dir, 0775, true)) { $res['falhas'][] = "$rotulo: não foi possível criar a pasta da conta."; continue; }
@@ -835,13 +965,24 @@ function cp_salvar_fotos(int $contaId, string $tipo, array $files): array
         $arquivo = date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $extPorMime[$mime];
         $destino = $dir . '/' . $arquivo;
         if (!@move_uploaded_file($tmp, $destino)) { $res['falhas'][] = "$rotulo: não foi possível salvar."; continue; }
-        vn_image_optimize($destino);                         // fotos de celular pesam 3-12 MB
-        cp_miniatura_criar($destino, cp_miniatura_caminho($destino));
-        vn_exec('INSERT INTO vn_contas_pagar_fotos (conta_id, tipo, caminho, nome_original, criado_em) VALUES (?, ?, ?, ?, ?)',
-            [$contaId, $tipo, 'uploads/contas_pagar/' . $contaId . '/' . $arquivo, mb_substr($nome, 0, 190), date('Y-m-d H:i:s')]);
+        if (!$ehPdf) {
+            vn_image_optimize($destino);                         // fotos de celular pesam 3-12 MB
+            cp_miniatura_criar($destino, cp_miniatura_caminho($destino));
+        }
+        vn_exec('INSERT INTO vn_contas_pagar_fotos (conta_id, tipo, caminho, nome_original, formato, tamanho, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$contaId, $tipo, 'uploads/contas_pagar/' . $contaId . '/' . $arquivo, mb_substr($nome, 0, 190), $ehPdf ? 'pdf' : 'img', (int)@filesize($destino), date('Y-m-d H:i:s')]);
         $res['salvas']++;
+        $res[$ehPdf ? 'pdfs' : 'fotos']++;
     }
     return $res;
+}
+
+/* O anexo (linha da tabela), só se a conta dele pode ser vista por quem está usando. Para a tela que entrega o arquivo. */
+function cp_foto_permitida(int $fotoId): ?array
+{
+    $f = $fotoId > 0 ? vn_fetch_one('SELECT * FROM vn_contas_pagar_fotos WHERE id = ?', [$fotoId]) : null;
+    if (!$f || !cp_conta((int)$f['conta_id'])) return null;
+    return $f;
 }
 
 /* Caminho seguro no disco de uma foto (ou da miniatura). null se não existir ou estiver fora da pasta das fotos. */
@@ -858,10 +999,10 @@ function cp_foto_arquivo(array $foto, bool $miniatura = false): ?string
     return $real;
 }
 
-/* Apaga a foto (arquivo, miniatura e registro). Devolve o id da conta a que ela pertencia (0 se não achou). */
+/* Apaga o anexo (arquivo, miniatura e registro). Devolve o id da conta a que ela pertencia (0 se não achou). */
 function cp_excluir_foto(int $fotoId): int
 {
-    $f = vn_fetch_one('SELECT * FROM vn_contas_pagar_fotos WHERE id = ?', [$fotoId]);
+    $f = cp_foto_permitida($fotoId);
     if (!$f) return 0;
     $principal = cp_foto_arquivo($f, false);
     if ($principal) {
