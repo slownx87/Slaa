@@ -281,9 +281,10 @@ if (!function_exists('vn_cobr_catalogo_salvar')) {
         if ($qtd < 0 || $qtd > 9999999.99) throw new Exception('Confira a quantidade em estoque.');
         if ($ehServico) $qtd = 0.0;   // serviço não tem estoque
 
+        $linha = vn_linha_catalogo($post['catalogo_linha'] ?? '', $tipo);   // CFTV, serralheria ou (só serviço) as duas
         if ($id <= 0) {
-            vn_exec('INSERT INTO vn_mobile_orcamento_catalogo (tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, status, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-                [$tipo, $nome, $descricao, $foto !== '' ? $foto : null, $unidade, $valor, $custo, $qtd, 'ativo']);
+            vn_exec('INSERT INTO vn_mobile_orcamento_catalogo (tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, status, linha, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+                [$tipo, $nome, $descricao, $foto !== '' ? $foto : null, $unidade, $valor, $custo, $qtd, 'ativo', $linha]);
             return ['id' => vn_last_id(), 'nome' => $nome, 'novo' => true];
         }
 
@@ -291,6 +292,7 @@ if (!function_exists('vn_cobr_catalogo_salvar')) {
         if (!$atual) throw new Exception('Esse material não está mais no catálogo. Atualize a página.');
         $sets = ['tipo = ?', 'nome = ?', 'descricao = ?', 'unidade = ?', 'valor_unitario = ?', 'custo_unitario = ?', 'atualizado_em = NOW()'];
         $par = [$tipo, $nome, $descricao, $unidade, $valor, $custo];
+        if (isset($post['catalogo_linha'])) { $sets[] = 'linha = ?'; $par[] = $linha; }   // só muda a linha se o formulário mandou
         $orig = trim((string)($post['catalogo_estoque_orig'] ?? ''));
         $mudouEstoque = $ehServico ? (float)$atual['quantidade_estoque'] != 0.0 : ($orig === '' || abs(vn_money_db($orig) - $qtd) > 0.0001);
         if ($mudouEstoque) { $sets[] = 'quantidade_estoque = ?'; $par[] = $qtd; }

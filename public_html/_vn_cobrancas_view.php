@@ -343,6 +343,7 @@ if (!function_exists('cb_catalogo_lista')) {
                     'valor' => number_format((float)($c['valor_unitario'] ?? 0), 2, ',', '.'),
                     'custo' => number_format((float)($c['custo_unitario'] ?? 0), 2, ',', '.'),
                     'estoque' => number_format((float)($c['quantidade_estoque'] ?? 0), 2, ',', '.'),
+                    'linha' => (string)($c['linha'] ?? 'cftv'),
                 ];
                 $json = json_encode($dados, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
                 $h .= '<div class="cb-sel" data-sel data-cat-id="' . (int)$c['id'] . '" data-cat="' . vn_h((string)$json) . '" data-busca="' . vn_h(vn_lower(($c['nome'] ?? '') . ' ' . ($c['descricao'] ?? ''))) . '">'
@@ -376,6 +377,7 @@ if (!function_exists('cb_janela_catalogo')) {
             . '<div class="cb-sheet-body"><div class="cb-form">'
             . '<div class="cb-f full"><label for="cb-cat-nome">Nome *</label><input id="cb-cat-nome" name="catalogo_nome" required maxlength="190" autocomplete="off" placeholder="Ex.: Cabo UTP cat6, Câmera bullet, Visita técnica"></div>'
             . '<div class="cb-f"><label for="cb-cat-tipo">Tipo</label><select id="cb-cat-tipo" name="catalogo_tipo">' . $tipos . '</select></div>'
+            . '<div class="cb-f"><label for="cb-cat-linha">Linha</label><select id="cb-cat-linha" name="catalogo_linha"><option value="cftv">CFTV</option><option value="serralheria">Serralheria</option><option value="geral">CFTV e serralheria (só serviço)</option></select></div>'
             . '<div class="cb-f"><label for="cb-cat-valor">Valor de venda (R$) *</label><input id="cb-cat-valor" name="catalogo_valor" inputmode="decimal" required placeholder="0,00" autocomplete="off"></div>'
             . '<div class="cb-f"><label for="cb-cat-custo">Custo (R$)</label><input id="cb-cat-custo" name="catalogo_custo" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>'
             . '<div class="cb-f" data-cat-fisico><label for="cb-cat-un">Unidade</label><input id="cb-cat-un" name="catalogo_unidade" maxlength="30" value="un" autocomplete="off"></div>'

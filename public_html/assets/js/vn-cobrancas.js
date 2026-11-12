@@ -371,6 +371,8 @@
     f.elements.catalogo_nome.value = novo ? ((busca && busca.value.trim()) || '') : dados.nome;   // novo: aproveita o que foi buscado
     var tipos = $$('option', f.elements.catalogo_tipo).map(function (o) { return o.value; });
     f.elements.catalogo_tipo.value = (!novo && tipos.indexOf(dados.tipo) !== -1) ? dados.tipo : 'material';
+    var servico = !novo && (dados.tipo === 'servico' || dados.tipo === 'mao_obra');
+    f.elements.catalogo_linha.value = novo ? 'cftv' : (dados.linha || (servico ? 'geral' : 'cftv'));
     f.elements.catalogo_valor.value = novo ? '' : dados.valor;
     f.elements.catalogo_custo.value = novo ? '' : dados.custo;
     f.elements.catalogo_unidade.value = novo ? 'un' : (dados.unidade || 'un');

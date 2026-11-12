@@ -504,6 +504,23 @@ function vn_insert_dynamic(string $table, array $map): int {
     return vn_last_id();
 }
 
+/* Tipos (linhas de trabalho) de orçamentos, peças e OS. */
+function vn_categorias_orc(): array { return ['cftv' => 'CFTV', 'serralheria' => 'Serralheria']; }
+function vn_categoria_valida($c, string $padrao = 'cftv'): string {
+    $c = strtolower(trim((string)$c));
+    return isset(vn_categorias_orc()[$c]) ? $c : $padrao;
+}
+function vn_categoria_rotulo($c): string { return vn_categorias_orc()[vn_categoria_valida($c)]; }
+/* Linha de um item do catálogo: cftv | serralheria | geral. Serviço sem escolha vale para os dois ('geral'); peça sem escolha é de CFTV. */
+function vn_linha_catalogo($linha, string $tipo): string {
+    $l = strtolower(trim((string)$linha));
+    if (in_array($l, ['cftv', 'serralheria', 'geral'], true)) {
+        if ($l === 'geral' && !in_array($tipo, ['servico', 'mao_obra'], true)) return 'cftv';   // peça física tem de ser de uma linha só
+        return $l;
+    }
+    return in_array($tipo, ['servico', 'mao_obra'], true) ? 'geral' : 'cftv';
+}
+
 function vn_ensure_mobile_tables(): void {
     static $feito = false;   // as tabelas só precisam ser conferidas uma vez por requisição
     if ($feito) return;
@@ -565,6 +582,7 @@ function vn_ensure_mobile_tables(): void {
         ,'mostrar_relatorio' => "TINYINT(1) NOT NULL DEFAULT 1"
         ,'mostrar_fotos' => "TINYINT(1) NOT NULL DEFAULT 1"
         ,'mostrar_clausulas' => "TINYINT(1) NOT NULL DEFAULT 1"
+        ,'categoria' => "VARCHAR(20) NOT NULL DEFAULT 'cftv'"      // tipo do orçamento: cftv | serralheria
     ] as $col => $def) {
         vn_add_col_if_missing('vn_mobile_orcamentos', $col, $def);
     }
@@ -583,6 +601,7 @@ function vn_ensure_mobile_tables(): void {
     vn_add_col_if_missing('vn_mobile_orcamento_itens', 'tipo', "VARCHAR(40) NOT NULL DEFAULT 'material'");
     vn_add_col_if_missing('vn_mobile_orcamento_itens', 'origem_peca', "VARCHAR(20) NOT NULL DEFAULT 'estoque'");
     vn_add_col_if_missing('vn_mobile_orcamento_itens', 'comprado', "TINYINT(1) NOT NULL DEFAULT 0");
+    vn_add_col_if_missing('vn_mobile_orcamento_itens', 'linha', "VARCHAR(20) NOT NULL DEFAULT 'cftv'");   // peça de CFTV ou de serralheria
 
     vn_exec("CREATE TABLE IF NOT EXISTS vn_mobile_orcamento_fotos (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -651,6 +670,10 @@ function vn_ensure_mobile_tables(): void {
     vn_add_col_if_missing('vn_mobile_orcamento_catalogo', 'foto_url', "VARCHAR(255) NULL");
     vn_add_col_if_missing('vn_mobile_orcamento_catalogo', 'quantidade_estoque', "DECIMAL(12,2) NOT NULL DEFAULT 0");
     vn_add_col_if_missing('vn_mobile_orcamento_catalogo', 'estoque_minimo', "DECIMAL(12,2) NULL DEFAULT NULL");
+    // Linha do item: 'cftv', 'serralheria' ou 'geral' (serviço que vale para os dois). Os itens que já existiam eram todos de CFTV.
+    $linhaNova = !vn_column_exists('vn_mobile_orcamento_catalogo', 'linha');
+    vn_add_col_if_missing('vn_mobile_orcamento_catalogo', 'linha', "VARCHAR(20) NOT NULL DEFAULT 'geral'");
+    if ($linhaNova) vn_exec("UPDATE vn_mobile_orcamento_catalogo SET linha = 'cftv' WHERE tipo NOT IN ('servico', 'mao_obra')");
 
     vn_exec("CREATE TABLE IF NOT EXISTS vn_mobile_os (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -674,6 +697,7 @@ function vn_ensure_mobile_tables(): void {
         INDEX idx_vn_mobile_os_status (status),
         INDEX idx_vn_mobile_os_tec (tecnico_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    vn_add_col_if_missing('vn_mobile_os', 'linha_servico', "VARCHAR(20) NOT NULL DEFAULT 'cftv'");   // OS de CFTV (padrão) ou de serralheria
     $feito = true;
 }
 
@@ -2300,7 +2324,8 @@ function vn_salvar_catalogo_orcamento_mobile_v6(array $post): int {
     if ($nome === '') throw new Exception('Informe o nome do item para cadastrar.');
     if ($descricao === '') $descricao = $nome;
     $fotoUrl = trim((string)($post['catalogo_foto_url'] ?? ''));
-    vn_exec('INSERT INTO vn_mobile_orcamento_catalogo (tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, status, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())', [$tipo, $nome, $descricao, $fotoUrl ?: null, $unidade ?: 'un', $valor, $custo, $quantidadeEstoque, $estoqueMinimo, 'ativo']);
+    $linha = vn_linha_catalogo($post['catalogo_linha'] ?? '', $tipo);
+    vn_exec('INSERT INTO vn_mobile_orcamento_catalogo (tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, status, linha, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())', [$tipo, $nome, $descricao, $fotoUrl ?: null, $unidade ?: 'un', $valor, $custo, $quantidadeEstoque, $estoqueMinimo, 'ativo', $linha]);
     return vn_last_id();
 }
 
@@ -2324,6 +2349,10 @@ function vn_atualizar_catalogo_orcamento_mobile_v6(array $post): int {
         vn_exec('UPDATE vn_mobile_orcamento_catalogo SET tipo=?, nome=?, descricao=?, foto_url=?, unidade=?, valor_unitario=?, custo_unitario=?, quantidade_estoque=?, estoque_minimo=?, atualizado_em=NOW() WHERE id=? LIMIT 1', [$tipo, $nome, $descricao, $fotoUrl, $unidade ?: 'un', $valor, $custo, $quantidadeEstoque, $estoqueMinimo, $id]);
     } else {
         vn_exec('UPDATE vn_mobile_orcamento_catalogo SET tipo=?, nome=?, descricao=?, unidade=?, valor_unitario=?, custo_unitario=?, quantidade_estoque=?, estoque_minimo=?, atualizado_em=NOW() WHERE id=? LIMIT 1', [$tipo, $nome, $descricao, $unidade ?: 'un', $valor, $custo, $quantidadeEstoque, $estoqueMinimo, $id]);
+    }
+    // Só mexe na linha (CFTV / serralheria) quando o formulário mandou o campo.
+    if (isset($post['catalogo_linha'])) {
+        vn_exec('UPDATE vn_mobile_orcamento_catalogo SET linha = ? WHERE id = ? LIMIT 1', [vn_linha_catalogo($post['catalogo_linha'], $tipo), $id]);
     }
     return $id;
 }
@@ -2390,11 +2419,12 @@ function vn_catalogo_orcamento_mobile_v6(bool $somenteAtivos = true): array {
             'custo_unitario' => $custo,
             'quantidade_estoque' => (float)($r['quantidade_estoque'] ?? $r['quantidade'] ?? $r['qtd'] ?? $r['estoque'] ?? 0),
             'estoque_minimo' => (isset($r['estoque_minimo']) && $r['estoque_minimo'] !== '') ? (float)$r['estoque_minimo'] : null,
+            'linha' => vn_linha_catalogo($r['linha'] ?? '', $tipo),
         ];
     };
 
     $where = $somenteAtivos ? "WHERE status IS NULL OR status = '' OR LOWER(status) IN ('ativo','1','sim','s')" : '';
-    foreach (vn_fetch_all("SELECT id, tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo FROM vn_mobile_orcamento_catalogo $where ORDER BY tipo ASC, nome ASC LIMIT 1000") as $r) {
+    foreach (vn_fetch_all("SELECT id, tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, linha FROM vn_mobile_orcamento_catalogo $where ORDER BY tipo ASC, nome ASC LIMIT 1000") as $r) {
         $add($r, 'mobile');
     }
 
@@ -2462,6 +2492,7 @@ function vn_salvar_orcamento_mobile_v4(array $post): int {
     $precos = $post['item_preco'] ?? [];
     $custos = $post['item_custo'] ?? [];
     $origens = $post['item_origem'] ?? [];
+    $linhasItem = $post['item_linha'] ?? [];
     $itens = [];
     $subtotalItens = 0;
     $custoTotal = 0;
@@ -2481,7 +2512,8 @@ function vn_salvar_orcamento_mobile_v4(array $post): int {
         $ct = round($q * $c, 2);
         $subtotalItens += $t;
         $custoTotal += $ct;
-        $itens[] = ['tipo'=>$tipo, 'descricao'=>$d, 'quantidade'=>$q, 'valor_unitario'=>$p, 'custo_unitario'=>$c, 'total'=>$t, 'custo_total'=>$ct, 'origem_peca'=>$origem];
+        $itens[] = ['tipo'=>$tipo, 'descricao'=>$d, 'quantidade'=>$q, 'valor_unitario'=>$p, 'custo_unitario'=>$c, 'total'=>$t, 'custo_total'=>$ct, 'origem_peca'=>$origem,
+                    'linha'=>vn_categoria_valida($linhasItem[$i] ?? 'cftv')];
     }
     $total = max(0, round($subtotalItens + $visitaValor + $maoValor - $desconto, 2));
     $lucro = round($total - $custoTotal, 2);
@@ -2509,7 +2541,11 @@ function vn_salvar_orcamento_mobile_v4(array $post): int {
     }
     foreach ($itens as $it) {
         $comprado = ($it['origem_peca'] === 'comprar' && isset($compradoMap[vn_lower($it['descricao'])])) ? 1 : 0;
-        vn_exec('INSERT INTO vn_mobile_orcamento_itens (orcamento_id, tipo, descricao, quantidade, valor_unitario, custo_unitario, total, custo_total, origem_peca, comprado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$orcId, $it['tipo'], $it['descricao'], $it['quantidade'], $it['valor_unitario'], $it['custo_unitario'], $it['total'], $it['custo_total'], $it['origem_peca'], $comprado]);
+        vn_exec('INSERT INTO vn_mobile_orcamento_itens (orcamento_id, tipo, descricao, quantidade, valor_unitario, custo_unitario, total, custo_total, origem_peca, comprado, linha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$orcId, $it['tipo'], $it['descricao'], $it['quantidade'], $it['valor_unitario'], $it['custo_unitario'], $it['total'], $it['custo_total'], $it['origem_peca'], $comprado, $it['linha']]);
+    }
+    // Tipo do orçamento (CFTV ou Serralheria). Formulário antigo, sem o campo, não mexe no que já estava salvo.
+    if (isset($post['categoria'])) {
+        vn_exec('UPDATE vn_mobile_orcamentos SET categoria = ? WHERE id = ? LIMIT 1', [vn_categoria_valida($post['categoria']), $orcId]);
     }
     vn_orcamento_salvar_extras((int)$orcId, $post);
     return $orcId;

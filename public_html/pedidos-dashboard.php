@@ -4,6 +4,7 @@
     Cartões com situação, cliente, referência, número, data e valor; busca em todos os pedidos; aba "Pedidos por status".
     Tocar num cartão abre a tela do pedido (pedido.php), onde ficam as ações (editar, duplicar, excluir, documento, WhatsApp...).
     Os pedidos do sistema antigo (tabela "orcamentos") continuam só para consulta, em "Pedidos do sistema antigo".
+    Tipo do orçamento: abas Todos | CFTV | Serralheria no topo (?cat=cftv|serralheria); cada cartão mostra o tipo.
 */
 require_once __DIR__ . '/_vn_orcamento_layout.php';
 $ok = null; $erro = '';
@@ -14,17 +15,19 @@ $st   = trim((string)($_GET['st'] ?? ''));
 $mes  = (string)($_GET['mes'] ?? '');
 if (!preg_match('/^\d{4}-\d{2}$/', $mes)) $mes = '';
 $aba  = (string)($_GET['aba'] ?? '') === 'status' ? 'status' : 'todos';
+$cat  = vn_categoria_valida($_GET['cat'] ?? '', '');   // '' = todos os tipos
 $antigo = isset($_GET['antigo']);
 $pag  = max(1, (int)($_GET['pagina'] ?? 1));
 $porPag = 20;
 
 function pl_url(array $extra = []): string {
-    $m = array_merge(['aba' => $_GET['aba'] ?? '', 'q' => $_GET['q'] ?? '', 'st' => $_GET['st'] ?? '', 'mes' => $_GET['mes'] ?? '', 'pagina' => $_GET['pagina'] ?? ''], $extra);
+    $m = array_merge(['cat' => $_GET['cat'] ?? '', 'aba' => $_GET['aba'] ?? '', 'q' => $_GET['q'] ?? '', 'st' => $_GET['st'] ?? '', 'mes' => $_GET['mes'] ?? '', 'pagina' => $_GET['pagina'] ?? ''], $extra);
+    if (!isset(vn_categorias_orc()[(string)$m['cat']])) $m['cat'] = '';
     foreach ($m as $k => $v) { if ($v === '' || $v === null || ($k === 'pagina' && (int)$v <= 1) || ($k === 'aba' && $v === 'todos')) unset($m[$k]); }
     return 'pedidos-dashboard.php' . ($m ? '?' . http_build_query($m) : '');
 }
 
-$lista = []; $total = 0; $contStatus = []; $meses = []; $legado = false;
+$lista = []; $total = 0; $contStatus = []; $meses = []; $legado = false; $contCat = ['cftv' => 0, 'serralheria' => 0];
 try {
     vn_ensure_mobile_tables();
     $legado = vn_table_exists('orcamentos');
@@ -41,7 +44,10 @@ try {
         // Conta por situação ignorando maiúsculas/acentos ("pendente" e "Pendente" são a mesma); as fora da lista padrão ficam como vieram.
         $porChave = [];
         foreach (array_keys(vn_pedido_status_lista()) as $lbl) $porChave[vn_norm_key($lbl)] = $lbl;
-        foreach (vn_fetch_all('SELECT status, COUNT(*) AS q FROM vn_mobile_orcamentos GROUP BY status') as $r) {
+        foreach (vn_fetch_all('SELECT categoria, COUNT(*) AS q FROM vn_mobile_orcamentos GROUP BY categoria') as $r) {
+            $contCat[vn_categoria_valida($r['categoria'] ?? 'cftv')] += (int)$r['q'];
+        }
+        foreach (vn_fetch_all('SELECT status, COUNT(*) AS q FROM vn_mobile_orcamentos' . ($cat !== '' ? ' WHERE categoria = ?' : '') . ' GROUP BY status', $cat !== '' ? [$cat] : []) as $r) {
             $bruto = trim((string)($r['status'] ?? ''));
             $rotulo = $porChave[vn_norm_key($bruto)] ?? ($bruto !== '' ? $bruto : 'Pendente');
             $contStatus[$rotulo] = ($contStatus[$rotulo] ?? 0) + (int)$r['q'];
@@ -51,6 +57,7 @@ try {
         }
         if ($aba === 'todos') {
             $where = []; $par = [];
+            if ($cat !== '') { $where[] = 'categoria = ?'; $par[] = $cat; }
             if ($st !== '') { $where[] = 'status = ?'; $par[] = $st; }
             if ($mes !== '') { $where[] = 'criado_em >= ? AND criado_em < ?'; $par[] = $mes . '-01 00:00:00'; $par[] = date('Y-m-01 00:00:00', strtotime($mes . '-01 +1 month')); }
             if ($q !== '') {
@@ -65,7 +72,7 @@ try {
             $total = (int)(vn_fetch_one('SELECT COUNT(*) AS q FROM vn_mobile_orcamentos' . $w, $par)['q'] ?? 0);
             $paginas = max(1, (int)ceil($total / $porPag));
             $pag = min($pag, $paginas);
-            $lista = vn_fetch_all('SELECT id, numero, cliente_nome, status, valor_total, equipamento, endereco, criado_em FROM vn_mobile_orcamentos' . $w
+            $lista = vn_fetch_all('SELECT id, numero, cliente_nome, status, valor_total, equipamento, endereco, criado_em, categoria FROM vn_mobile_orcamentos' . $w
                 . ' ORDER BY criado_em DESC, id DESC LIMIT ' . $porPag . ' OFFSET ' . (($pag - 1) * $porPag), $par);
         }
     }
@@ -80,13 +87,14 @@ $extras = array_values(array_diff(array_keys($contStatus), $padrao, ['']));
 $situacoes = array_merge($padrao, $extras);
 
 $filtrando = ($st !== '' || $mes !== '');
+$urlNovo = 'orcamento-novo.php' . ($cat !== '' ? '?cat=' . $cat : '');
 vn_ui_shell_start('Pedidos', 'pedidos', ['css' => ['assets/css/vn-pedidos.css']]);
 vn_alerts($ok, $erro);
 ?>
 <div class="pl">
     <div class="pl-head-desk">
         <h2><?php echo $antigo ? 'Pedidos do sistema antigo' : 'Pedidos'; ?></h2>
-        <a class="vn-btn vn-btn-primary" href="orcamento-novo.php"><span class="material-symbols-outlined" aria-hidden="true">add</span>Novo pedido</a>
+        <a class="vn-btn vn-btn-primary" href="<?php echo vn_h($urlNovo); ?>"><span class="material-symbols-outlined" aria-hidden="true">add</span><?php echo $cat === 'serralheria' ? 'Novo orçamento de serralheria' : 'Novo pedido'; ?></a>
     </div>
 
 <?php if ($antigo): ?>
@@ -112,6 +120,11 @@ vn_alerts($ok, $erro);
     <?php endif; ?>
 
 <?php else: ?>
+    <nav class="pl-cats" aria-label="Tipo do orçamento">
+        <?php foreach (['' => ['Todos', $contCat['cftv'] + $contCat['serralheria'], 'receipt_long'], 'cftv' => ['CFTV', $contCat['cftv'], 'videocam'], 'serralheria' => ['Serralheria', $contCat['serralheria'], 'build']] as $kc => $dc): ?>
+            <a href="<?php echo vn_h(pl_url(['cat' => $kc, 'pagina' => ''])); ?>" class="<?php echo $cat === $kc ? 'on' : ''; ?>"<?php echo $cat === $kc ? ' aria-current="page"' : ''; ?>><span class="material-symbols-outlined" aria-hidden="true"><?php echo $dc[2]; ?></span><?php echo vn_h($dc[0]); ?><span class="n"><?php echo (int)$dc[1]; ?></span></a>
+        <?php endforeach; ?>
+    </nav>
     <nav class="pl-tabs" aria-label="Visão dos pedidos">
         <a href="<?php echo vn_h(pl_url(['aba' => 'todos', 'st' => '', 'pagina' => ''])); ?>" class="<?php echo $aba === 'todos' ? 'on' : ''; ?>"<?php echo $aba === 'todos' ? ' aria-current="page"' : ''; ?>>Todos os pedidos</a>
         <a href="<?php echo vn_h(pl_url(['aba' => 'status', 'q' => '', 'st' => '', 'mes' => '', 'pagina' => ''])); ?>" class="<?php echo $aba === 'status' ? 'on' : ''; ?>"<?php echo $aba === 'status' ? ' aria-current="page"' : ''; ?>>Pedidos por status</a>
@@ -120,7 +133,7 @@ vn_alerts($ok, $erro);
     <?php if ($aba === 'status'): ?>
         <div class="pl-sts">
             <?php foreach ($situacoes as $s): ?>
-                <a href="<?php echo vn_h('pedidos-dashboard.php?st=' . rawurlencode($s)); ?>">
+                <a href="<?php echo vn_h('pedidos-dashboard.php?st=' . rawurlencode($s) . ($cat !== '' ? '&cat=' . $cat : '')); ?>">
                     <i class="dot tom-<?php echo vn_pedido_status_tom($s); ?>"></i><span><?php echo vn_h($s); ?></span>
                     <span class="n"><?php echo (int)($contStatus[$s] ?? 0); ?></span><span class="material-symbols-outlined go" aria-hidden="true">chevron_right</span>
                 </a>
@@ -128,6 +141,7 @@ vn_alerts($ok, $erro);
         </div>
     <?php else: ?>
         <form method="get" class="pl-bar" role="search">
+            <?php if ($cat !== ''): ?><input type="hidden" name="cat" value="<?php echo vn_h($cat); ?>"><?php endif; ?>
             <?php if ($st !== ''): ?><input type="hidden" name="st" value="<?php echo vn_h($st); ?>"><?php endif; ?>
             <?php if ($mes !== ''): ?><input type="hidden" name="mes" value="<?php echo vn_h($mes); ?>"><?php endif; ?>
             <label class="pl-busca"><span class="material-symbols-outlined" aria-hidden="true">search</span><input type="search" name="q" value="<?php echo vn_h($q); ?>" placeholder="Buscar" aria-label="Buscar pedido por cliente, número, telefone ou equipamento" autocomplete="off"></label>
@@ -150,7 +164,7 @@ vn_alerts($ok, $erro);
                 $ref = trim((string)($r['equipamento'] ?? '')) !== '' ? (string)$r['equipamento'] : mb_substr(trim((string)($r['endereco'] ?? '')), 0, 60);
             ?>
             <a class="pl-card" href="pedido.php?id=<?php echo (int)$r['id']; ?>">
-                <span class="pl-st"><i class="dot tom-<?php echo $tom; ?>"></i><?php echo vn_h(vn_pedido_status_label((string)($r['status'] ?? ''))); ?></span>
+                <span class="pl-st"><i class="dot tom-<?php echo $tom; ?>"></i><?php echo vn_h(vn_pedido_status_label((string)($r['status'] ?? ''))); ?><?php $cr = vn_categoria_valida($r['categoria'] ?? 'cftv'); ?><span class="pl-cat <?php echo $cr; ?>"><?php echo vn_h(vn_categoria_rotulo($cr)); ?></span></span>
                 <strong class="pl-cli"><?php echo vn_h($r['cliente_nome'] ?: 'Sem cliente'); ?></strong>
                 <?php if ($ref !== ''): ?><span class="pl-ref"><?php echo vn_h($ref); ?></span><?php endif; ?>
                 <span class="pl-num">Pedido n. <?php echo vn_h(vn_pedido_numero($r)); ?></span>
@@ -173,11 +187,12 @@ vn_alerts($ok, $erro);
         <p style="text-align:center;margin:26px 0 0"><a href="pedidos-dashboard.php?antigo=1" style="color:var(--text-soft);font-weight:700">Pedidos do sistema antigo (só consulta)</a></p>
     <?php endif; ?>
 
-    <a class="pl-novo" href="orcamento-novo.php"><span class="material-symbols-outlined" aria-hidden="true">add</span>novo pedido</a>
+    <a class="pl-novo" href="<?php echo vn_h($urlNovo); ?>"><span class="material-symbols-outlined" aria-hidden="true">add</span><?php echo $cat === 'serralheria' ? 'novo de serralheria' : 'novo pedido'; ?></a>
 
     <!-- Filtro: situação e mês -->
     <dialog class="pl-sheet" id="plFiltro" aria-labelledby="plFiltroT"><div class="pl-sheet-in">
         <form method="get">
+            <?php if ($cat !== ''): ?><input type="hidden" name="cat" value="<?php echo vn_h($cat); ?>"><?php endif; ?>
             <?php if ($q !== ''): ?><input type="hidden" name="q" value="<?php echo vn_h($q); ?>"><?php endif; ?>
             <div class="pl-sheet-h"><button type="button" class="pl-x" data-fechar aria-label="Fechar"><span class="material-symbols-outlined" aria-hidden="true">close</span></button><h3 id="plFiltroT">Filtrar pedidos</h3><span></span></div>
             <div class="pl-sheet-b">
