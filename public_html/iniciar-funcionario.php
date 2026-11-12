@@ -2426,7 +2426,7 @@ $logoSrc = 'vn.png';
 <!DOCTYPE html>
 <html lang="pt-BR" data-theme="<?= h($temaHtml) ?>">
 <head>
-    <?php echo vn_ui_head_tags(['title' => 'Ordens de Serviço', 'noindex' => true, 'icons' => false, 'theme_default' => $temaHtml, 'css' => ['assets/css/os-app-funcionario.css'], 'js' => ['assets/js/vn-download.js']]); ?>
+    <?php echo vn_ui_head_tags(['title' => 'Ordens de Serviço', 'noindex' => true, 'icons' => false, 'theme_default' => $temaHtml, 'css' => ['assets/css/os-app-funcionario.css'], 'js' => ['assets/js/vn-camera.js', 'assets/js/vn-download.js']]); ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 
@@ -4701,6 +4701,9 @@ function prepararUploadMultiplo() {
     if (!input || !prev || !botao) return;
 
     const MAX_BYTES = 120 * 1024 * 1024;
+
+    /* Câmera própria: tira várias fotos seguidas (o campo de arquivo do celular só devolve 1 por vez). */
+    if (window.VNCamera) VNCamera.attach(input, { bloco: true });
 
     function tamanhoBonito(b) {
         if (b >= 1024 * 1024) return (b / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';

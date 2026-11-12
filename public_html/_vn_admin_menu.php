@@ -20,6 +20,7 @@ if (!function_exists('vn_admin_menu_grupos')) {
                 ['pedidos',        'pedidos-dashboard.php',     'fa-calculator',           'receipt_long',               'Orçamentos & Pedidos'],
                 // Vendas de material, mensalidades e PIX avulso ficam dentro de Cobranças.
                 ['cobrancas',      'cobrancas.php',             'fa-money-bill-wave',      'payments',                   'Cobranças'],
+                ['contas-pagar',   'contas-pagar.php',          'fa-file-invoice-dollar',  'request_quote',              'A Pagar'],
                 ['relatorios',     'orcamentos-dashboard.php',  'fa-chart-column',         'bar_chart',                  'Relatórios Financeiros'],
                 ['leads',          'leads.php',                 'fa-bullhorn',             'campaign',                   'Contatos do site'],
             ],

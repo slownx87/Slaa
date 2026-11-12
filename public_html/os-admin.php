@@ -1526,7 +1526,7 @@ $vnHeadExtra = ob_get_clean();
 // ?linha=serralheria (menu "Gerar OS de Serralheria") já abre com Serralheria marcada
 $linhaTela = (($_POST['linha_servico'] ?? ($_GET['linha'] ?? '')) === 'serralheria') ? 'serralheria' : 'cftv';
 $menuChave = (($_GET['linha'] ?? '') === 'serralheria') ? 'gerar-os-serralheria' : 'gerar-os';
-vn_ui_shell_start($linhaTela === 'serralheria' ? 'Gerar OS de Serralheria' : 'Gerar OS', $menuChave, ['head_extra' => $vnHeadExtra, 'legacy' => 'admin']);
+vn_ui_shell_start($linhaTela === 'serralheria' ? 'Gerar OS de Serralheria' : 'Gerar OS', $menuChave, ['head_extra' => $vnHeadExtra, 'legacy' => 'admin', 'js' => ['assets/js/vn-camera.js']]);
 ?>
 <div class="content">
             <div class="page-title">
@@ -1667,7 +1667,7 @@ vn_ui_shell_start($linhaTela === 'serralheria' ? 'Gerar OS de Serralheria' : 'Ge
 
                     <div class="full-width">
                         <label><i class="fas fa-images"></i> Fotos de ajuda para o técnico</label>
-                        <input type="file" name="fotos_ajuda[]" accept="image/*,video/*" multiple>
+                        <input type="file" name="fotos_ajuda[]" accept="image/*,video/*" multiple data-vn-camera>
                         <div class="resume-box">Opcional. Fotos ou vídeos de orientação (local do equipamento, modelo da peça, caminho até o quadro...). O técnico vê essas imagens ao abrir a OS no celular.</div>
                     </div>
 

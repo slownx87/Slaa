@@ -3023,7 +3023,7 @@ $logoSrc = 'vn.png';
 <!DOCTYPE html>
 <html lang="pt-BR" data-theme="<?= h($temaHtml) ?>">
 <head>
-    <?php echo vn_ui_head_tags(['title' => 'Ordens de Serviço', 'noindex' => true, 'icons' => false, 'theme_default' => $temaHtml, 'css' => ['assets/css/os-app-admin.css'], 'js' => ['assets/js/vn-download.js']]); ?>
+    <?php echo vn_ui_head_tags(['title' => 'Ordens de Serviço', 'noindex' => true, 'icons' => false, 'theme_default' => $temaHtml, 'css' => ['assets/css/os-app-admin.css'], 'js' => ['assets/js/vn-camera.js', 'assets/js/vn-download.js']]); ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 
@@ -3741,7 +3741,13 @@ document.addEventListener('click', function (e) {
     const painel = document.getElementById('calendarFilterPanel');
     if (!painel || painel.style.display === 'none') return;
 
-    const clicouNoPainel = painel.contains(e.target);
+    /*
+       Ao tocar num dia, o calendario se redesenha e o botao do dia sai da tela (innerHTML = '').
+       Ai painel.contains(e.target) dava falso e o painel fechava sozinho a cada toque, impedindo
+       escolher um periodo (2 toques). composedPath() guarda o caminho de ANTES do redesenho.
+    */
+    const caminhoDoClique = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    const clicouNoPainel = painel.contains(e.target) || caminhoDoClique.indexOf(painel) !== -1;
     const clicouNoBotaoData = e.target.closest('.app-date-pill') || e.target.closest('[onclick*="abrirCalendarioFiltro"]');
 
     if (!clicouNoPainel && !clicouNoBotaoData) {
@@ -5589,6 +5595,9 @@ function prepararUploadMultiplo() {
     if (!input || !prev || !botao) return;
 
     const MAX_BYTES = 120 * 1024 * 1024;
+
+    /* Câmera própria: tira várias fotos seguidas (o campo de arquivo do celular só devolve 1 por vez). */
+    if (window.VNCamera) VNCamera.attach(input, { bloco: true });
 
     function tamanhoBonito(b) {
         if (b >= 1024 * 1024) return (b / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';
