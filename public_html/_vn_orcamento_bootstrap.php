@@ -1262,6 +1262,10 @@ function vn_registrar_saida_estoque_v1(array $post): string {
     $motivo = vn_clean((string)($post['saida_motivo'] ?? ''));
     $responsavel = vn_clean((string)($post['saida_responsavel'] ?? ''));
 
+    // Data da saída (padrão: agora). Em outro dia, mantém a hora de agora só para a ordem do dia.
+    $dataSaida = vn_date_db_or_null($post['saida_data'] ?? '');
+    $quando = ($dataSaida !== null && $dataSaida !== date('Y-m-d')) ? $dataSaida . ' ' . date('H:i:s') : '';
+
     // Cliente vinculado (opcional): grava id + nome, e usa o nome como motivo se o motivo ficou vazio.
     $clienteId = (int)($post['saida_cliente_id'] ?? 0);
     $clienteNome = '';
@@ -1299,7 +1303,7 @@ function vn_registrar_saida_estoque_v1(array $post): string {
     // Aplica baixa + registra cada movimento
     vn_estoque_saidas_tabela_v1();
     $resumo = [];
-    vn_tx(function () use ($linhas, $rows, $origem, $motivo, $responsavel, $clienteId, $clienteNome, &$resumo) {
+    vn_tx(function () use ($linhas, $rows, $origem, $motivo, $responsavel, $clienteId, $clienteNome, $quando, &$resumo) {
     foreach ($linhas as $id => $qtd) {
         $row = $rows[$id];
         $nome = (string)($row['nome'] ?? 'Item');
@@ -1307,13 +1311,13 @@ function vn_registrar_saida_estoque_v1(array $post): string {
         if (!vn_estoque_ajustar((int)$id, -$qtd)) {
             throw new Exception('O estoque de "' . $nome . '" mudou enquanto a saída era registrada e já não é suficiente. Atualize a página e tente de novo.');
         }
-        vn_exec('INSERT INTO vn_mobile_estoque_saidas (catalogo_id, origem, item_nome, item_tipo, quantidade, motivo, responsavel, cliente_id, cliente_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-            [$id, $origem, $nome, $tipo, $qtd, $motivo ?: null, $responsavel ?: null, $clienteId ?: null, $clienteNome ?: null]);
+        vn_exec('INSERT INTO vn_mobile_estoque_saidas (catalogo_id, origem, item_nome, item_tipo, quantidade, motivo, responsavel, cliente_id, cliente_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($quando !== '' ? '?' : 'NOW()') . ')',
+            array_merge([$id, $origem, $nome, $tipo, $qtd, $motivo ?: null, $responsavel ?: null, $clienteId ?: null, $clienteNome ?: null], $quando !== '' ? [$quando] : []));
         $resumo[] = $nome . ' (' . number_format($qtd, 2, ',', '.') . ')';
     }
     });
 
-    return 'Saída registrada para ' . count($resumo) . ' item(ns): ' . implode(', ', $resumo) . '. Movimentos disponíveis em Relatórios.';
+    return 'Saída registrada' . ($quando !== '' ? ' em ' . date('d/m/Y', strtotime($quando)) : '') . ' para ' . count($resumo) . ' item(ns): ' . implode(', ', $resumo) . '. Movimentos disponíveis em Relatórios.';
 }
 
 function vn_estoque_saidas_recentes_v1(int $limite = 20, ?string $categoria = null): array {
@@ -1845,7 +1849,21 @@ function vn_editar_saida_estoque_v1(array $post): string {
             [$clienteId ?: null, $clienteNome ?: null, $id]);
     }
 
-    return 'Saída atualizada. Estoque ajustado conforme a nova quantidade.';
+    // Data da saída (só mexe se o formulário enviou o campo): a peça da venda em Cobranças acompanha.
+    $msgData = '';
+    if (isset($post['saida_data']) && trim((string)$post['saida_data']) !== '') {
+        $dataNova = vn_date_db_or_null($post['saida_data']);
+        if ($dataNova === null) throw new Exception('A data da saída não é válida.');
+        if ($dataNova !== substr((string)($s['criado_em'] ?? ''), 0, 10)) {
+            $hora = substr((string)($s['criado_em'] ?? ''), 11, 8);
+            if (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $hora)) $hora = date('H:i:s');
+            vn_exec('UPDATE vn_mobile_estoque_saidas SET criado_em = ? WHERE id = ? LIMIT 1', [$dataNova . ' ' . $hora, $id]);
+            if (vn_table_exists('vn_saida_cobrancas')) vn_exec('UPDATE vn_saida_cobrancas SET criado_em = ? WHERE saida_id = ?', [$dataNova . ' ' . $hora, $id]);
+            $msgData = ' Data da saída: ' . date('d/m/Y', strtotime($dataNova)) . '.';
+        }
+    }
+
+    return 'Saída atualizada. Estoque ajustado conforme a nova quantidade.' . $msgData;
 }
 
 /** Ações (editar + excluir) de uma linha de saída, usadas em todas as tabelas de saída. */
@@ -1863,6 +1881,7 @@ function vn_render_saida_acoes_v1(array $s, array $responsaveis = [], array $cli
                 <input type="hidden" name="acao" value="editar_saida">
                 <input type="hidden" name="saida_id" value="<?php echo $id; ?>">
                 <div class="vn-field"><label>Quantidade</label><input name="saida_quantidade" inputmode="decimal" value="<?php echo number_format($qtd, 2, ',', '.'); ?>" required></div>
+                <div class="vn-field"><label>Data da saída</label><input type="date" name="saida_data" value="<?php echo vn_h(substr((string)($s['criado_em'] ?? ''), 0, 10)); ?>" required></div>
                 <div class="vn-field"><label>Responsável</label>
                     <?php if (!empty($responsaveis)): ?>
                         <select name="saida_responsavel">

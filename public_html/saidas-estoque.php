@@ -216,6 +216,7 @@ vn_alerts($ok, $erro);
                     <input disabled value="" placeholder="Cadastre clientes em Clientes para vincular">
                 <?php endif; ?>
             </div>
+            <div class="vn-field"><label>Data da saída</label><input type="date" name="saida_data" value="<?php echo vn_h(date('Y-m-d')); ?>" required><small class="vn-help">Hoje, ou o dia em que o material realmente saiu.</small></div>
             <div class="vn-field"><label>Motivo / observação</label><input name="saida_motivo" placeholder="Ex: instalação, uso interno, perda, troca..."></div>
             <div class="vn-field full"><button class="vn-btn vn-btn-primary" type="submit" id="saidaSubmit" disabled>Registrar saída</button></div>
         </div>

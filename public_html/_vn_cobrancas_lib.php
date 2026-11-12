@@ -155,6 +155,11 @@ if (!function_exists('vn_cobr_add_pecas')) {
 
         if (empty($linhas) && empty($servicosAvulsos)) throw new Exception('Selecione ao menos uma peça ou informe um serviço para cobrar.');
 
+        // Data da venda (padrão: hoje). Em outra data, a hora de agora vale só para manter a ordem do dia.
+        $dataVenda = vn_date_db_or_null($post['peca_data'] ?? '');
+        $outraData = $dataVenda !== null && $dataVenda !== vn_today_sp();
+        $quando = $outraData ? $dataVenda . ' ' . date('H:i:s') : vn_now_sp();
+
         // Valida o estoque de todas as PEÇAS antes de aplicar (serviço não tem estoque).
         $rows = [];
         foreach ($linhas as $id => $l) {
@@ -182,25 +187,117 @@ if (!function_exists('vn_cobr_add_pecas')) {
                 $baixouEstoque = true;
             }
             // Serviço entra com catalogo_id 0: excluir depois não devolve nada ao estoque.
-            vn_exec('INSERT INTO vn_mobile_estoque_saidas (catalogo_id, origem, item_nome, item_tipo, quantidade, motivo, responsavel, cliente_id, cliente_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-                [$ehServico ? 0 : $id, 'mobile', (string)$row['nome'], (string)($row['tipo'] ?? 'material'), $l['qtd'], $ehServico ? 'Serviço da venda' : 'Cobrança de material', null, $clienteId ?: null, $clienteNome]);
+            vn_exec('INSERT INTO vn_mobile_estoque_saidas (catalogo_id, origem, item_nome, item_tipo, quantidade, motivo, responsavel, cliente_id, cliente_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($outraData ? '?' : 'NOW()') . ')',
+                array_merge([$ehServico ? 0 : $id, 'mobile', (string)$row['nome'], (string)($row['tipo'] ?? 'material'), $l['qtd'], $ehServico ? 'Serviço da venda' : 'Cobrança de material', null, $clienteId ?: null, $clienteNome], $outraData ? [$quando] : []));
             $saidaId = vn_last_id();
             vn_exec('INSERT INTO vn_saida_cobrancas (saida_id, cliente_id, cliente_nome, item_nome, quantidade, valor_unitario, valor_total, pago, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
-                [$saidaId, $clienteId ?: null, $clienteNome, (string)$row['nome'], $l['qtd'], $valor, round($l['qtd'] * $valor, 2), vn_now_sp()]);
+                [$saidaId, $clienteId ?: null, $clienteNome, (string)$row['nome'], $l['qtd'], $valor, round($l['qtd'] * $valor, 2), $quando]);
             $resumo[] = $row['nome'] . ' (' . number_format($l['qtd'], 2, ',', '.') . ')';
         }
 
         foreach ($servicosAvulsos as $sv) {
-            vn_exec('INSERT INTO vn_mobile_estoque_saidas (catalogo_id, origem, item_nome, item_tipo, quantidade, motivo, responsavel, cliente_id, cliente_nome, criado_em) VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-                ['mobile', $sv['nome'], 'servico', $sv['qtd'], 'Serviço da venda', null, $clienteId ?: null, $clienteNome]);
+            vn_exec('INSERT INTO vn_mobile_estoque_saidas (catalogo_id, origem, item_nome, item_tipo, quantidade, motivo, responsavel, cliente_id, cliente_nome, criado_em) VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($outraData ? '?' : 'NOW()') . ')',
+                array_merge(['mobile', $sv['nome'], 'servico', $sv['qtd'], 'Serviço da venda', null, $clienteId ?: null, $clienteNome], $outraData ? [$quando] : []));
             $saidaId = vn_last_id();
             vn_exec('INSERT INTO vn_saida_cobrancas (saida_id, cliente_id, cliente_nome, item_nome, quantidade, valor_unitario, valor_total, pago, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
-                [$saidaId, $clienteId ?: null, $clienteNome, $sv['nome'], $sv['qtd'], $sv['valor'], round($sv['qtd'] * $sv['valor'], 2), vn_now_sp()]);
+                [$saidaId, $clienteId ?: null, $clienteNome, $sv['nome'], $sv['qtd'], $sv['valor'], round($sv['qtd'] * $sv['valor'], 2), $quando]);
             $resumo[] = $sv['nome'] . ' (' . number_format($sv['qtd'], 2, ',', '.') . ')';
         }
 
-        return count($resumo) . ' item(ns) adicionado(s) na venda de ' . $clienteNome . ': ' . implode(', ', $resumo)
+        return count($resumo) . ' item(ns) adicionado(s) na venda de ' . $clienteNome . ($outraData ? ' (data ' . vn_date_br($dataVenda) . ')' : '') . ': ' . implode(', ', $resumo)
             . ($baixouEstoque ? '. O estoque já foi baixado.' : '.');
+    }
+}
+
+if (!function_exists('vn_cobr_set_data_peca')) {
+    /*
+        Muda a DATA de uma peça da venda (mantém a hora que ela já tinha). Acompanha a saída de estoque
+        correspondente, para os dois relatórios dizerem a mesma coisa. $novaData: 'AAAA-MM-DD'.
+    */
+    function vn_cobr_set_data_peca(array $peca, string $novaData): void {
+        $hora = substr((string)($peca['criado_em'] ?? ''), 11, 8);
+        if (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $hora)) $hora = date('H:i:s');
+        $novo = $novaData . ' ' . $hora;
+        vn_exec('UPDATE vn_saida_cobrancas SET criado_em = ? WHERE id = ?', [$novo, (int)$peca['id']]);
+        if ((int)($peca['saida_id'] ?? 0) > 0) {
+            vn_exec('UPDATE vn_mobile_estoque_saidas SET criado_em = ? WHERE id = ?', [$novo, (int)$peca['saida_id']]);
+        }
+    }
+}
+
+if (!function_exists('vn_cobr_mudar_data_venda')) {
+    /*
+        Muda a data de TODAS as peças ainda não aprovadas de um cliente em um mês (a "venda" da central).
+        Devolve quantas peças mudaram. A venda passa a aparecer no mês da nova data.
+    */
+    function vn_cobr_mudar_data_venda(string $cliente, string $mes, string $novaData): int {
+        if ($cliente === '' || !preg_match('/^\d{4}-\d{2}$/', $mes)) throw new Exception('Cliente ou mês inválido.');
+        $iniMes = $mes . '-01 00:00:00';
+        $fimMes = date('Y-m-01 00:00:00', strtotime($mes . '-01 +1 month'));
+        $itens = vn_fetch_all(
+            'SELECT * FROM vn_saida_cobrancas WHERE cliente_nome = ? AND cobranca_id IS NULL AND criado_em >= ? AND criado_em < ? ORDER BY id ASC',
+            [$cliente, $iniMes, $fimMes]);
+        if (!$itens) throw new Exception('Nenhuma peça aguardando aprovação para este cliente neste mês.');
+        foreach ($itens as $i) vn_cobr_set_data_peca($i, $novaData);
+        return count($itens);
+    }
+}
+
+if (!function_exists('vn_cobr_tipos_catalogo')) {
+    /* Tipos que dá para escolher ao cadastrar/editar um material na tela de Cobranças (ferramentas têm tela própria). */
+    function vn_cobr_tipos_catalogo(): array {
+        return ['material' => 'Peça / material', 'equipamento' => 'Equipamento', 'produto_usado' => 'Produto usado',
+                'servico' => 'Serviço', 'mao_obra' => 'Mão de obra', 'outro' => 'Outro item'];
+    }
+}
+
+if (!function_exists('vn_cobr_catalogo_salvar')) {
+    /*
+        Cadastra (catalogo_id vazio) ou altera um item do catálogo/estoque pela janela "Cobrar peça ou serviço":
+        nome, tipo, valor de venda, custo, unidade, quantidade em estoque, foto e descrição.
+        $foto = caminho da foto nova já enviada ('' = manter a atual). Só mexe no estoque se a quantidade foi mudada de propósito
+        (catalogo_estoque_orig guarda o valor que a pessoa viu ao abrir a janela).
+        Devolve ['id' => id do item, 'nome' => ..., 'novo' => bool].
+    */
+    function vn_cobr_catalogo_salvar(array $post, string $foto = ''): array {
+        vn_ensure_mobile_tables();
+        $id = (int)($post['catalogo_id'] ?? 0);
+        $tipo = (string)($post['catalogo_tipo'] ?? 'material');
+        if (!isset(vn_cobr_tipos_catalogo()[$tipo])) $tipo = 'material';
+        $ehServico = in_array($tipo, ['servico', 'mao_obra'], true);
+        $nome = vn_clean($post['catalogo_nome'] ?? '');
+        if ($nome === '') throw new Exception('Informe o nome do material ou serviço.');
+        if (mb_strlen($nome) > 190) throw new Exception('O nome passou de 190 letras.');
+        $valorTxt = trim((string)($post['catalogo_valor'] ?? ''));
+        $valor = vn_money_db($valorTxt);
+        if ($valor < 0 || $valor > 9999999.99) throw new Exception('Confira o valor de venda.');
+        $custo = vn_money_db($post['catalogo_custo'] ?? 0);
+        if ($custo < 0 || $custo > 9999999.99) throw new Exception('Confira o custo.');
+        $unidade = vn_clean($post['catalogo_unidade'] ?? 'un') ?: 'un';
+        $descricao = trim((string)($post['catalogo_descricao'] ?? ''));
+        if ($descricao === '') $descricao = $nome;
+        $qtdTxt = trim((string)($post['catalogo_quantidade_estoque'] ?? ''));
+        $qtd = $qtdTxt === '' ? 0.0 : vn_money_db($qtdTxt);
+        if ($qtd < 0 || $qtd > 9999999.99) throw new Exception('Confira a quantidade em estoque.');
+        if ($ehServico) $qtd = 0.0;   // serviço não tem estoque
+
+        if ($id <= 0) {
+            vn_exec('INSERT INTO vn_mobile_orcamento_catalogo (tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, status, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+                [$tipo, $nome, $descricao, $foto !== '' ? $foto : null, $unidade, $valor, $custo, $qtd, 'ativo']);
+            return ['id' => vn_last_id(), 'nome' => $nome, 'novo' => true];
+        }
+
+        $atual = vn_fetch_one('SELECT * FROM vn_mobile_orcamento_catalogo WHERE id = ? LIMIT 1', [$id]);
+        if (!$atual) throw new Exception('Esse material não está mais no catálogo. Atualize a página.');
+        $sets = ['tipo = ?', 'nome = ?', 'descricao = ?', 'unidade = ?', 'valor_unitario = ?', 'custo_unitario = ?', 'atualizado_em = NOW()'];
+        $par = [$tipo, $nome, $descricao, $unidade, $valor, $custo];
+        $orig = trim((string)($post['catalogo_estoque_orig'] ?? ''));
+        $mudouEstoque = $ehServico ? (float)$atual['quantidade_estoque'] != 0.0 : ($orig === '' || abs(vn_money_db($orig) - $qtd) > 0.0001);
+        if ($mudouEstoque) { $sets[] = 'quantidade_estoque = ?'; $par[] = $qtd; }
+        if ($foto !== '') { $sets[] = 'foto_url = ?'; $par[] = $foto; }
+        $par[] = $id;
+        vn_exec('UPDATE vn_mobile_orcamento_catalogo SET ' . implode(', ', $sets) . ' WHERE id = ? LIMIT 1', $par);
+        return ['id' => $id, 'nome' => $nome, 'novo' => false];
     }
 }
 
