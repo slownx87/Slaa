@@ -463,7 +463,7 @@ vn_alerts($ok, $erro);
                 <div class="l"><span data-r-unit-rot>Preço por medida</span><b data-r-unit>R$ 0,00</b></div>
                 <div class="l tot"><span>Total</span><b data-r-total>R$ 0,00</b></div>
             </div>
-            <p class="pd-hint" data-med-nota>Os preços vêm da <a href="serralheria-precos.php" target="_blank" rel="noopener">tabela de preços da serralheria</a>. O nível ajusta o preço da estrutura e o perfil ajusta a mão de obra.</p>
+            <p class="pd-hint" data-med-nota>Os preços vêm da <a href="serralheria-precos.php" target="_blank" rel="noopener" data-vn-janela="Preços da serralheria">tabela de preços da serralheria</a>. O nível ajusta o preço da estrutura e o perfil ajusta a mão de obra.</p>
         </div>
         <div class="pd-sheet-f"><div class="med-foot-tot" aria-live="polite"><small>Total</small><b data-r-total-foot>R$ 0,00</b></div><button type="button" class="pd-btn" data-med-add disabled>adicionar ao pedido</button></div>
     </div></dialog>

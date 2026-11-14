@@ -70,6 +70,26 @@ public final class TestesPuros {
         confere(UrlPolicy.decide("", true).action == UrlPolicy.Action.BLOCK && UrlPolicy.decide(null, true).action == UrlPolicy.Action.BLOCK, "endereço vazio é bloqueado");
         confere("vnsystemltda.com".equals(UrlPolicy.hostOf("https://vnsystemltda.com?x=1")), "host antes do ?");
         confere("[::1]".equals(UrlPolicy.hostOf("http://[::1]:8080/a")), "host IPv6");
+
+        // mapa: o site abre a navegação do Google Maps com google.navigation: (iniciar.php) e, com várias OS, com intent://
+        r = UrlPolicy.decide("google.navigation:q=Rua%20X%2C%20123&mode=d", true);
+        confere(r.action == UrlPolicy.Action.EXTERNAL, "google.navigation: abre fora do app (botão de mapa da OS)");
+        confere(UrlPolicy.decide("google.navigation:q=Rua", false).action == UrlPolicy.Action.BLOCK, "google.navigation: dentro de quadro é bloqueado");
+        confere("google.navigation".equals(UrlPolicy.esquemaDe("Google.Navigation:q=Rua")), "esquemaDe lê google.navigation em minúsculas");
+        confere("https".equals(UrlPolicy.esquemaDe("https://a.com")) && "".equals(UrlPolicy.esquemaDe("sem-esquema")) && "".equals(UrlPolicy.esquemaDe(null)), "esquemaDe: https, sem esquema e nulo");
+        String[] liberados = { "http", "https", "tel", "mailto", "sms", "smsto", "geo", "whatsapp", "market", "intent", "google.navigation", "waze", "TEL" };
+        boolean todosLiberados = true;
+        for (String e : liberados) if (!UrlPolicy.esquemaPermitido(e)) { todosLiberados = false; System.out.println("      não liberou: " + e); }
+        confere(todosLiberados, "esquemas liberados: telefone, e-mail, SMS, WhatsApp, mapas, intent, Play Store");
+        String[] recusados = { "javascript", "file", "content", "ftp", "chrome", "view-source", "android-app", "", null };
+        boolean todosRecusados = true;
+        for (String e : recusados) if (UrlPolicy.esquemaPermitido(e)) { todosRecusados = false; System.out.println("      liberou sem querer: " + e); }
+        confere(todosRecusados, "esquemas perigosos continuam recusados (javascript, file, content, ftp, chrome...)");
+        confere("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=Rua%20X%2C%20123".equals(UrlPolicy.alternativaWeb("google.navigation:q=Rua%20X%2C%20123&mode=d")),
+                "sem o app do Maps: google.navigation vira a página de rotas do Google Maps");
+        confere(UrlPolicy.alternativaWeb("google.navigation:mode=w&q=Praca").contains("travelmode=walking&destination=Praca"), "alternativa a pé (mode=w) com q depois");
+        confere("".equals(UrlPolicy.alternativaWeb("google.navigation:mode=d")) && "".equals(UrlPolicy.alternativaWeb("tel:123")) && "".equals(UrlPolicy.alternativaWeb(null)),
+                "alternativa vazia quando não há destino ou não é google.navigation");
     }
 
     // ------------------------------------------------------------------ nomes

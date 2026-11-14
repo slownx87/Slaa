@@ -34,7 +34,7 @@
   /* aviso de "sem preço" logo abaixo da escolha */
   var semPreco = document.createElement('div');
   semPreco.className = 'med-aviso'; semPreco.hidden = true;
-  semPreco.innerHTML = 'Esta estrutura está sem preço na tabela. <a href="serralheria-precos.php" target="_blank" rel="noopener">Defina o preço em Preços da serralheria</a> e abra a janela de novo.';
+  semPreco.innerHTML = 'Esta estrutura está sem preço na tabela. <a href="serralheria-precos.php" target="_blank" rel="noopener" data-vn-janela="Preços da serralheria">Defina o preço em Preços da serralheria</a> e abra a janela de novo.';
   selEst.insertAdjacentElement('afterend', semPreco);
 
   /* ------------------------------------------------------------------ lista de estruturas (agrupada por categoria) */
@@ -116,8 +116,8 @@
   }
   function avisar() {
     var txt = '';
-    if (!D.revisado) txt = 'Os preços da tabela ainda são valores de exemplo. <a href="serralheria-precos.php" target="_blank" rel="noopener">Confira em Preços da serralheria</a> antes de passar o valor para o cliente.';
-    else if (D.dias !== null && D.dias >= 30) txt = 'A tabela de preços foi conferida há ' + D.dias + ' dias. O preço do aço varia: <a href="serralheria-precos.php" target="_blank" rel="noopener">vale revisar</a>.';
+    if (!D.revisado) txt = 'Os preços da tabela ainda são valores de exemplo. <a href="serralheria-precos.php" target="_blank" rel="noopener" data-vn-janela="Preços da serralheria">Confira em Preços da serralheria</a> antes de passar o valor para o cliente.';
+    else if (D.dias !== null && D.dias >= 30) txt = 'A tabela de preços foi conferida há ' + D.dias + ' dias. O preço do aço varia: <a href="serralheria-precos.php" target="_blank" rel="noopener" data-vn-janela="Preços da serralheria">vale revisar</a>.';
     avisoTopo.innerHTML = txt; avisoTopo.hidden = !txt;
   }
   function zerar() {

@@ -13,7 +13,8 @@ APK pronto: `dist/VNSystem-2.0.0.apk` (assinado, Android 5.0 ou mais novo).
 | **Baixar PDF e arquivos** | `DownloadListener` próprio (`MainActivity.aoBaixar`). Endereço normal: baixa com o login do app (`HttpDownload`). Arquivo gerado pelo site no navegador (`blob:`/`data:`): o JavaScript entrega em base64 (`Bridge.salvarBase64`; o `vn-download.js` do site já chama isso). Salva em `Downloads/VN System` e abre no leitor de PDF. |
 | Enviar fotos e vídeos | Seletor de arquivos que respeita `multiple` e `accept`, com câmera de foto e de vídeo (`MainActivity.lancarSeletor`). |
 | Câmera e localização do site | `getUserMedia` (ex.: "tirar várias fotos") e `navigator.geolocation` (check-in da OS), com os pedidos de permissão do Android. |
-| WhatsApp, telefone, e-mail, mapas | Links de fora do site abrem no aplicativo certo (`UrlPolicy`). |
+| WhatsApp, telefone, e-mail, mapas, rotas | Links de fora do site abrem no aplicativo certo (`UrlPolicy`). Inclui a navegação do Google Maps que o botão de mapa da OS usa (`google.navigation:`); sem o Maps instalado, abre a rota no navegador. |
+| "Nova aba" | O WebView não tem abas: `target="_blank"` abre na mesma tela (o Voltar traz de volta). Links do site marcados com `data-vn-janela` abrem numa **janela por cima** da página (`assets/vn-app.js`), para não perder o que está aberto (ex.: o orçamento ao consultar a tabela de preços da serralheria). O Voltar fecha a janela. |
 | Compartilhar e imprimir | `navigator.share` (texto, link e arquivo) e `window.print()` ligados ao Android (`assets/vn-app.js`). |
 | Tela sem internet | `assets/offline.html` + tenta de novo sozinho quando a internet volta. |
 | Botão voltar | Fecha primeiro o modal aberto do site (`<dialog open>`), depois volta de página; na primeira página pede para tocar de novo para sair. |

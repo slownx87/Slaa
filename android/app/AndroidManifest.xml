@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <!-- A câmera do site vibra de leve ao tirar a foto (navigator.vibrate). Sem esta permissão o app ignora a vibração. -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -33,6 +35,8 @@
         <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="tel"/></intent>
         <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="mailto"/></intent>
         <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="geo"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="google.navigation"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="waze"/></intent>
         <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="whatsapp"/></intent>
         <intent><action android:name="android.intent.action.SENDTO"/><data android:scheme="sms"/></intent>
         <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="application/pdf"/></intent>

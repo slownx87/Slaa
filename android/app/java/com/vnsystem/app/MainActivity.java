@@ -422,13 +422,12 @@ public final class MainActivity extends Activity {
         runOnUiThread(new Runnable() {
             @Override public void run() {
                 if (url == null || url.isEmpty()) return;
-                String esquema = url.indexOf(':') > 0 ? url.substring(0, url.indexOf(':')).toLowerCase(Locale.ROOT) : "";
-                if (!esquemaPermitido(esquema)) {
+                if (!UrlPolicy.esquemaPermitido(UrlPolicy.esquemaDe(url))) {
                     Toast.makeText(MainActivity.this, "Este tipo de link não pode ser aberto pelo app.", Toast.LENGTH_LONG).show();
                     return;
                 }
+                Intent i;
                 try {
-                    Intent i;
                     if (url.startsWith("intent:")) {
                         i = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
                         i.addCategory(Intent.CATEGORY_BROWSABLE);
@@ -437,9 +436,16 @@ public final class MainActivity extends Activity {
                     } else {
                         i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                     }
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Não consegui abrir este link.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                try {
                     startActivity(i);
                 } catch (ActivityNotFoundException e) {
-                    Toast.makeText(MainActivity.this, "Não encontrei um aplicativo para abrir este link.", Toast.LENGTH_LONG).show();
+                    if (!abrirAlternativa(url, i)) {
+                        Toast.makeText(MainActivity.this, "Não encontrei um aplicativo para abrir este link.", Toast.LENGTH_LONG).show();
+                    }
                 } catch (Exception e) {
                     Toast.makeText(MainActivity.this, "Não consegui abrir este link.", Toast.LENGTH_LONG).show();
                 }
@@ -447,14 +453,24 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private static boolean esquemaPermitido(String esquema) {
-        switch (esquema) {
-            case "http": case "https": case "tel": case "mailto": case "sms": case "smsto": case "geo":
-            case "whatsapp": case "market": case "intent":
+    /**
+     * O aplicativo pedido não está instalado (ex.: Google Maps): abre o mesmo destino no navegador.
+     * Link intent:// com aplicativo fixo -> tira o aplicativo e abre o endereço https; google.navigation: -> página do Maps na web.
+     */
+    private boolean abrirAlternativa(String url, Intent original) {
+        try {
+            if (url.startsWith("intent:") && original.getPackage() != null) {
+                original.setPackage(null);
+                startActivity(original);
                 return true;
-            default:
-                return false;
-        }
+            }
+            String web = UrlPolicy.alternativaWeb(url);
+            if (!web.isEmpty()) {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(web)));
+                return true;
+            }
+        } catch (Exception ignorar) { /* sem alternativa */ }
+        return false;
     }
 
     void mostrarAviso(final String texto) {
