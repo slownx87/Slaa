@@ -82,6 +82,30 @@
   var UNID = { m2: ['m²', 'm²'], m: ['m', 'm'], un: ['un', 'un'], h: ['h', 'h'], degrau: ['degrau', 'degraus'], kg: ['kg', 'kg'] };
   function unValida(u) { return Object.prototype.hasOwnProperty.call(UNID, u) ? u : ''; }
   function unRotulo(u, qtd) { var d = unValida(u) ? UNID[u] : null; return d ? (Math.abs(Number(qtd) - 1) < 0.0001 ? d[0] : d[1]) : ''; }
+
+  /* Produto cobrado por medida (serralheria): o PRODUTO define como cobra (m², metro, degrau, hora, kg) e o valor de cada medida,
+     no cadastro. A medida (largura × altura, comprimento...) é digitada ao cadastrar o produto ou, depois, ao escolhê-lo no catálogo. */
+  var CALCULOS = { m2: 'm²', m: 'm', degrau: 'degrau', h: 'h', kg: 'kg' };   // a quantidade simples (por unidade) não entra aqui
+  function unCalc(c) { return Object.prototype.hasOwnProperty.call(CALCULOS, c) ? c : ''; }
+  function r2(n) { return Math.round((Number(n) + 1e-9) * 100) / 100; }
+  function fmt2(n) { return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  /* lê a medida digitada: { ok, qtd (na medida do produto), det (texto para a descrição do item), txt (a conta, para o resumo) }.
+     v: { larg, alt, pecas, comp, deg, horas, kg } (textos digitados nos campos) */
+  function lerMedida(calc, v) {
+    calc = unCalc(calc); v = v || {};
+    if (!calc) return { ok: false };
+    var q;
+    if (calc === 'm2') {
+      var L = parseBR(v.larg), A = parseBR(v.alt), n = Math.max(1, Math.round(parseBR(v.pecas) || 1));
+      if (!(L > 0 && A > 0)) return { ok: false };
+      var areaPeca = r2(L * A); q = r2(areaPeca * n);
+      return { ok: q > 0, qtd: q, det: fmt2(L) + ' × ' + fmt2(A) + ' m' + (n > 1 ? ' · ' + n + ' peças' : ''),
+               txt: (n > 1 ? n + ' × ' + fmt2(areaPeca) : fmt2(L) + ' × ' + fmt2(A)) + ' = ' + fmt2(q) + ' m²' };
+    }
+    q = r2(parseBR(calc === 'm' ? v.comp : calc === 'degrau' ? v.deg : calc === 'h' ? v.horas : v.kg));
+    if (!(q > 0)) return { ok: false };
+    return { ok: true, qtd: q, det: '', txt: fmtQtd(q) + ' ' + unRotulo(calc, q) };
+  }
   var boxServ = document.getElementById('itemsServicos'), boxPeca = document.getElementById('itemsPecas'), boxSerr = document.getElementById('itemsSerralheria');
   var categoria = CFG.categoria === 'serralheria' ? 'serralheria' : 'cftv';
   function todosItens() { return $$('.pd-item'); }
@@ -337,7 +361,11 @@
       $$('[data-sel]', modal).forEach(function (c) { var m = c.classList.contains('marcado'), i = c.getAttribute('data-inicial') === '1'; if (m && !i) add++; else if (!m && i) rem++; });
       return { add: add, rem: rem };
     }
-    function novoValido() { return q('[data-new-nome]').value.trim() !== '' && parseBR(q('[data-new-preco]').value) > 0; }
+    function novoValido() {
+      if (q('[data-new-nome]').value.trim() === '' || !(parseBR(q('[data-new-preco]').value) > 0)) return false;
+      var m = medidaNova();                 // produto cobrado por medida: só vale com a medida preenchida
+      return !m || m.ok;
+    }
     function sincronizar() {
       var h3 = $('.pd-sheet-h h3', modal);   // o título acompanha a aba (na aba CFTV: "Adicionar peça de CFTV ao pedido")
       if (h3) h3.textContent = (aba === 'new' && soCatalogo()) ? 'Salvar ' + rotuloAtual() + ' no catálogo' : 'Adicionar ' + rotuloAtual() + ' ao pedido';
@@ -365,6 +393,8 @@
       var nota = q('[data-new-nota-txt]');
       if (nota) nota.textContent = 'Fica salva no catálogo de ' + (NOME_LINHA[linhaDestino()] || 'peças') + '.';
       var box = q('[data-new-pedido-box]'); if (box) box.hidden = !outraLinha();
+      var cb = q('[data-new-calc-box]'), cs = q('[data-new-calc]');   // "Como cobrar" não vale para peça de CFTV
+      if (cb) { cb.hidden = outraLinha(); if (outraLinha() && cs && cs.value) cs.value = ''; aplicarCalc(); }
     }
     function irParaAba(t) {
       aba = t.getAttribute('data-add-tab');
@@ -379,7 +409,10 @@
     /* clique num cartão do catálogo marca/desmarca (um só ouvinte: vale também para os cartões criados depois) */
     modal.addEventListener('click', function (e) {
       var card = e.target.closest ? e.target.closest('[data-sel]') : null;
-      if (card && modal.contains(card)) { card.classList.toggle('marcado'); sincronizar(); }
+      if (!card || !modal.contains(card)) return;
+      var itc = itemDoCard(card);   // produto cobrado por medida: pede a medida em vez de marcar (cada toque pode ser outro portão, outra grade...)
+      if (itc && unCalc(itc.calculo) && window.VNMedida) { window.VNMedida.abrir(itc, { tipo: itc.tipo || tipoBase, linha: linhaModal || categoria }); return; }
+      card.classList.toggle('marcado'); sincronizar();
     });
 
     /* peça/serviço recém-salvo no catálogo: entra (ou tem o preço atualizado) na aba Catálogo desta janela na hora, sem recarregar a tela */
@@ -394,10 +427,11 @@
       if (it.foto_url) { var im = el('img'); im.src = it.foto_url; im.alt = ''; im.loading = 'lazy'; c.appendChild(im); } else c.appendChild(el('span', 'sem-img'));
       var info = el('div', 'info'); info.appendChild(el('strong', '', it.nome));
       if (it.descricao && it.descricao !== it.nome) info.appendChild(el('small', '', it.descricao));
+      if (unCalc(it.calculo)) { info.appendChild(el('small', 'med-dica', 'Toque e informe a medida')); c.setAttribute('data-calculo', it.calculo); }
       c.appendChild(info); c.appendChild(el('span', 'chk', '✓'));
       var pr = el('div', 'preco'); pr.appendChild(el('small', '', 'Preço por ' + (it.unidade || 'unidade') + ':')); pr.appendChild(el('strong', '', 'R$ ' + moneyBR(it.valor_unitario)));
       c.appendChild(pr);
-      if (!ehModalServico) {
+      if (!ehModalServico && !unCalc(it.calculo)) {
         var es = el('div', 'preco'); es.style.cssText = 'border:0;padding-top:0;margin-top:0';
         es.appendChild(el('span', 'est', 'Quantidade em estoque:')); es.appendChild(el('span', 'est', fmtQtd(it.quantidade_estoque || 0) + ' ' + (it.unidade || 'un')));
         c.appendChild(es);
@@ -421,7 +455,11 @@
     /* cadastrar */
     var qtdEl = q('[data-new-qtd]'), precoEl = q('[data-new-preco]'), custoEl = q('[data-new-custo]'), lucroEl = q('[data-new-lucro]'), markEl = q('[data-new-markup]');
     function novoValor() {
-      q('[data-new-valor]').textContent = 'R$ ' + moneyBR(parseBR(precoEl.value) * Math.max(1, parseBR(qtdEl.value)));
+      var m = medidaNova();
+      var qtdConta = m ? (m.ok ? m.qtd : 0) : Math.max(1, parseBR(qtdEl.value));
+      q('[data-new-valor]').textContent = 'R$ ' + moneyBR(parseBR(precoEl.value) * qtdConta);
+      var conta = q('[data-new-conta]');
+      if (conta) { conta.textContent = m && m.ok ? m.txt : ''; conta.hidden = !(m && m.ok); }
       sincronizar();
     }
     q('[data-new-menos]').addEventListener('click', function () { qtdEl.value = fmtQtd(Math.max(1, parseBR(qtdEl.value) - 1)); novoValor(); });
@@ -433,6 +471,31 @@
       var corpo = q('[data-new-cl-body]'); corpo.hidden = !corpo.hidden;
       tg.classList.toggle('fechada', corpo.hidden); tg.setAttribute('aria-expanded', corpo.hidden ? 'false' : 'true');
     });
+    /* "Como cobrar" (peça de serralheria e serviço): por unidade ou por medida. Por medida, a medida vem no lugar da quantidade. */
+    var calcBox = q('[data-new-calc-box]'), calcSel = q('[data-new-calc]'), medBox = q('[data-new-medida]');
+    function calcAtual() { return calcSel && calcBox && !calcBox.hidden ? unCalc(calcSel.value) : ''; }
+    function medidaNova() {
+      var c = calcAtual(); if (!c) return null;
+      var v = {}; $$('[data-new-m]', modal).forEach(function (el) { v[el.getAttribute('data-new-m')] = el.value; });
+      return lerMedida(c, v);
+    }
+    function aplicarCalc() {
+      var c = calcAtual(), porMedida = !!c;
+      if (medBox) medBox.hidden = !porMedida;
+      $$('[data-new-mbloco]', modal).forEach(function (b) { b.hidden = b.getAttribute('data-new-mbloco') !== c; });
+      ['[data-new-qtd-box]', '[data-new-un-box]', '[data-new-origem-box]'].forEach(function (s) { var e = q(s); if (e) e.hidden = porMedida; });
+      var pb = q('[data-new-preco-box]'); if (pb) pb.classList.toggle('med-full', porMedida);
+      var rot = q('[data-new-preco-rot]'); if (rot) rot.textContent = porMedida ? 'Preço por ' + CALCULOS[c] + ' (R$)' : 'Preço unitário (R$)';
+      custoEl.placeholder = porMedida ? 'Quanto cada ' + CALCULOS[c] + ' custa pra você?' : 'Quanto cada unidade custa pra você?';
+      novoValor();
+    }
+    if (calcSel) calcSel.addEventListener('change', aplicarCalc);
+    $$('[data-new-m]', modal).forEach(function (el) { el.addEventListener('input', novoValor); });
+    var pecasEl = q('[data-new-m="pecas"]');
+    if (pecasEl) {
+      q('[data-new-pecas-menos]').addEventListener('click', function () { pecasEl.value = String(Math.max(1, (Math.round(parseBR(pecasEl.value)) || 1) - 1)); novoValor(); });
+      q('[data-new-pecas-mais]').addEventListener('click', function () { pecasEl.value = String((Math.round(parseBR(pecasEl.value)) || 0) + 1); novoValor(); });
+    }
     var fotoBtn = q('[data-new-foto-btn]'), fotoEl = q('[data-new-foto]');
     if (fotoBtn && fotoEl) {
       fotoBtn.addEventListener('click', function () { fotoEl.click(); });
@@ -461,17 +524,21 @@
       var nome = q('[data-new-nome]').value.trim();
       var tipoSel = q('[data-new-tipo]').value || tipoBase;
       var det = q('[data-new-det]').value.trim();
-      var un = q('[data-new-un]').value.trim() || 'un';
-      var preco = parseBR(precoEl.value), qtd = Math.max(1, parseBR(qtdEl.value)), custo = parseBR(custoEl.value);
+      var med = medidaNova();                       // null = por unidade; senão a conta da medida (largura × altura, comprimento...)
+      var calcNovo = med ? calcAtual() : '';
+      var un = calcNovo ? CALCULOS[calcNovo] : (q('[data-new-un]').value.trim() || 'un');
+      var preco = parseBR(precoEl.value), qtd = med ? med.qtd : Math.max(1, parseBR(qtdEl.value)), custo = parseBR(custoEl.value);
       var origemEl = q('[data-new-origem]');
       var lin = linhaDestino(), soCat = soCatalogo(), daOutraLinha = outraLinha();
-      if (!soCat) adicionarItem({ tipo: tipoSel, desc: nome + (det ? ' — ' + det : ''), qtd: qtd, preco: preco, custo: custo, origem: origemEl ? origemEl.value : 'estoque', linha: lin });
+      var detPedido = [det, med ? med.det : ''].filter(Boolean).join(' · ');
+      if (!soCat) adicionarItem({ tipo: tipoSel, desc: nome + (detPedido ? ' — ' + detPedido : ''), qtd: qtd, preco: preco, custo: custo, origem: calcNovo ? 'estoque' : (origemEl ? origemEl.value : 'estoque'), linha: lin, un: calcNovo });
 
       /* peça cadastrada vai SEMPRE para o catálogo (a da aba "CFTV", para o catálogo de CFTV); serviço, só com a caixa marcada */
       if (!ehModalServico || soCat || (salvarEl && salvarEl.checked)) {
         var fd = new FormData();
         fd.append('acao', 'catalogo_rapido'); fd.append('catalogo_tipo', tipoSel); fd.append('catalogo_nome', nome); fd.append('catalogo_descricao', det);
         fd.append('catalogo_unidade', un); fd.append('catalogo_valor', moneyBR(preco)); fd.append('catalogo_custo', moneyBR(custo));
+        if (calcSel) fd.append('catalogo_calculo', calcNovo);   // como o produto é cobrado: por unidade ('') ou por medida (m2, m, degrau, h, kg)
         fd.append('catalogo_linha', lin);   // peça de serralheria vai para o catálogo de serralheria, a de CFTV para o de CFTV; serviço, para o tipo do orçamento
         var est = q('[data-new-estoque]'); fd.append('catalogo_quantidade_estoque', moneyBR(est ? parseBR(est.value) : 0));
         if (fotoEl && fotoEl.files && fotoEl.files[0]) fd.append('catalogo_foto', fotoEl.files[0]);
@@ -490,6 +557,9 @@
       if (fotoEl) { fotoEl.value = ''; var nm = $('[data-new-foto-nome]', modal); if (nm) nm.textContent = 'A foto vai para o catálogo'; }
       lucroEl.value = tipoBase !== 'servico' ? '30,00' : '';
       q('[data-new-un]').value = 'un'; q('[data-new-tipo]').selectedIndex = 0; qtdEl.value = '1'; if (salvarEl) salvarEl.checked = false;
+      if (calcSel) calcSel.value = '';
+      $$('[data-new-m]', modal).forEach(function (el) { el.value = el.getAttribute('data-new-m') === 'pecas' ? '1' : ''; });
+      aplicarCalc();
       if (chkPedido) chkPedido.checked = true;
       if (daOutraLinha) irParaAba($('[data-add-tab="cat"]', modal));   // terminou o cadastro da outra linha: a janela volta para o Catálogo
       novoValor(); fechar(modal); atualizarListasAbertas();
@@ -867,11 +937,12 @@
   }
   $$('[data-categoria]').forEach(function (b) { b.addEventListener('click', function () { aplicarCategoria(b.getAttribute('data-categoria'), true); }); });
 
-  /* a calculadora por medida (vn-serr-medida.js) põe o resultado no pedido por aqui */
+  /* a janela "Informar a medida" (vn-serr-medida.js) põe o resultado no pedido por aqui */
   window.VNPedido = {
     adicionar: function (d) { return adicionarItem(d); },
     abrir: abrir, fechar: fechar, toast: toast, parseBR: parseBR, moneyBR: moneyBR, fmtQtd: fmtQtd,
-    categoria: function () { return categoria; }, unRotulo: unRotulo
+    categoria: function () { return categoria; }, unRotulo: unRotulo,
+    lerMedida: lerMedida, calculos: CALCULOS, unCalc: unCalc, r2: r2, fmt2: fmt2
   };
 
   /* ------------------------------------------------------------------ início */

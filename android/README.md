@@ -14,7 +14,7 @@ APK pronto: `dist/VNSystem-2.0.1.apk` (assinado, Android 5.0 ou mais novo).
 | Enviar fotos e vídeos | Seletor de arquivos que respeita `multiple` e `accept`, com câmera de foto e de vídeo (`MainActivity.lancarSeletor`). |
 | Câmera e localização do site | `getUserMedia` (ex.: "tirar várias fotos") e `navigator.geolocation` (check-in da OS), com os pedidos de permissão do Android. |
 | WhatsApp, telefone, e-mail, mapas, rotas | Links de fora do site abrem no aplicativo certo (`UrlPolicy`). Inclui a navegação do Google Maps que o botão de mapa da OS usa (`google.navigation:`); sem o Maps instalado, abre a rota no navegador. |
-| "Nova aba" | O WebView não tem abas: `target="_blank"` abre na mesma tela (o Voltar traz de volta). Links do site marcados com `data-vn-janela` abrem numa **janela por cima** da página (`assets/vn-app.js`), para não perder o que está aberto (ex.: o orçamento ao consultar a tabela de preços da serralheria). O Voltar fecha a janela. |
+| "Nova aba" | O WebView não tem abas: `target="_blank"` abre na mesma tela (o Voltar traz de volta). Links do site marcados com `data-vn-janela` abrem numa **janela por cima** da página (`assets/vn-app.js`), para não perder o que está aberto (ex.: consultar outra tela sem sair do orçamento que está sendo montado). O Voltar fecha a janela. |
 | Compartilhar e imprimir | `navigator.share` (texto, link e arquivo) e `window.print()` ligados ao Android (`assets/vn-app.js`). |
 | Tela sem internet | `assets/offline.html` + tenta de novo sozinho quando a internet volta. |
 | Botão voltar | Fecha primeiro o modal aberto do site (`<dialog open>`), depois volta de página; na primeira página pede para tocar de novo para sair. |

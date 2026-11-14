@@ -680,6 +680,8 @@ function vn_ensure_mobile_tables(): void {
     $linhaNova = !vn_column_exists('vn_mobile_orcamento_catalogo', 'linha');
     vn_add_col_if_missing('vn_mobile_orcamento_catalogo', 'linha', "VARCHAR(20) NOT NULL DEFAULT 'geral'");
     if ($linhaNova) vn_exec("UPDATE vn_mobile_orcamento_catalogo SET linha = 'cftv' WHERE tipo NOT IN ('servico', 'mao_obra')");
+    // Como o produto é cobrado: vazio = por unidade (quantidade simples) ou a medida (m2, m, degrau, h, kg): no orçamento a tela pede a medida e faz a conta.
+    vn_add_col_if_missing('vn_mobile_orcamento_catalogo', 'calculo', "VARCHAR(12) NOT NULL DEFAULT ''");
 
     vn_exec("CREATE TABLE IF NOT EXISTS vn_mobile_os (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -2336,7 +2338,10 @@ function vn_salvar_catalogo_orcamento_mobile_v6(array $post): int {
     if ($descricao === '') $descricao = $nome;
     $fotoUrl = trim((string)($post['catalogo_foto_url'] ?? ''));
     $linha = vn_linha_catalogo($post['catalogo_linha'] ?? '', $tipo);
-    vn_exec('INSERT INTO vn_mobile_orcamento_catalogo (tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, status, linha, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())', [$tipo, $nome, $descricao, $fotoUrl ?: null, $unidade ?: 'un', $valor, $custo, $quantidadeEstoque, $estoqueMinimo, 'ativo', $linha]);
+    // Produto cobrado por medida (serralheria): a unidade é a da medida ("Preço por m²") e não há estoque em m².
+    $calculo = function_exists('vn_serr_calculo_valido') ? vn_serr_calculo_valido($post['catalogo_calculo'] ?? '') : '';
+    if ($calculo !== '') { $unidade = vn_serr_calculo_unidade($calculo); $quantidadeEstoque = 0; }
+    vn_exec('INSERT INTO vn_mobile_orcamento_catalogo (tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, status, linha, calculo, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())', [$tipo, $nome, $descricao, $fotoUrl ?: null, $unidade ?: 'un', $valor, $custo, $quantidadeEstoque, $estoqueMinimo, 'ativo', $linha, $calculo]);
     return vn_last_id();
 }
 
@@ -2364,6 +2369,12 @@ function vn_atualizar_catalogo_orcamento_mobile_v6(array $post): int {
     // Só mexe na linha (CFTV / serralheria) quando o formulário mandou o campo.
     if (isset($post['catalogo_linha'])) {
         vn_exec('UPDATE vn_mobile_orcamento_catalogo SET linha = ? WHERE id = ? LIMIT 1', [vn_linha_catalogo($post['catalogo_linha'], $tipo), $id]);
+    }
+    // Como cobrar (por unidade ou por medida): só mexe quando o formulário mandou o campo; por medida, a unidade passa a ser a da medida.
+    if (array_key_exists('catalogo_calculo', $post) && function_exists('vn_serr_calculo_valido')) {
+        $calculo = vn_serr_calculo_valido($post['catalogo_calculo']);
+        vn_exec('UPDATE vn_mobile_orcamento_catalogo SET calculo = ? WHERE id = ? LIMIT 1', [$calculo, $id]);
+        if ($calculo !== '') vn_exec('UPDATE vn_mobile_orcamento_catalogo SET unidade = ? WHERE id = ? LIMIT 1', [vn_serr_calculo_unidade($calculo), $id]);
     }
     return $id;
 }
@@ -2431,11 +2442,12 @@ function vn_catalogo_orcamento_mobile_v6(bool $somenteAtivos = true): array {
             'quantidade_estoque' => (float)($r['quantidade_estoque'] ?? $r['quantidade'] ?? $r['qtd'] ?? $r['estoque'] ?? 0),
             'estoque_minimo' => (isset($r['estoque_minimo']) && $r['estoque_minimo'] !== '') ? (float)$r['estoque_minimo'] : null,
             'linha' => vn_linha_catalogo($r['linha'] ?? '', $tipo),
+            'calculo' => function_exists('vn_serr_calculo_valido') ? vn_serr_calculo_valido($r['calculo'] ?? '') : '',
         ];
     };
 
     $where = $somenteAtivos ? "WHERE status IS NULL OR status = '' OR LOWER(status) IN ('ativo','1','sim','s')" : '';
-    foreach (vn_fetch_all("SELECT id, tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, linha FROM vn_mobile_orcamento_catalogo $where ORDER BY tipo ASC, nome ASC LIMIT 1000") as $r) {
+    foreach (vn_fetch_all("SELECT id, tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, linha, calculo FROM vn_mobile_orcamento_catalogo $where ORDER BY tipo ASC, nome ASC LIMIT 1000") as $r) {
         $add($r, 'mobile');
     }
 

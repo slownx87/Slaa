@@ -1,26 +1,21 @@
 /* =========================================================================
-   VN System — Calcular por medida (janela dentro do pedido de serralheria)
+   VN System — Produto cobrado por medida (cadastro e janela "Informar a medida" do orçamento)
    Só usa tokens do vn-ui.css / vn-pedido.css (claro e escuro).
    ========================================================================= */
 
-/* aviso no alto da janela (tabela de exemplo / tabela antiga) e "estrutura sem preço" */
-.med-aviso{margin:0 0 14px;padding:11px 14px;border-radius:12px;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-text);font-weight:700;font-size:.86rem;line-height:1.45}
-.med-aviso a{color:inherit;font-weight:800;text-decoration:underline}
-.med-aviso[hidden]{display:none!important}
-#medEst + .med-aviso{margin:-4px 0 14px}
+/* produto escolhido, no alto da janela "Informar a medida" */
+.med-prod{margin:0 0 14px}
+.med-prod strong{display:block;font-size:1.08rem;font-weight:800;color:var(--text)}
+.med-prod small{display:block;color:var(--muted);font-weight:600;font-size:.84rem;line-height:1.4;margin-top:3px}
+.med-prod small:empty{display:none}
 
-/* níveis da estrutura e perfis de mão de obra: botões que quebram de linha */
-.med-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
-.med-chips button{
-  display:inline-flex;align-items:center;gap:7px;min-height:46px;padding:0 15px;border-radius:999px;
-  border:1.5px solid var(--line-strong);background:var(--surface);color:var(--text);font:inherit;font-weight:800;font-size:.92rem;cursor:pointer;
-}
-.med-chips button small{font-weight:700;color:var(--muted);font-size:.76rem}
-.med-chips button:hover{border-color:var(--primary)}
-.med-chips button[aria-pressed="true"]{border-color:var(--primary);background:var(--primary-softer);color:var(--primary-ink);box-shadow:var(--ring)}
-html[data-theme="dark"] .med-chips button[aria-pressed="true"]{color:var(--text)}
-.med-chips button[aria-pressed="true"] small{color:inherit;opacity:.85}
-.med-chips button:focus-visible{outline:0;box-shadow:var(--ring)}
+/* cartão do catálogo de um produto cobrado por medida: avisa que o toque pede a medida */
+.pd-sel .info .med-dica{display:block;margin-top:4px;color:var(--primary-fg);font-weight:800;font-size:.78rem}
+
+/* cadastro do produto: a conta da medida (largura × altura = área) e o preço ocupando a linha inteira quando não há quantidade */
+.med-conta{margin:-2px 0 12px;padding:10px 14px;border-radius:12px;background:var(--surface-2);color:var(--text);font-weight:800;font-size:.92rem;font-variant-numeric:tabular-nums}
+.med-conta[hidden]{display:none!important}
+.pd-grid2 > .med-full{grid-column:1 / -1}
 
 /* resumo da conta */
 .med-resumo{background:var(--surface-2);border-radius:14px;padding:4px 16px;margin:8px 0 14px}

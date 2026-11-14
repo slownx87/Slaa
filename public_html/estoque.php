@@ -112,6 +112,7 @@ function vn_render_estoque_grupo_v9(string $titulo, string $subtitulo, array $it
                                 <input type="hidden" name="catalogo_tipo" value="<?php echo vn_h($tipoItem); ?>">
                                 <div class="vn-field"><label>Nome</label><input name="catalogo_nome" value="<?php echo vn_h($it['nome']); ?>" required></div>
                                 <div class="vn-field"><label>Unidade</label><input name="catalogo_unidade" value="<?php echo vn_h($it['unidade'] ?? 'un'); ?>"></div>
+                                <?php if (function_exists('vn_serr_calculo_select')): ?><div class="vn-field"><label>Como cobrar</label><?php echo vn_serr_calculo_select((string)($it['calculo'] ?? '')); ?><small class="vn-help">Por medida (m², metro, degrau, hora, kg): no orçamento a tela pede a medida e calcula.</small></div><?php endif; ?>
                                 <div class="vn-field"><label>Qtd no estoque</label><input name="catalogo_quantidade_estoque" inputmode="decimal" value="<?php echo number_format($qtdEstoque, 2, ',', '.'); ?>"></div>
                                 <?php if (!$isServico): ?><div class="vn-field"><label>Estoque mínimo</label><input name="catalogo_estoque_minimo" inputmode="decimal" placeholder="padrão" value="<?php echo isset($it['estoque_minimo']) && $it['estoque_minimo'] !== null && $it['estoque_minimo'] !== '' ? number_format((float)$it['estoque_minimo'], 2, ',', '.') : ''; ?>"><small class="vn-help">Avisa em "Faltando" quando ficar abaixo. Vazio = limite geral.</small></div><?php endif; ?>
                                 <div class="vn-field"><label>Custo</label><input class="js-custo" name="catalogo_custo" inputmode="decimal" value="<?php echo number_format($custo, 2, ',', '.'); ?>"></div>
@@ -156,6 +157,7 @@ function vn_render_form_catalogo_v9(string $titulo, string $subtitulo, string $t
             </select></div>
             <div class="vn-field"><label><?php echo vn_h($nomeLabel); ?></label><input name="catalogo_nome" required placeholder="<?php echo vn_h($nomePlaceholder); ?>"></div>
             <div class="vn-field"><label>Unidade</label><input name="catalogo_unidade" value="<?php echo vn_h($unidade); ?>"></div>
+            <?php if (function_exists('vn_serr_calculo_select')): ?><div class="vn-field"><label>Como cobrar</label><?php echo vn_serr_calculo_select(''); ?><small class="vn-help">Por medida (m², metro, degrau, hora, kg): no orçamento a tela pede a medida e calcula.</small></div><?php endif; ?>
             <div class="vn-field"><label>Qtd no estoque</label><input name="catalogo_quantidade_estoque" inputmode="decimal" value="0,00" placeholder="0,00"></div>
             <?php if (!$isServico): ?><div class="vn-field"><label>Estoque mínimo</label><input name="catalogo_estoque_minimo" inputmode="decimal" placeholder="padrão"><small class="vn-help">Avisa em "Faltando" quando ficar abaixo. Vazio = limite geral.</small></div><?php endif; ?>
             <div class="vn-field"><label>Custo</label><input class="js-custo" name="catalogo_custo" inputmode="decimal" value="0,00" placeholder="0,00"></div>

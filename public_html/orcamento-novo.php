@@ -41,12 +41,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['acao'] ?? '') === 
             $custoRap = vn_money_db($_POST['catalogo_custo'] ?? 0);
             if ($custoRap > 0) { $sets[] = 'custo_unitario = ?'; $par[] = $custoRap; }
             if (!empty($_POST['catalogo_foto_url'])) { $sets[] = 'foto_url = ?'; $par[] = (string)$_POST['catalogo_foto_url']; }
+            // como cobrar (por unidade ou por medida): cadastrar de novo o mesmo produto também atualiza o cálculo
+            if (isset($_POST['catalogo_calculo']) && function_exists('vn_serr_calculo_valido')) {
+                $calcRap = vn_serr_calculo_valido($_POST['catalogo_calculo']);
+                $sets[] = 'calculo = ?'; $par[] = $calcRap;
+                if ($calcRap !== '') { $sets[] = 'unidade = ?'; $par[] = vn_serr_calculo_unidade($calcRap); }
+            }
             $par[] = $idRap;
             vn_exec('UPDATE vn_mobile_orcamento_catalogo SET ' . implode(', ', $sets) . ' WHERE id = ? LIMIT 1', $par);
         } else {
             $idRap = (int)vn_salvar_catalogo_orcamento_mobile_v6($_POST);
         }
-        $rowRap = vn_fetch_one('SELECT id, tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, linha FROM vn_mobile_orcamento_catalogo WHERE id = ? LIMIT 1', [$idRap]);
+        $rowRap = vn_fetch_one('SELECT id, tipo, nome, descricao, foto_url, unidade, valor_unitario, custo_unitario, quantidade_estoque, estoque_minimo, linha, calculo FROM vn_mobile_orcamento_catalogo WHERE id = ? LIMIT 1', [$idRap]);
         $itemRap = null;
         if ($rowRap) {
             $itemRap = ['origem' => 'mobile', 'id' => (int)$rowRap['id'], 'tipo' => $tipoRap, 'nome' => vn_clean($rowRap['nome']),
@@ -54,7 +60,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['acao'] ?? '') === 
                 'foto_url' => trim((string)$rowRap['foto_url']), 'unidade' => vn_clean($rowRap['unidade'] ?? 'un'),
                 'valor_unitario' => (float)$rowRap['valor_unitario'], 'custo_unitario' => (float)$rowRap['custo_unitario'],
                 'quantidade_estoque' => (float)$rowRap['quantidade_estoque'], 'estoque_minimo' => ($rowRap['estoque_minimo'] !== null && $rowRap['estoque_minimo'] !== '') ? (float)$rowRap['estoque_minimo'] : null,
-                'linha' => vn_linha_catalogo($rowRap['linha'] ?? '', $tipoRap)];
+                'linha' => vn_linha_catalogo($rowRap['linha'] ?? '', $tipoRap),
+                'calculo' => function_exists('vn_serr_calculo_valido') ? vn_serr_calculo_valido($rowRap['calculo'] ?? '') : ''];
         }
         echo json_encode(['ok' => true, 'id' => $idRap, 'existente' => $jaExistia, 'item' => $itemRap]);
     } catch (Throwable $e) {
@@ -354,8 +361,7 @@ vn_alerts($ok, $erro);
         elseif ((string)($it['linha'] ?? 'cftv') === 'serralheria') $htmlSerr .= $htmlItem($it);
         else $htmlPeca .= $htmlItem($it);
     }
-    $p = '<button type="button" class="pd-row clic" id="medidaRow" data-abrir="shMedida" data-linha-row="serralheria">' . pd_ico('square_foot') . '<span class="pd-lbl">Calcular por medida<small>m², metro linear, degrau, hora</small></span><span class="pd-plus" aria-hidden="true">' . pd_ico('add') . '</span></button>'
-        . '<button type="button" class="pd-row clic" data-grupo-abrir="servicos">' . pd_ico('assignment') . '<span class="pd-lbl">Serviços<small id="servResumo" data-dica="' . $countServicos . ' no catálogo · ou cadastre na hora">' . $countServicos . ' no catálogo · ou cadastre na hora</small></span><span class="pd-plus" aria-hidden="true">' . pd_ico('add') . '</span>' . pd_ico('chevron_right', ' class="pd-go" hidden') . '</button>'
+    $p = '<button type="button" class="pd-row clic" data-grupo-abrir="servicos">' . pd_ico('assignment') . '<span class="pd-lbl">Serviços<small id="servResumo" data-dica="' . $countServicos . ' no catálogo · ou cadastre na hora">' . $countServicos . ' no catálogo · ou cadastre na hora</small></span><span class="pd-plus" aria-hidden="true">' . pd_ico('add') . '</span>' . pd_ico('chevron_right', ' class="pd-go" hidden') . '</button>'
         . '<div class="pd-items" id="itemsServicos">' . $htmlServ . '</div>'
         . '<button type="button" class="pd-row clic" data-grupo-abrir="pecas" data-linha-row="cftv">' . pd_ico('deployed_code') . '<span class="pd-lbl">Peças<small id="pecaResumo" data-dica="' . $countPecas . ' da base · ou cadastre uma para comprar">' . $countPecas . ' da base · ou cadastre uma para comprar</small></span><span class="pd-plus" aria-hidden="true">' . pd_ico('add') . '</span>' . pd_ico('chevron_right', ' class="pd-go" hidden') . '</button>'
         . '<div class="pd-items" id="itemsPecas" data-linha-row="cftv">' . $htmlPeca . '</div>'
@@ -426,13 +432,12 @@ vn_alerts($ok, $erro);
         <div class="pd-sheet-f"><button type="button" class="pd-btn bad" data-i-remover style="flex:0 0 auto"><?php echo pd_ico('delete'); ?>Remover</button><button type="button" class="pd-btn" data-i-salvar>salvar item</button></div>
     </div></dialog>
 
-    <!-- ============ Janela: calcular por medida (serralheria) ============ -->
+    <!-- ============ Janela: informar a medida de um produto cobrado por medida (serralheria) ============ -->
+    <!-- O produto define COMO se cobra (m², metro, degrau, hora, kg) e o valor de cada medida quando é cadastrado; aqui só se informa a medida. -->
     <dialog class="pd-sheet alta" id="shMedida" aria-labelledby="shMedidaT"><div class="pd-sheet-in">
-        <div class="pd-sheet-h"><button type="button" class="pd-x" data-fechar aria-label="Voltar"><?php echo pd_ico('arrow_back'); ?></button><h3 id="shMedidaT">Calcular por medida</h3><span></span></div>
+        <div class="pd-sheet-h"><button type="button" class="pd-x" data-fechar aria-label="Voltar"><?php echo pd_ico('arrow_back'); ?></button><h3 id="shMedidaT">Informar a medida</h3><span></span></div>
         <div class="pd-sheet-b">
-            <div class="med-aviso" data-med-aviso hidden></div>
-            <label class="pd-lab" for="medEst">O que você vai fazer?</label>
-            <select class="pd-in" id="medEst"><option value="">Escolha a estrutura ou o serviço…</option></select>
+            <div class="med-prod"><strong data-med-nome>—</strong><small data-med-det></small></div>
 
             <div data-med-bloco="m2" hidden>
                 <div class="pd-grid2">
@@ -446,24 +451,18 @@ vn_alerts($ok, $erro);
             <div data-med-bloco="degrau" hidden><label class="pd-lab" for="medDeg">Quantos degraus</label><input class="pd-in" id="medDeg" inputmode="numeric" placeholder="0" autocomplete="off"></div>
             <div data-med-bloco="h" hidden><label class="pd-lab" for="medHoras">Quantas horas</label><input class="pd-in" id="medHoras" inputmode="decimal" placeholder="0" autocomplete="off"></div>
             <div data-med-bloco="kg" hidden><label class="pd-lab" for="medKg">Peso (kg)</label><input class="pd-in" id="medKg" inputmode="decimal" placeholder="0" autocomplete="off"></div>
-            <div data-med-bloco="un" hidden><label class="pd-lab" for="medUn">Quantidade</label><input class="pd-in" id="medUn" inputmode="decimal" placeholder="1" autocomplete="off"></div>
 
-            <span class="pd-lab">Nível da estrutura</span>
-            <div class="med-chips" data-med-niveis role="group" aria-label="Nível da estrutura"></div>
-            <span class="pd-lab">Perfil de mão de obra</span>
-            <div class="med-chips" data-med-perfis role="group" aria-label="Perfil de mão de obra"></div>
-
+            <label class="pd-lab" for="medPreco" data-med-preco-rot>Preço por medida (R$)</label>
+            <input class="pd-in" id="medPreco" inputmode="decimal" placeholder="0,00" autocomplete="off">
             <label class="pd-lab" for="medObs">Detalhes (opcional)</label>
             <input class="pd-in" id="medObs" maxlength="120" placeholder="Ex.: com pintura eletrostática" autocomplete="off">
 
             <div class="med-resumo" aria-live="polite">
                 <div class="l"><span>Medida</span><b data-r-medida>—</b></div>
-                <div class="l"><span>Estrutura<small data-r-est-sub></small></span><b data-r-estrutura>R$ 0,00</b></div>
-                <div class="l"><span>Mão de obra<small data-r-mao-sub></small></span><b data-r-mao>R$ 0,00</b></div>
                 <div class="l"><span data-r-unit-rot>Preço por medida</span><b data-r-unit>R$ 0,00</b></div>
                 <div class="l tot"><span>Total</span><b data-r-total>R$ 0,00</b></div>
             </div>
-            <p class="pd-hint" data-med-nota>Os preços vêm da <a href="serralheria-precos.php" target="_blank" rel="noopener" data-vn-janela="Preços da serralheria">tabela de preços da serralheria</a>. O nível ajusta o preço da estrutura e o perfil ajusta a mão de obra.</p>
+            <p class="pd-hint">O valor de cada medida vem do cadastro do produto. Se precisar, ajuste aqui só para este pedido.</p>
         </div>
         <div class="pd-sheet-f"><div class="med-foot-tot" aria-live="polite"><small>Total</small><b data-r-total-foot>R$ 0,00</b></div><button type="button" class="pd-btn" data-med-add disabled>adicionar ao pedido</button></div>
     </div></dialog>
@@ -584,7 +583,9 @@ function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chav
     $isPeca = $tipoBase !== 'servico';
     $nomeLinha = $linha === 'serralheria' ? 'serralheria' : 'CFTV';          // catálogo onde a peça cadastrada aqui fica salva
     $tres = $isPeca && $linhaExtra !== '';                                   // aba extra: cadastrar peça da outra linha direto no catálogo dela
-    $rotCad = $tres ? $nomeLinha : $rotulo; ?>
+    $rotCad = $tres ? $nomeLinha : $rotulo;
+    $comCalc = ($tipoBase === 'servico') || ($linha === 'serralheria');     // cobrar por medida (m², metro, degrau, hora, kg): peça de serralheria e serviço
+    $opcCalc = ($comCalc && function_exists('vn_serr_calculos_opcoes')) ? vn_serr_calculos_opcoes() : []; ?>
     <dialog class="pd-sheet alta" id="<?php echo vn_h($id); ?>" data-rotulo="<?php echo vn_h($rotulo); ?>" data-tipo-base="<?php echo vn_h($tipoBase); ?>"<?php echo $linha !== '' ? ' data-linha="' . vn_h($linha) . '"' : ''; ?> aria-labelledby="<?php echo vn_h($id); ?>T"><div class="pd-sheet-in">
         <div class="pd-sheet-h"><button type="button" class="pd-x" data-fechar aria-label="Voltar"><?php echo pd_ico('arrow_back'); ?></button><h3 id="<?php echo vn_h($id); ?>T">Adicionar <?php echo vn_h($rotulo); ?> ao pedido</h3><span></span></div>
         <div class="pd-tabs<?php echo $tres ? ' tres' : ''; ?>">
@@ -599,13 +600,14 @@ function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chav
                 <div data-grupo data-grupo-tipo="<?php echo vn_h($k); ?>" data-titulo="<?php echo vn_h($g['titulo']); ?>"<?php echo empty($g['itens']) ? ' hidden' : ''; ?>>
                     <div class="pd-grp"><?php echo vn_h($g['titulo']); ?> · <?php echo count($g['itens']); ?></div>
                     <?php foreach ($g['itens'] as $c): ?>
-                        <div class="pd-sel" data-sel data-id="<?php echo (int)$c['id']; ?>" data-origem="<?php echo vn_h($c['origem']); ?>" data-linha-item="<?php echo vn_h((string)($c['linha'] ?? 'cftv')); ?>" data-busca="<?php echo vn_h(vn_lower(($c['nome'] ?? '') . ' ' . ($c['descricao'] ?? '') . ' ' . $g['titulo'])); ?>">
+                        <div class="pd-sel" data-sel data-id="<?php echo (int)$c['id']; ?>" data-origem="<?php echo vn_h($c['origem']); ?>" data-linha-item="<?php echo vn_h((string)($c['linha'] ?? 'cftv')); ?>" data-calculo="<?php echo vn_h((string)($c['calculo'] ?? '')); ?>" data-busca="<?php echo vn_h(vn_lower(($c['nome'] ?? '') . ' ' . ($c['descricao'] ?? '') . ' ' . $g['titulo'])); ?>">
                             <?php if (!empty($c['foto_url'])): ?><img src="<?php echo vn_h($c['foto_url']); ?>" alt="" loading="lazy"><?php else: ?><span class="sem-img"></span><?php endif; ?>
                             <div class="info"><strong><?php echo vn_h($c['nome']); ?></strong>
-                                <?php if (!empty($c['descricao']) && $c['descricao'] !== $c['nome']): ?><small><?php echo vn_h($c['descricao']); ?></small><?php endif; ?></div>
+                                <?php if (!empty($c['descricao']) && $c['descricao'] !== $c['nome']): ?><small><?php echo vn_h($c['descricao']); ?></small><?php endif; ?>
+                                <?php if (!empty($c['calculo'])): ?><small class="med-dica">Toque e informe a medida</small><?php endif; ?></div>
                             <span class="chk">✓</span>
                             <div class="preco"><small>Preço por <?php echo vn_h($c['unidade'] ?? 'unidade'); ?>:</small><strong><?php echo vn_h(vn_money($c['valor_unitario'])); ?></strong></div>
-                            <?php if ($isPeca): ?><div class="preco" style="border:0;padding-top:0;margin-top:0"><span class="est">Quantidade em estoque:</span><span class="est"><?php echo vn_h(number_format((float)($c['quantidade_estoque'] ?? 0), 2, ',', '.')); ?> <?php echo vn_h($c['unidade'] ?? 'un'); ?></span></div><?php endif; ?>
+                            <?php if ($isPeca && empty($c['calculo'])): ?><div class="preco" style="border:0;padding-top:0;margin-top:0"><span class="est">Quantidade em estoque:</span><span class="est"><?php echo vn_h(number_format((float)($c['quantidade_estoque'] ?? 0), 2, ',', '.')); ?> <?php echo vn_h($c['unidade'] ?? 'un'); ?></span></div><?php endif; ?>
                         </div>
                     <?php endforeach; ?>
                 </div>
@@ -625,11 +627,35 @@ function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chav
                     <?php if ($isPeca): ?><option value="material">Material</option><option value="equipamento">Equipamento</option><option value="produto_usado">Produto usado</option><option value="outro">Outro</option>
                     <?php else: ?><option value="servico">Serviço</option><option value="mao_obra">Mão de obra</option><?php endif; ?>
                 </select></div>
-                <div class="pd-f"><label class="pd-lab">Unidade de medida</label><input class="pd-in" data-new-un value="un"></div>
+                <div class="pd-f" data-new-un-box><label class="pd-lab">Unidade de medida</label><input class="pd-in" data-new-un value="un"></div>
             </div>
+            <?php if ($opcCalc): ?>
+            <div class="pd-f" data-new-calc-box>
+                <label class="pd-lab" for="<?php echo vn_h($id); ?>Calc">Como cobrar</label>
+                <select class="pd-in" id="<?php echo vn_h($id); ?>Calc" data-new-calc>
+                    <option value="">Por unidade (quantidade)</option>
+                    <?php foreach ($opcCalc as $oc): ?><option value="<?php echo vn_h($oc[0]); ?>"><?php echo vn_h($oc[1]); ?></option><?php endforeach; ?>
+                </select>
+            </div>
+            <div data-new-medida hidden>
+                <div data-new-mbloco="m2" hidden>
+                    <div class="pd-grid2">
+                        <div class="pd-f"><label class="pd-lab">Largura (m)</label><input class="pd-in" data-new-m="larg" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+                        <div class="pd-f"><label class="pd-lab">Altura (m)</label><input class="pd-in" data-new-m="alt" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+                    </div>
+                    <label class="pd-lab">Quantas peças iguais</label>
+                    <div class="pd-step"><button type="button" class="menos" data-new-pecas-menos aria-label="Diminuir">−</button><input data-new-m="pecas" inputmode="numeric" value="1" aria-label="Quantas peças iguais"><button type="button" class="mais" data-new-pecas-mais aria-label="Aumentar">＋</button></div>
+                </div>
+                <div data-new-mbloco="m" hidden><label class="pd-lab">Comprimento (m)</label><input class="pd-in" data-new-m="comp" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+                <div data-new-mbloco="degrau" hidden><label class="pd-lab">Quantos degraus</label><input class="pd-in" data-new-m="deg" inputmode="numeric" placeholder="0" autocomplete="off"></div>
+                <div data-new-mbloco="h" hidden><label class="pd-lab">Quantas horas</label><input class="pd-in" data-new-m="horas" inputmode="decimal" placeholder="0" autocomplete="off"></div>
+                <div data-new-mbloco="kg" hidden><label class="pd-lab">Peso (kg)</label><input class="pd-in" data-new-m="kg" inputmode="decimal" placeholder="0" autocomplete="off"></div>
+                <p class="med-conta" data-new-conta hidden></p>
+            </div>
+            <?php endif; ?>
             <div class="pd-grid2">
-                <div class="pd-f"><label class="pd-lab">Preço unitário (R$)</label><input class="pd-in" data-new-preco inputmode="decimal" placeholder="0,00"></div>
-                <div class="pd-f"><label class="pd-lab">Quantidade</label><div class="pd-step"><button type="button" class="menos" data-new-menos aria-label="Diminuir">−</button><input data-new-qtd inputmode="decimal" value="1" aria-label="Quantidade"><button type="button" class="mais" data-new-mais aria-label="Aumentar">＋</button></div></div>
+                <div class="pd-f" data-new-preco-box><label class="pd-lab" data-new-preco-rot>Preço unitário (R$)</label><input class="pd-in" data-new-preco inputmode="decimal" placeholder="0,00"></div>
+                <div class="pd-f" data-new-qtd-box><label class="pd-lab">Quantidade</label><div class="pd-step"><button type="button" class="menos" data-new-menos aria-label="Diminuir">−</button><input data-new-qtd inputmode="decimal" value="1" aria-label="Quantidade"><button type="button" class="mais" data-new-mais aria-label="Aumentar">＋</button></div></div>
             </div>
             <div class="pd-valor"><span>Valor</span><span data-new-valor>R$ 0,00</span></div>
             <button type="button" class="pd-sub-h" data-new-cl-toggle aria-expanded="true"><h4>Custo &amp; Lucro</h4><span class="pd-chev"><?php echo pd_ico('keyboard_arrow_up'); ?></span></button>
@@ -642,7 +668,7 @@ function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chav
                 <p class="pd-hint">Margem = parte do preço que é lucro. Markup = quanto se soma ao custo. Preencheu o custo e uma das duas, o preço é calculado.</p>
             </div>
             <?php if ($isPeca): ?>
-            <div class="pd-grid2">
+            <div class="pd-grid2" data-new-origem-box>
                 <div class="pd-f"><label class="pd-lab">Origem da peça</label><select class="pd-in" data-new-origem><option value="comprar">Para comprar</option><option value="estoque">Da base (em estoque)</option></select></div>
                 <div class="pd-f"><label class="pd-lab">Qtd em estoque (ao salvar)</label><input class="pd-in" data-new-estoque inputmode="decimal" placeholder="0"></div>
             </div>
@@ -674,11 +700,6 @@ window.VN_PEDIDO = <?php echo json_encode([
     'categoria' => $catAtual,
 ], $jsonSeguro); ?>;
 </script>
-<script>window.VN_SERR = <?php
-    $serrDados = null;
-    try { if (function_exists('vn_serr_para_js')) $serrDados = vn_serr_para_js(); } catch (Throwable $e) { $serrDados = null; }
-    echo json_encode($serrDados, $jsonSeguro);
-?>;</script>
 <script defer src="<?php echo vn_h(vn_ui_asset('assets/js/vn-pedido.js')); ?>"></script>
 <script defer src="<?php echo vn_h(vn_ui_asset('assets/js/vn-serr-medida.js')); ?>"></script>
 <?php vn_ui_shell_end('novo'); ?>
