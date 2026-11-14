@@ -14,7 +14,7 @@ final class Config {
     /** Marca no final do User-Agent: o servidor e o JavaScript sabem que é o app. */
     static final String UA_SUFFIX = " VNSystemApp/2.0";
     /** Versão do app (também no AndroidManifest/build.sh). */
-    static final String VERSION = "2.0.0";
+    static final String VERSION = "2.0.1";
 
     /** O host é do site (vnsystemltda.com, www.vnsystemltda.com ou subdomínio)? */
     static boolean isSiteHost(String host) {

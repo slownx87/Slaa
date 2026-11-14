@@ -13,8 +13,8 @@ set -euo pipefail
 AQUI="$(cd "$(dirname "$0")" && pwd)"
 cd "$AQUI"
 
-VERSION_NAME="2.0.0"
-VERSION_CODE=20
+VERSION_NAME="2.0.1"
+VERSION_CODE=21
 MIN_SDK=21
 TARGET_SDK=34
 

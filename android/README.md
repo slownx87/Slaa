@@ -3,7 +3,7 @@
 O site `https://vnsystemltda.com` dentro de um aplicativo, com tudo que o site faz. É um navegador próprio (WebView) mais as partes
 que o WebView sozinho não faz.
 
-APK pronto: `dist/VNSystem-2.0.0.apk` (assinado, Android 5.0 ou mais novo).
+APK pronto: `dist/VNSystem-2.0.1.apk` (assinado, Android 5.0 ou mais novo).
 
 ## O que o app faz
 
