@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    VN System — aplicativo Android (o site https://vnsystemltda.com dentro de um app, com tudo que o site faz).
+    O app é um navegador próprio (WebView) com as partes que o WebView sozinho não faz: baixar PDF e outros arquivos,
+    enviar fotos e vídeos (várias de uma vez, câmera), câmera e localização do site, compartilhar, imprimir e avisar de OS novas.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.vnsystem.app">
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Só no Android 9 ou mais antigo: salvar na pasta pública Downloads. Do Android 10 em diante não precisa. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
+
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+    <uses-feature android:name="android.hardware.location" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+
+    <!-- Android 11+: sem isto o app não "enxerga" os outros aplicativos (WhatsApp, leitor de PDF, câmera, mapas...). -->
+    <queries>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="http"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="tel"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="mailto"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="geo"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="whatsapp"/></intent>
+        <intent><action android:name="android.intent.action.SENDTO"/><data android:scheme="sms"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="application/pdf"/></intent>
+        <intent><action android:name="android.media.action.IMAGE_CAPTURE"/></intent>
+        <intent><action android:name="android.media.action.VIDEO_CAPTURE"/></intent>
+        <intent><action android:name="android.intent.action.GET_CONTENT"/><data android:mimeType="*/*"/></intent>
+        <package android:name="com.whatsapp"/>
+        <package android:name="com.whatsapp.w4b"/>
+    </queries>
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/TemaVN"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:hardwareAccelerated="true"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|layoutDirection|fontScale|density"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Links do próprio site (ex.: mandados pelo WhatsApp) podem abrir no app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="vnsystemltda.com"/>
+                <data android:scheme="https" android:host="www.vnsystemltda.com"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Entrega arquivos (foto da câmera, PDF baixado) para a câmera, o leitor de PDF e o compartilhar. -->
+        <provider
+            android:name=".VNFileProvider"
+            android:authorities="com.vnsystem.app.files"
+            android:exported="false"
+            android:grantUriPermissions="true"/>
+
+        <!-- Avisos de OS nova / alterada e de cobranças chegando (confere de tempos em tempos). -->
+        <service
+            android:name=".AvisosJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE"/>
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

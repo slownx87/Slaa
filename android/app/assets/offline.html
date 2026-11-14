@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sem conexão</title>
+<style>
+  :root{color-scheme:light dark}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#f8f9fa;color:#1f2937;
+       font-family:system-ui,-apple-system,Roboto,"Segoe UI",sans-serif;text-align:center}
+  .c{max-width:340px}
+  .i{width:76px;height:76px;margin:0 auto 18px;border-radius:50%;background:#dbeafe;display:flex;align-items:center;justify-content:center}
+  .i svg{width:38px;height:38px;fill:none;stroke:#2563eb;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  h1{font-size:1.25rem;margin:0 0 8px}
+  p{margin:0 0 22px;color:#4b5563;line-height:1.5}
+  button{background:#2563eb;color:#fff;border:0;border-radius:12px;padding:14px 24px;font:inherit;font-weight:700;min-width:210px}
+  button:active{background:#1d4ed8}
+  @media (prefers-color-scheme:dark){
+    body{background:#0b1220;color:#e5e7eb}
+    p{color:#9ca3af}
+    .i{background:#1e3a8a}
+    .i svg{stroke:#93c5fd}
+  }
+</style>
+</head>
+<body>
+<div class="c">
+  <div class="i" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5h.01"/><path d="M3 3l18 18"/></svg></div>
+  <h1>Sem conexão com o sistema</h1>
+  <p>Confira a internet (Wi-Fi ou dados móveis). Quando voltar, o app tenta abrir sozinho.</p>
+  <button id="b" type="button">Tentar de novo</button>
+</div>
+<script>
+  document.getElementById('b').addEventListener('click', function () {
+    if (window.VNApp && VNApp.recarregar) VNApp.recarregar(); else location.reload();
+  });
+</script>
+</body>
+</html>

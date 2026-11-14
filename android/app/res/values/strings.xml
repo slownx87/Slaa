@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VN System</string>
+    <string name="canal_downloads">Downloads</string>
+    <string name="canal_avisos">Avisos do sistema</string>
+</resources>
