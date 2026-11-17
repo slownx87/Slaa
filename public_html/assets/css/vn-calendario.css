@@ -1,0 +1,45 @@
+/* =========================================================================
+   VN System — Calendário para escolher datas (vn-calendario.js). Só usa tokens do vn-ui.css (claro/escuro).
+   ========================================================================= */
+.vn-cal{
+  border:0;padding:0;margin:auto;background:var(--surface);color:var(--text);
+  width:min(360px,calc(100vw - 20px));border-radius:var(--radius-lg,16px);box-shadow:var(--shadow-lg);
+}
+.vn-cal::backdrop{background:rgba(15,23,42,.55);backdrop-filter:blur(3px)}
+.vn-cal *{box-sizing:border-box}
+.vn-cal [hidden]{display:none!important}
+.vn-cal-in{padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
+.vn-cal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:4px 4px 0 6px}
+.vn-cal-tit strong{display:block;font-size:1rem;font-weight:800}
+.vn-cal-tit small{display:block;color:var(--muted);font-size:.8rem;font-weight:600;margin-top:1px}
+.vn-cal-x{width:40px;height:40px;border:0;border-radius:var(--radius);background:transparent;color:var(--text-soft);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.vn-cal-x:hover{background:var(--surface-2);color:var(--text)}
+.vn-cal-nav{display:grid;grid-template-columns:44px minmax(0,1fr) 92px 44px;gap:6px;align-items:center}
+.vn-cal-nav select{
+  min-height:44px;min-width:0;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--text);
+  font:inherit;font-size:16px;font-weight:700;padding:0 8px;
+}
+.vn-cal-seta{width:44px;height:44px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.vn-cal-seta:hover{border-color:var(--primary);color:var(--primary-fg)}
+.vn-cal-volta{transform:scaleX(-1)}   /* só existe o ícone chevron_right na fonte: o da esquerda é o mesmo espelhado */
+.vn-cal-sem,.vn-cal-grade{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.vn-cal-sem span{text-align:center;font-size:.74rem;font-weight:800;color:var(--muted);padding:4px 0}
+.vn-cal-grade button{
+  min-height:44px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--text);
+  font:inherit;font-size:1rem;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums;
+}
+.vn-cal-grade button:hover:not(:disabled){background:var(--primary-softer);color:var(--primary-ink)}
+html[data-theme="dark"] .vn-cal-grade button:hover:not(:disabled){color:var(--text)}
+.vn-cal-grade button.hoje{border-color:var(--primary);color:var(--primary-fg)}
+.vn-cal-grade button.sel{background:var(--primary);border-color:var(--primary);color:#fff}
+.vn-cal-grade button:disabled{opacity:.35;cursor:not-allowed}
+.vn-cal-grade button:focus-visible,.vn-cal-btn:focus-visible,.vn-cal-seta:focus-visible,.vn-cal-nav select:focus-visible{outline:0;box-shadow:var(--ring)}
+.vn-cal-foot{display:flex;gap:8px;align-items:center;margin-top:2px}
+.vn-cal-esp{flex:1}
+.vn-cal-btn{min-height:44px;padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);color:var(--text);font:inherit;font-size:.88rem;font-weight:800;cursor:pointer}
+.vn-cal-btn:hover:not(:disabled){border-color:var(--primary);background:var(--primary-softer);color:var(--primary-ink)}
+html[data-theme="dark"] .vn-cal-btn:hover:not(:disabled){color:var(--text)}
+.vn-cal-btn:disabled{opacity:.45;cursor:not-allowed}
+/* campos de data da tela: parecem clicáveis */
+input[type="date"]:not([data-cal="nativo"]){cursor:pointer}
+@media(max-width:480px){.vn-cal{width:calc(100vw - 16px)}}

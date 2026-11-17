@@ -397,3 +397,9 @@ html[data-theme="dark"] .cb-venc-in input,html[data-theme="dark"] .cb-datavenda 
 .cb-anexo form button .material-symbols-outlined{font-size:1rem}
 .cb-anexo-envio{margin:0}
 .cb-anexo-envio label{cursor:pointer}
+
+/* escolha do mês (setas, mês e ano) */
+.cb-mes-bar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.cb-mes-bar .vn-filter{margin:0;flex:1 1 280px;min-width:0;max-width:100%}
+.cb-mes-bar .vn-mes-wrap,.cb-mes-bar .vn-mes{min-width:0;max-width:100%;width:100%}
+.cb-mes-nota{margin:0;flex:1 1 240px;color:var(--muted);font-size:.8rem;font-weight:600;line-height:1.4}

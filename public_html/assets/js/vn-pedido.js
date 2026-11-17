@@ -323,7 +323,9 @@
       var base = m.getAttribute('data-tipo-base');
       return serv ? base === 'servico' : (base !== 'servico' && m.getAttribute('data-linha') === it.linha);
     })[0];
-    if (alvo && alvo.__novoCard) alvo.__novoCard(it);
+    if (alvo && alvo.__novoCard) alvo.__novoCard(it, false);
+    // peça de CFTV: também entra na aba "Peças de CFTV" da janela de peças de serralheria (só para consulta/uso no pedido)
+    if (!serv && it.linha === 'cftv') $$('dialog[data-tipo-base]').forEach(function (m) { if (m !== alvo && m.__novoCard && $('[data-tab-body="cftv"]', m)) m.__novoCard(it, true); });
   }
 
   /* ------------------------------------------------------------------ janelas "adicionar peça / serviço" */
@@ -339,10 +341,12 @@
     function itemDoCard(card) {
       return (CFG.catalogo || []).filter(function (x) { return String(x.id) === card.getAttribute('data-id') && String(x.origem) === card.getAttribute('data-origem'); })[0];
     }
+    /* linha do item de um cartão: os da aba "Peças de CFTV" (dentro das peças de serralheria) entram no pedido como peça de CFTV */
+    function linhaDoCard(card) { return card.closest && card.closest('[data-tab-body="cftv"]') ? 'cftv' : (linhaModal || categoria); }
     /* itens do pedido que vieram deste cartão do catálogo (mesmo texto de linha e mesmo grupo) */
     function itensDoCard(card) {
       var it = itemDoCard(card), esperado = it ? nomeComDetalhe(it) : '';
-      return esperado ? todosItens().filter(function (el) { var d = lerItem(el); return d.desc === esperado && ehServico(d.tipo) === ehModalServico && (ehModalServico || d.linha === linhaModal); }) : [];
+      return esperado ? todosItens().filter(function (el) { var d = lerItem(el); return d.desc === esperado && ehServico(d.tipo) === ehModalServico && (ehModalServico || d.linha === linhaDoCard(card)); }) : [];
     }
     /* ao abrir: o que já está no pedido aparece marcado (com a quantidade), e desmarcar remove do pedido */
     function sincronizarCard(card) {
@@ -369,7 +373,7 @@
     function sincronizar() {
       var h3 = $('.pd-sheet-h h3', modal);   // o título acompanha a aba (na aba CFTV: "Adicionar peça de CFTV ao pedido")
       if (h3) h3.textContent = (aba === 'new' && soCatalogo()) ? 'Salvar ' + rotuloAtual() + ' no catálogo' : 'Adicionar ' + rotuloAtual() + ' ao pedido';
-      if (aba === 'cat') {
+      if (aba === 'cat' || aba === 'cftv') {
         var df = diferencas();
         okBtn.textContent = df.rem > 0 ? 'aplicar alterações (' + (df.add + df.rem) + ')' : (df.add > 0 ? 'adicionar selecionadas (' + df.add + ')' : 'adicionar');
         okBtn.disabled = df.add + df.rem === 0;
@@ -387,7 +391,7 @@
     var salvarEl = q('[data-new-salvar]');   // a caixa "salvar no catálogo" só existe em serviço: peça cadastrada vai sempre para o catálogo
     function linhaDestino() { return destino || linhaModal || categoria; }
     function outraLinha() { return !!destino && destino !== linhaModal; }
-    function rotuloAtual() { return outraLinha() ? 'peça de ' + (NOME_LINHA[destino] || destino) : rotulo; }
+    function rotuloAtual() { return aba === 'cftv' ? 'peça de CFTV' : (outraLinha() ? 'peça de ' + (NOME_LINHA[destino] || destino) : rotulo); }
     function soCatalogo() { var c = q('[data-new-no-pedido]'); return outraLinha() && !!c && !c.checked; }
     function atualizarNota() {
       var nota = q('[data-new-nota-txt]');
@@ -411,16 +415,18 @@
       var card = e.target.closest ? e.target.closest('[data-sel]') : null;
       if (!card || !modal.contains(card)) return;
       var itc = itemDoCard(card);   // produto cobrado por medida: pede a medida em vez de marcar (cada toque pode ser outro portão, outra grade...)
-      if (itc && unCalc(itc.calculo) && window.VNMedida) { window.VNMedida.abrir(itc, { tipo: itc.tipo || tipoBase, linha: linhaModal || categoria }); return; }
+      if (itc && unCalc(itc.calculo) && window.VNMedida) { window.VNMedida.abrir(itc, { tipo: itc.tipo || tipoBase, linha: linhaDoCard(card) }); return; }
       card.classList.toggle('marcado'); sincronizar();
     });
 
     /* peça/serviço recém-salvo no catálogo: entra (ou tem o preço atualizado) na aba Catálogo desta janela na hora, sem recarregar a tela */
-    modal.__novoCard = function (it) {
+    modal.__novoCard = function (it, naAbaCftv) {
       function el(tag, cls, txt) { var x = document.createElement(tag); if (cls) x.className = cls; if (txt != null) x.textContent = txt; return x; }
-      var grupo = $('[data-grupo-tipo="' + (it.tipo || tipoBase) + '"]', modal) || $('[data-grupo-tipo="outro"]', modal) || $('[data-grupo-tipo]', modal);
+      // a janela de serralheria tem duas listas: o Catálogo e a aba "Peças de CFTV" (a peça entra só na que é dela)
+      var base = (naAbaCftv ? $('[data-tab-body="cftv"]', modal) : $('[data-tab-body="cat"]', modal)) || modal;
+      var grupo = $('[data-grupo-tipo="' + (it.tipo || tipoBase) + '"]', base) || $('[data-grupo-tipo="outro"]', base) || $('[data-grupo-tipo]', base);
       if (!grupo) return;
-      var antigo = $$('[data-sel]', modal).filter(function (c) { return c.getAttribute('data-id') === String(it.id) && c.getAttribute('data-origem') === String(it.origem); })[0];
+      var antigo = $$('[data-sel]', base).filter(function (c) { return c.getAttribute('data-id') === String(it.id) && c.getAttribute('data-origem') === String(it.origem); })[0];
       var c = el('div', 'pd-sel'); c.setAttribute('data-sel', '');
       c.setAttribute('data-id', it.id); c.setAttribute('data-origem', it.origem || 'mobile'); c.setAttribute('data-linha-item', it.linha || 'cftv'); c.setAttribute('data-fora-linha', '0');
       c.setAttribute('data-busca', norm(it.nome + ' ' + it.descricao + ' ' + (grupo.getAttribute('data-titulo') || '')));
@@ -443,14 +449,14 @@
       var n = $$('[data-sel]', grupo).length;
       $('.pd-grp', grupo).textContent = (grupo.getAttribute('data-titulo') || '') + ' · ' + n;
       grupo.hidden = false;
-      var vazio = $('[data-vazio]', modal); if (vazio) vazio.hidden = true;
+      var vazio = $('[data-vazio]', base); if (vazio) vazio.hidden = true;
       sincronizar();
     };
-    q('[data-add-busca]').addEventListener('input', function (e) {
+    $$('[data-add-busca]', modal).forEach(function (campoBusca) { campoBusca.addEventListener('input', function (e) {
       var termo = norm(e.target.value).trim();
       $$('[data-sel]', modal).forEach(function (c) { c.hidden = (termo !== '' && norm(c.getAttribute('data-busca')).indexOf(termo) === -1) || c.getAttribute('data-fora-linha') === '1'; });
       $$('[data-grupo]', modal).forEach(function (g) { g.hidden = !$$('[data-sel]', g).some(function (c) { return !c.hidden; }); });
-    });
+    }); });
 
     /* cadastrar */
     var qtdEl = q('[data-new-qtd]'), precoEl = q('[data-new-preco]'), custoEl = q('[data-new-custo]'), lucroEl = q('[data-new-lucro]'), markEl = q('[data-new-markup]');
@@ -507,12 +513,12 @@
     }
 
     okBtn.addEventListener('click', function () {
-      if (aba === 'cat') {
+      if (aba === 'cat' || aba === 'cftv') {
         $$('[data-sel]', modal).forEach(function (card) {
           var marcado = card.classList.contains('marcado'), inicial = card.getAttribute('data-inicial') === '1';
           if (marcado && !inicial) {
             var it = itemDoCard(card);
-            if (it) adicionarItem({ tipo: it.tipo || tipoBase, desc: nomeComDetalhe(it), qtd: 1, preco: Number(it.valor_unitario) || 0, custo: Number(it.custo_unitario) || 0, origem: 'estoque', linha: linhaModal || categoria });
+            if (it) adicionarItem({ tipo: it.tipo || tipoBase, desc: nomeComDetalhe(it), qtd: 1, preco: Number(it.valor_unitario) || 0, custo: Number(it.custo_unitario) || 0, origem: 'estoque', linha: linhaDoCard(card) });
           } else if (!marcado && inicial) {
             itensDoCard(card).forEach(function (el) { el.remove(); });
             calcular(); marcarAlterado();

@@ -516,6 +516,11 @@ $hoje      = vn_today_sp();
 $mesAtual  = vn_mes_atual();
 $fimSemana = date('Y-m-d', strtotime($hoje . ' +7 days'));
 $inicioMes = $mesAtual . '-01';
+/* Mês escolhido no seletor (?mes=AAAA-MM). Vazio = visão padrão: o que está em aberto + o que foi pago nos últimos 60 dias.
+   Com um mês: só o que vence ou foi pago naquele mês (mensalidades daquele mês, parcelas do mês, material daquele mês). */
+$mesSel = vn_mes_valido((string)($_GET['mes'] ?? '')) ? (string)$_GET['mes'] : '';
+$noMes = function (string $d) use ($mesSel): bool { return $mesSel !== '' && strlen($d) >= 7 && substr($d, 0, 7) === $mesSel; };
+$mesKpi = $mesSel !== '' ? $mesSel : $mesAtual;
 $limPagas  = date('Y-m-d', strtotime($hoje . ' -60 days'));
 
 $cobrancas = [];            // cobranças em parcelas
@@ -539,6 +544,7 @@ try {
     }
     vn_saida_cobrancas_auto_gerar();   // TODA saída de material vira venda para aprovar
     vn_mens_gerar_mes($mesAtual);
+    if ($mesSel !== '') vn_mens_gerar_mes($mesSel);   // mês escolhido (passado ou futuro): garante as mensalidades dele
     $etqMap = vn_cliente_etiquetas_map();
 
     $cobrancas = vn_fetch_all('SELECT * FROM vn_cobrancas ORDER BY criado_em DESC, id DESC');
@@ -568,13 +574,16 @@ try {
     }
 
     // Mensalidades: tudo que está em aberto (de qualquer mês, para não esconder atraso) + o que foi pago nos últimos 60 dias.
-    $mensRows = vn_fetch_all(
-        'SELECT p.id AS pagamento_id, p.competencia, p.valor, p.vencimento, p.pago, p.pago_em,
-                m.id AS mensalidade_id, m.ativo, m.cliente_id, m.cliente_nome, m.categoria, m.telefone, m.chave_pix, m.dia_vencimento, m.observacao, m.valor_mensal
-         FROM vn_mensalidade_pagamentos p
-         JOIN vn_mensalidades m ON m.id = p.mensalidade_id
-         WHERE (p.pago = 0 AND p.competencia <= ?) OR (p.pago = 1 AND p.pago_em >= ?)
-         ORDER BY p.vencimento ASC, m.cliente_nome ASC', [$mesAtual, $limPagas]);
+    $mensCols = 'p.id AS pagamento_id, p.competencia, p.valor, p.vencimento, p.pago, p.pago_em,
+                m.id AS mensalidade_id, m.ativo, m.cliente_id, m.cliente_nome, m.categoria, m.telefone, m.chave_pix, m.dia_vencimento, m.observacao, m.valor_mensal';
+    if ($mesSel !== '') {
+        $mensRows = vn_fetch_all("SELECT $mensCols FROM vn_mensalidade_pagamentos p JOIN vn_mensalidades m ON m.id = p.mensalidade_id
+                                  WHERE p.competencia = ? ORDER BY p.vencimento ASC, m.cliente_nome ASC", [$mesSel]);
+    } else {
+        $mensRows = vn_fetch_all("SELECT $mensCols FROM vn_mensalidade_pagamentos p JOIN vn_mensalidades m ON m.id = p.mensalidade_id
+                                  WHERE (p.pago = 0 AND p.competencia <= ?) OR (p.pago = 1 AND p.pago_em >= ?)
+                                  ORDER BY p.vencimento ASC, m.cliente_nome ASC", [$mesAtual, $limPagas]);
+    }
     $anexosCob = cba_listar('cobranca', array_column($cobrancas, 'id'));
     $anexosMens = cba_listar('mensalidade', array_column($mensRows, 'pagamento_id'));
 
@@ -599,14 +608,23 @@ try {
 foreach ($cobrancas as $cob) {
     $cid = (int)$cob['id'];
     $ps = $parcelasPorCobranca[$cid] ?? [];
+    $psRef = $ps;   // parcelas que a linha considera: todas (visão padrão) ou só as do mês escolhido
+    if ($mesSel !== '') {
+        $psRef = array_values(array_filter($ps, function ($p) use ($noMes) {
+            return $noMes((string)($p['vencimento'] ?? '')) || ((int)$p['pago'] === 1 && $noMes((string)($p['pago_em'] ?? '')));
+        }));
+        if (!$psRef) continue;
+    }
+    $somaPagasTotal = 0.0; $somaAbertaTotal = 0.0;
+    foreach ($ps as $p) { if ((int)$p['pago'] === 1) $somaPagasTotal += (float)$p['valor']; else $somaAbertaTotal += (float)$p['valor']; }
     $abertas = []; $atrasadas = []; $somaPagas = 0.0; $somaAberta = 0.0; $somaAtrasada = 0.0; $somaSemana = 0.0; $ultimoPago = '';
-    foreach ($ps as $p) {
+    foreach ($psRef as $p) {
         $v = (float)$p['valor'];
         if ((int)$p['pago'] === 1) {
             $somaPagas += $v;
             $pe = (string)($p['pago_em'] ?? '');
             if ($pe > $ultimoPago) $ultimoPago = $pe;
-            if ($pe !== '' && $pe >= $inicioMes) { $kpi['recebido'] += $v; $kpi['recebido_qtd']++; }
+            if ($pe !== '' && ($mesSel !== '' ? $noMes($pe) : $pe >= $inicioMes)) { $kpi['recebido'] += $v; $kpi['recebido_qtd']++; }
         } else {
             $abertas[] = $p; $somaAberta += $v;
             $venc = (string)($p['vencimento'] ?? '');
@@ -623,7 +641,7 @@ foreach ($cobrancas as $cob) {
     $it = [
         'key' => 'c' . $cid, 'tipo' => 'parcela', 'cliente' => $nome,
         'etq' => vn_etiqueta_resolver($etqMap, $idPorNome, 0, $nome),
-        'cob' => $cob, 'parcelas' => $ps, 'somaPagas' => $somaPagas, 'somaAberta' => $somaAberta,
+        'cob' => $cob, 'parcelas' => $ps, 'somaPagas' => $somaPagasTotal, 'somaAberta' => $somaAbertaTotal,
         'pago_em' => '', 'venc' => '', 'wpp' => '', 'pix' => '', 'anexos' => count($anexosCob[$cid] ?? []),
     ];
     if ($abertas) {
@@ -647,12 +665,18 @@ foreach ($cobrancas as $cob) {
             $it['wpp'] = cb_whatsapp_varias($cob, $atrasadas);
             $it['pix'] = vn_pix_payload((string)($cob['chave_pix'] ?? ''), $somaAtrasada);
         }
-    } elseif ($ps) {
+    } elseif ($psRef) {
         $it['estado'] = 'paga';
-        $it['valor'] = (float)$cob['valor_total'];
         $it['pago_em'] = $ultimoPago;
-        $it['titulo'] = 'Quitada em ' . $totalParc . 'x';
-        $it['sub'] = vn_h($origem);
+        if ($mesSel !== '') {   // no mês: só o que foi pago naquele mês (a cobrança pode ter outras parcelas em aberto)
+            $it['valor'] = $somaPagas;
+            $it['titulo'] = count($psRef) === 1 ? 'Parcela ' . (int)$psRef[0]['numero'] . '/' . $totalParc . ' paga' : count($psRef) . ' parcelas pagas';
+            $it['sub'] = vn_h($origem) . ($somaAbertaTotal > 0 ? ' · ainda faltam ' . vn_h(vn_money($somaAbertaTotal)) : ' · quitada');
+        } else {
+            $it['valor'] = (float)$cob['valor_total'];
+            $it['titulo'] = 'Quitada em ' . $totalParc . 'x';
+            $it['sub'] = vn_h($origem);
+        }
     } else {
         $it['estado'] = 'futura';
         $it['valor'] = (float)$cob['valor_total'];
@@ -672,7 +696,7 @@ foreach ($mensRows as $r) {
     if ($pago) {
         $estado = 'paga';
         $pe = (string)($r['pago_em'] ?? '');
-        if ($pe !== '' && $pe >= $inicioMes) { $kpi['recebido'] += $v; $kpi['recebido_qtd']++; }
+        if ($pe !== '' && ($mesSel !== '' ? $noMes($pe) : $pe >= $inicioMes)) { $kpi['recebido'] += $v; $kpi['recebido_qtd']++; }
     } else {
         $estado = cb_estado_venc($venc, $hoje, $fimSemana);
         if ($estado === 'atrasada') { $kpi['atrasado'] += $v; $kpi['atrasado_qtd']++; }
@@ -690,6 +714,7 @@ foreach ($mensRows as $r) {
 
 /* ---- Material para aprovar: uma linha por cliente e mês ---- */
 foreach ($matMeses as $mesItem => $lista) {
+    if ($mesSel !== '' && $mesItem !== $mesSel) continue;
     foreach ($lista as $nomeCli => $d) {
         $kpi['material'] += $d['pend']; $kpi['material_qtd']++;
         $semValor = 0;
@@ -720,7 +745,7 @@ usort($secoes['aprovar'], function ($a, $b) {
     return strcmp($b['mes'], $a['mes']) ?: strcasecmp($ka, $kb) ?: strcasecmp($a['cliente'], $b['cliente']);
 });
 usort($secoes['paga'], function ($a, $b) { return strcmp((string)$b['pago_em'], (string)$a['pago_em']) ?: strcasecmp($a['cliente'], $b['cliente']); });
-$secoes['paga'] = array_slice($secoes['paga'], 0, 60);
+if ($mesSel === '') $secoes['paga'] = array_slice($secoes['paga'], 0, 60);   // visão padrão: só as 60 mais recentes; com mês escolhido, todas as dele
 $mostrados = [];
 foreach ($secoes as $l) foreach ($l as $it) $mostrados[$it['key']] = true;
 
@@ -744,7 +769,8 @@ $secTitulo = [
 ];
 
 vn_ui_shell_start('Cobranças', 'cobrancas', [
-    'css'        => ['assets/css/vn-cobrancas.css'],
+    'css'        => ['assets/css/vn-cobrancas.css', 'assets/css/vn-calendario.css'],
+    'js'         => ['assets/js/vn-calendario.js'],
     'head_extra' => '<style>' . vn_etiqueta_css() . '</style>',
 ]);
 vn_alerts($ok, $erro);
@@ -822,6 +848,13 @@ vn_alerts($ok, $erro);
     <?php $f = ob_get_clean(); echo cb_janela('cb-dlg-parcelas', 'Cobrança em parcelas', $orcPre ? 'Preenchida a partir do pedido ' . vn_h($orcPre['numero']) . '. Confira antes de registrar.' : 'Informe o valor e quantas parcelas.', $f); ?>
 
     <div id="cb-root">
+        <div class="cb-mes-bar">
+            <form class="vn-filter" method="get" action="cobrancas.php"><?php echo vn_mes_picker_html($mesSel, ['rotulo' => 'Mês', 'todos' => true, 'todos_rotulo' => 'Em aberto e recentes']); ?></form>
+            <p class="cb-mes-nota"><?php echo $mesSel !== ''
+                ? 'Mostrando só o que vence ou foi pago em ' . vn_h(substr($mesSel, 5, 2) . '/' . substr($mesSel, 0, 4)) . '. Escolha "Em aberto e recentes" para voltar.'
+                : 'Mostrando o que está em aberto e o que foi pago nos últimos 60 dias. Escolha um mês (setas ou lista) para ver só aquele mês.'; ?></p>
+        </div>
+
         <div class="cb-kpis">
             <button type="button" class="cb-kpi<?php echo $kpi['atrasado'] > 0 ? ' is-danger' : ''; ?>" data-kpi="atrasadas" aria-pressed="false">
                 <span class="l"><?php echo cb_ico('warning'); ?>Atrasado</span>
@@ -839,7 +872,7 @@ vn_alerts($ok, $erro);
                 <span class="s"><?php echo (int)$kpi['material_qtd']; ?> <?php echo $kpi['material_qtd'] === 1 ? 'venda' : 'vendas'; ?></span>
             </button>
             <button type="button" class="cb-kpi is-ok" data-kpi="pagas" aria-pressed="false">
-                <span class="l"><?php echo cb_ico('check_circle'); ?>Recebido em <?php echo vn_h(substr($mesAtual, 5, 2) . '/' . substr($mesAtual, 0, 4)); ?></span>
+                <span class="l"><?php echo cb_ico('check_circle'); ?>Recebido em <?php echo vn_h(substr($mesKpi, 5, 2) . '/' . substr($mesKpi, 0, 4)); ?></span>
                 <span class="v"><?php echo vn_h(vn_money($kpi['recebido'])); ?></span>
                 <span class="s"><?php echo (int)$kpi['recebido_qtd']; ?> <?php echo $kpi['recebido_qtd'] === 1 ? 'pagamento' : 'pagamentos'; ?></span>
             </button>

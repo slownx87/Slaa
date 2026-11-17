@@ -337,8 +337,8 @@ if (in_array($ver, ['abertas', 'todas'], true)) {
 $soma = $somar($contas);
 
 vn_ui_shell_start('A Pagar', 'contas-pagar', [
-    'css' => ['assets/css/vn-cobrancas.css', 'assets/css/vn-contas-pagar.css'],
-    'js'  => ['assets/js/vn-download.js', 'assets/js/vn-contas-pagar.js'],
+    'css' => ['assets/css/vn-cobrancas.css', 'assets/css/vn-contas-pagar.css', 'assets/css/vn-calendario.css'],
+    'js'  => ['assets/js/vn-download.js', 'assets/js/vn-contas-pagar.js', 'assets/js/vn-calendario.js'],
     'sub' => 'Contas e boletos da empresa',
 ]);
 ?>

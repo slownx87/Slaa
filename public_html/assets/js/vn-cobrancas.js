@@ -129,7 +129,7 @@
 
   /* ------------------------------------------------------------------ envio assíncrono */
   function postar(fd) {
-    return fetch(window.location.pathname, {
+    return fetch(window.location.pathname + window.location.search, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'X-Requested-With': 'XMLHttpRequest' },

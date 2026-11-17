@@ -579,10 +579,23 @@ vn_alerts($ok, $erro);
 
 <!-- ============ Janelas: adicionar peça / serviço (abas Catálogo | Cadastrar) ============ -->
 <?php
-function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chaves, array $grupos, string $linha = '', string $linhaExtra = ''): void {
+/* Um cartão do catálogo (peça ou serviço) nas janelas "adicionar ao pedido". */
+function pd_card_catalogo(array $c, array $g, bool $isPeca): void { ?>
+    <div class="pd-sel" data-sel data-id="<?php echo (int)$c['id']; ?>" data-origem="<?php echo vn_h($c['origem']); ?>" data-linha-item="<?php echo vn_h((string)($c['linha'] ?? 'cftv')); ?>" data-calculo="<?php echo vn_h((string)($c['calculo'] ?? '')); ?>" data-busca="<?php echo vn_h(vn_lower(($c['nome'] ?? '') . ' ' . ($c['descricao'] ?? '') . ' ' . $g['titulo'])); ?>">
+        <?php if (!empty($c['foto_url'])): ?><img src="<?php echo vn_h($c['foto_url']); ?>" alt="" loading="lazy"><?php else: ?><span class="sem-img"></span><?php endif; ?>
+        <div class="info"><strong><?php echo vn_h($c['nome']); ?></strong>
+            <?php if (!empty($c['descricao']) && $c['descricao'] !== $c['nome']): ?><small><?php echo vn_h($c['descricao']); ?></small><?php endif; ?>
+            <?php if (!empty($c['calculo'])): ?><small class="med-dica">Toque e informe a medida</small><?php endif; ?></div>
+        <span class="chk">✓</span>
+        <div class="preco"><small>Preço por <?php echo vn_h($c['unidade'] ?? 'unidade'); ?>:</small><strong><?php echo vn_h(vn_money($c['valor_unitario'])); ?></strong></div>
+        <?php if ($isPeca && empty($c['calculo'])): ?><div class="preco" style="border:0;padding-top:0;margin-top:0"><span class="est">Quantidade em estoque:</span><span class="est"><?php echo vn_h(number_format((float)($c['quantidade_estoque'] ?? 0), 2, ',', '.')); ?> <?php echo vn_h($c['unidade'] ?? 'un'); ?></span></div><?php endif; ?>
+    </div>
+<?php }
+
+function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chaves, array $grupos, string $linha = '', string $linhaExtra = '', array $gruposExtra = []): void {
     $isPeca = $tipoBase !== 'servico';
     $nomeLinha = $linha === 'serralheria' ? 'serralheria' : 'CFTV';          // catálogo onde a peça cadastrada aqui fica salva
-    $tres = $isPeca && $linhaExtra !== '';                                   // aba extra: cadastrar peça da outra linha direto no catálogo dela
+    $tres = $isPeca && $linhaExtra !== '';                                   // aba extra "Peças de CFTV": só para VER o catálogo da outra linha e usar no pedido (não cadastra)
     $rotCad = $tres ? $nomeLinha : $rotulo;
     $comCalc = ($tipoBase === 'servico') || ($linha === 'serralheria');     // cobrar por medida (m², metro, degrau, hora, kg): peça de serralheria e serviço
     $opcCalc = ($comCalc && function_exists('vn_serr_calculos_opcoes')) ? vn_serr_calculos_opcoes() : []; ?>
@@ -591,7 +604,7 @@ function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chav
         <div class="pd-tabs<?php echo $tres ? ' tres' : ''; ?>">
             <button type="button" class="on" data-add-tab="cat"><?php echo pd_ico($isPeca ? 'deployed_code' : 'assignment'); ?>Catálogo</button>
             <button type="button" data-add-tab="new"><?php echo pd_ico($tres ? 'build' : 'add_circle'); ?>Cadastrar <?php echo vn_h($rotCad); ?></button>
-            <?php if ($tres): ?><button type="button" data-add-tab="new" data-add-linha="<?php echo vn_h($linhaExtra); ?>"><?php echo pd_ico('videocam'); ?>Cadastrar <?php echo vn_h($linhaExtra === 'cftv' ? 'CFTV' : $linhaExtra); ?></button><?php endif; ?>
+            <?php if ($tres): ?><button type="button" data-add-tab="cftv"><?php echo pd_ico('videocam'); ?>Peças de <?php echo vn_h($linhaExtra === 'cftv' ? 'CFTV' : $linhaExtra); ?></button><?php endif; ?>
         </div>
 
         <div class="pd-sheet-b" data-tab-body="cat">
@@ -600,20 +613,26 @@ function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chav
                 <div data-grupo data-grupo-tipo="<?php echo vn_h($k); ?>" data-titulo="<?php echo vn_h($g['titulo']); ?>"<?php echo empty($g['itens']) ? ' hidden' : ''; ?>>
                     <div class="pd-grp"><?php echo vn_h($g['titulo']); ?> · <?php echo count($g['itens']); ?></div>
                     <?php foreach ($g['itens'] as $c): ?>
-                        <div class="pd-sel" data-sel data-id="<?php echo (int)$c['id']; ?>" data-origem="<?php echo vn_h($c['origem']); ?>" data-linha-item="<?php echo vn_h((string)($c['linha'] ?? 'cftv')); ?>" data-calculo="<?php echo vn_h((string)($c['calculo'] ?? '')); ?>" data-busca="<?php echo vn_h(vn_lower(($c['nome'] ?? '') . ' ' . ($c['descricao'] ?? '') . ' ' . $g['titulo'])); ?>">
-                            <?php if (!empty($c['foto_url'])): ?><img src="<?php echo vn_h($c['foto_url']); ?>" alt="" loading="lazy"><?php else: ?><span class="sem-img"></span><?php endif; ?>
-                            <div class="info"><strong><?php echo vn_h($c['nome']); ?></strong>
-                                <?php if (!empty($c['descricao']) && $c['descricao'] !== $c['nome']): ?><small><?php echo vn_h($c['descricao']); ?></small><?php endif; ?>
-                                <?php if (!empty($c['calculo'])): ?><small class="med-dica">Toque e informe a medida</small><?php endif; ?></div>
-                            <span class="chk">✓</span>
-                            <div class="preco"><small>Preço por <?php echo vn_h($c['unidade'] ?? 'unidade'); ?>:</small><strong><?php echo vn_h(vn_money($c['valor_unitario'])); ?></strong></div>
-                            <?php if ($isPeca && empty($c['calculo'])): ?><div class="preco" style="border:0;padding-top:0;margin-top:0"><span class="est">Quantidade em estoque:</span><span class="est"><?php echo vn_h(number_format((float)($c['quantidade_estoque'] ?? 0), 2, ',', '.')); ?> <?php echo vn_h($c['unidade'] ?? 'un'); ?></span></div><?php endif; ?>
-                        </div>
+                        <?php pd_card_catalogo($c, $g, $isPeca); ?>
                     <?php endforeach; ?>
                 </div>
             <?php endforeach; ?>
             <div class="pd-hint" data-vazio style="text-align:center;padding:30px 0"<?php echo $temAlgum ? ' hidden' : ''; ?>>Nenhum item no catálogo ainda. Use a aba "Cadastrar <?php echo vn_h($rotCad); ?>".</div>
         </div>
+
+        <?php if ($tres): ?>
+        <div class="pd-sheet-b" data-tab-body="cftv" hidden>
+            <p class="pd-hint" style="margin:0 0 8px">Peças do catálogo de <?php echo vn_h($linhaExtra === 'cftv' ? 'CFTV' : $linhaExtra); ?>: toque para juntar ao pedido (aparecem em "Peças").</p>
+            <label class="pd-busca"><?php echo pd_ico('search'); ?><input type="search" data-add-busca placeholder="Buscar peça de CFTV" aria-label="Buscar no catálogo de CFTV"></label>
+            <?php $temExtra = false; foreach ($chaves as $k): $g = $gruposExtra[$k] ?? ['titulo' => $k, 'itens' => []]; if (!empty($g['itens'])) $temExtra = true; ?>
+                <div data-grupo data-grupo-extra data-grupo-tipo="<?php echo vn_h($k); ?>" data-titulo="<?php echo vn_h($g['titulo']); ?>"<?php echo empty($g['itens']) ? ' hidden' : ''; ?>>
+                    <div class="pd-grp"><?php echo vn_h($g['titulo']); ?> · <?php echo count($g['itens']); ?></div>
+                    <?php foreach ($g['itens'] as $c): pd_card_catalogo($c, $g, $isPeca); endforeach; ?>
+                </div>
+            <?php endforeach; ?>
+            <div class="pd-hint" data-vazio style="text-align:center;padding:30px 0"<?php echo $temExtra ? ' hidden' : ''; ?>>Nenhuma peça no catálogo de CFTV ainda.</div>
+        </div>
+        <?php endif; ?>
 
         <div class="pd-sheet-b" data-tab-body="new" hidden>
             <?php if ($isPeca): ?>
@@ -675,7 +694,6 @@ function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chav
             <?php endif; ?>
             <?php if ($isPeca): ?>
             <p class="pd-nota-cat" data-new-nota><?php echo pd_ico('inventory_2'); ?><span data-new-nota-txt>Fica salva no catálogo de <?php echo vn_h($nomeLinha); ?>.</span></p>
-            <?php if ($tres): ?><label class="pd-check" data-new-pedido-box hidden><input type="checkbox" data-new-no-pedido checked>Adicionar também a este pedido</label><?php endif; ?>
             <?php else: ?>
             <label class="pd-check" style="margin-top:6px"><input type="checkbox" data-new-salvar>Salvar <?php echo vn_h($rotulo); ?> no meu catálogo</label>
             <?php endif; ?>
@@ -685,7 +703,7 @@ function pd_janela_add(string $id, string $tipoBase, string $rotulo, array $chav
     </div></dialog>
 <?php }
 pd_janela_add('addPecaModal', 'material', 'peça', ['material', 'equipamento', 'outro', 'produto_usado'], $grupos, 'cftv');
-pd_janela_add('addSerralheriaModal', 'material', 'peça de serralheria', ['material', 'equipamento', 'outro', 'produto_usado'], $gruposSerr, 'serralheria', 'cftv');
+pd_janela_add('addSerralheriaModal', 'material', 'peça de serralheria', ['material', 'equipamento', 'outro', 'produto_usado'], $gruposSerr, 'serralheria', 'cftv', $grupos);
 pd_janela_add('addServicoModal', 'servico', 'serviço', ['servico', 'mao_obra'], $grupos);
 ?>
 
