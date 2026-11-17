@@ -124,6 +124,8 @@ function fin_painel_dados(string $mes): array
             'pago_mes' => cp_rel_pago_no_mes($mes),
             'por_categoria' => cp_rel_pago_por_categoria($mes),
             'proximas' => cp_rel_proximas(8),
+            // contas privadas (só quem cadastrou vê): NÃO entram nos totais acima, que são da empresa; aparecem à parte
+            'privadas' => ['abertas' => (float)cp_resumo($hoje, 'privadas')['v_abertas'], 'qtd' => (int)cp_resumo($hoje, 'privadas')['q_abertas'], 'pago_mes' => cp_rel_pago_no_mes($mes, 'privadas')],
         ];
     } catch (Throwable $e) { error_log('VN System [financeiro pagar]: ' . $e->getMessage()); $d['pagar'] = null; $d['erros'][] = 'a pagar'; }
 

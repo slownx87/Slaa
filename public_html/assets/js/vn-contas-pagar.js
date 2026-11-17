@@ -1,6 +1,6 @@
 /* =========================================================================
    VN System — A Pagar (contas-pagar.php) · v1
-   - janelas: nova/editar conta, pagar, fotos e contas fixas (usa <dialog>)
+   - janelas (<dialog>, no mesmo estilo da Central de Cobranças): detalhe da conta (pequeno, abre ao tocar na linha), nova/editar (só o essencial; o resto em "Mais opções"), pagar, anexos e contas fixas
    - repetir: escolher "Todo mês" etc. na conta nova; editar/parar numa conta que se repete
    - campo de valor com máscara (1.250,00)
    - fotos e PDFs: pré-visualização, redução das fotos no celular antes de enviar e galeria com ampliação
@@ -28,6 +28,9 @@
   }
   function abrir(dlg) { if (typeof dlg.showModal === 'function') { if (!dlg.open) dlg.showModal(); } else { dlg.setAttribute('open', ''); } }
   function fechar(dlg) { if (dlg.open) { try { dlg.close(); } catch (e) { dlg.removeAttribute('open'); } } }
+  function tituloDe(h3, texto) {
+    if (h3.firstChild && h3.firstChild.nodeType === 3) h3.firstChild.nodeValue = texto; else h3.insertBefore(document.createTextNode(texto), h3.firstChild);
+  }
   function setVal(form, nome, v) { var el = form.elements[nome]; if (el) el.value = v == null ? '' : v; }
   function limparArquivos(form) {
     $$('input[type="file"]', form).forEach(function (i) { i.value = ''; });
@@ -125,6 +128,10 @@
         : 'Excluir esta conta e as fotos dela? Isso não pode ser desfeito.');
     }
     contaAberta = nova ? null : c;
+    var mais = $('[data-cp-mais]', dlgConta);
+    if (mais) mais.open = false;               // só o essencial aparece; o resto fica em "Mais opções"
+    var corpoConta = $('.cb-sheet-body', dlgConta);
+    if (corpoConta) corpoConta.scrollTop = 0;
     abrir(dlgConta);
   }
   function textoVis() {
@@ -241,6 +248,84 @@
     if (fe && fe.requestSubmit) fe.requestSubmit(); else if (fe) fe.submit();
   });
 
+  /* ------------------------------------------------------------ janela: detalhe (pequena, abre ao tocar na linha) */
+  var dlgDet = $('#cpDlgDetalhe');
+  function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+  function icone(nome) { var i = el('span', 'material-symbols-outlined', nome); i.setAttribute('aria-hidden', 'true'); return i; }
+  function fato(rot, val) { var f = el('div', 'cb-fact'); f.appendChild(el('span', '', rot)); f.appendChild(el('strong', '', val)); return f; }
+  function botao(rot, ico, cls, fn) {
+    var b = el('button', 'cb-btn' + (cls ? ' ' + cls : '')); b.type = 'button';
+    b.appendChild(icone(ico)); b.appendChild(document.createTextNode(rot));
+    b.addEventListener('click', fn);
+    return b;
+  }
+  function abrirDetalhe(c) {
+    tituloDe($('[data-cp-det-titulo]', dlgDet), c.descricao + (c.num ? ' · ' + c.num : ''));
+    $('[data-cp-det-sub]', dlgDet).textContent = [c.fornecedor, c.categoria].filter(Boolean).join(' · ');
+    var corpo = $('[data-cp-det-corpo]', dlgDet);
+    corpo.innerHTML = '';
+
+    var fatos = el('div', 'cb-facts');
+    fatos.appendChild(fato(c.pago ? 'Valor pago' : 'Valor', dinheiro(c.pago ? c.valor_pago : c.valor)));
+    fatos.appendChild(c.pago
+      ? fato('Pago em', c.pago_em_br + (c.forma_rot ? ' · ' + c.forma_rot : ''))
+      : fato('Vencimento', c.venc_br + (c.quando ? ' · ' + c.quando : '')));
+    fatos.appendChild(fato('Situação', c.estado_rot));
+    fatos.appendChild(fato('Quem vê', (c.vis === 'privado' ? 'Privada' : 'Pública') + (c.dono ? ' · ' + c.dono : '')));
+    corpo.appendChild(fatos);
+
+    if (c.rec || c.parc) {
+      var chips = el('div', 'cp-chips');
+      if (c.rec) { var r = el('span', 'cp-rec'); r.appendChild(icone('event_repeat')); r.appendChild(document.createTextNode(c.rec.rotulo + (c.rec.ativa ? '' : ' · encerrada'))); chips.appendChild(r); }
+      if (c.parc) { var pc = el('span', 'cp-rec'); pc.appendChild(icone('payments')); pc.appendChild(document.createTextNode(c.parc.rotulo + ' de R$ ' + c.parc.total)); chips.appendChild(pc); }
+      corpo.appendChild(chips);
+    }
+    if (c.codigo) {
+      var cod = el('div', 'cb-note cp-cod');
+      cod.appendChild(el('code', '', c.codigo));
+      var cp = botao('Copiar', 'content_copy', 'sm', function () {});
+      cp.setAttribute('data-copy', c.codigo); cp.setAttribute('data-copy-ok', 'Código copiado.');
+      cod.appendChild(cp);
+      corpo.appendChild(cod);
+    }
+    if (c.observacao) corpo.appendChild(el('p', 'cb-note', c.observacao.length > 160 ? c.observacao.slice(0, 160) + '…' : c.observacao));
+
+    var fotos = c.fotos || [];
+    var anex = el('div', 'cp-anexos');
+    var cab = el('div', 'cp-anexos-h');
+    cab.appendChild(el('h4', 'cb-h', fotos.length ? 'Anexos (' + fotos.length + ')' : 'Anexos'));
+    anex.appendChild(cab);
+    if (fotos.length) {
+      var mini = el('button', 'cp-thumbs'); mini.type = 'button'; mini.setAttribute('aria-label', 'Ver os ' + fotos.length + ' anexos');
+      fotos.slice(0, 4).forEach(function (f) {
+        if (ehPdf(f)) { var pm = el('span', 'cp-pdf-mini'); pm.appendChild(icone('picture_as_pdf')); pm.appendChild(document.createTextNode('PDF')); mini.appendChild(pm); }
+        else { var im = el('img'); im.loading = 'lazy'; im.alt = ''; im.src = urlFoto(f.id, true); mini.appendChild(im); }
+      });
+      if (fotos.length > 4) mini.appendChild(el('span', 'cp-mais', '+' + (fotos.length - 4)));
+      mini.addEventListener('click', function () { fechar(dlgDet); abrirFotos(c); });
+      anex.appendChild(mini);
+    } else {
+      anex.appendChild(botao('Anexar foto ou PDF', 'photo_camera', 'sm', function () { fechar(dlgDet); abrirFotos(c); }));
+    }
+    corpo.appendChild(anex);
+
+    var rod = $('[data-cp-det-rodape]', dlgDet);
+    rod.innerHTML = '';
+    if (c.pago) {
+      rod.appendChild(botao('Desfazer pagamento', 'history', '', function () {
+        var f = $('#cpFormDesfazer', dlgDet);
+        f.elements.conta_id.value = c.id;
+        if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      }));
+    } else {
+      rod.appendChild(botao('Pagar', 'check', 'pri', function () { fechar(dlgDet); abrirPagar(c); }));
+    }
+    if (fotos.length) rod.appendChild(botao('Anexos', 'photo_camera', '', function () { fechar(dlgDet); abrirFotos(c); }));
+    rod.appendChild(botao('Editar', 'edit', '', function () { fechar(dlgDet); abrirConta(c); }));
+    var corpoRolagem = $('[data-cp-det-corpo]', dlgDet); if (corpoRolagem) corpoRolagem.scrollTop = 0;
+    abrir(dlgDet);
+  }
+
   /* ------------------------------------------------------------ janela: pagar */
   var dlgPagar = $('#cpDlgPagar');
   var formPagar = $('form[data-cp-form]', dlgPagar);
@@ -338,7 +423,7 @@
     setVal(formFotos, 'conta_id', c.id);
     setVal(formFotos, 'token', novoToken());
     setVal(formFotos, 'tipo', c.pago ? 'comprovante' : 'conta');
-    $('#cpFotosTitulo', dlgFotos).textContent = 'Anexos — ' + c.descricao;
+    tituloDe($('#cpFotosTitulo', dlgFotos), 'Anexos — ' + c.descricao);
     $('[data-cp-resumo]', dlgFotos).textContent = dinheiro(c.valor) + (c.pago ? ' · paga em ' + dataBR(c.pago_em) + (c.forma && FORMAS[c.forma] ? ' (' + FORMAS[c.forma] + ')' : '') : ' · vence ' + dataBR(c.vencimento));
     desenharGaleria();
     abrir(dlgFotos);
@@ -390,12 +475,19 @@
       if (a === 'editar') abrirConta(c);
       else if (a === 'pagar') abrirPagar(c);
       else if (a === 'fotos') abrirFotos(c);
+      else if (a === 'detalhe') abrirDetalhe(c);
       return;
+    }
+    // tocar em qualquer parte da linha (que não seja botão, link ou campo) abre o detalhe
+    var linhaEl = t.closest('.cp-row');
+    if (linhaEl && !t.closest('a, button, form, input, select, textarea, label, summary')) {
+      var c0 = dadosDaLinha(linhaEl);
+      if (c0) { abrirDetalhe(c0); return; }
     }
     var fe = t.closest('[data-cp-fechar]');
     if (fe) { var d = fe.closest('dialog'); if (d) fechar(d); return; }
     // clicar fora da janela (no fundo escuro) fecha
-    if (t.tagName === 'DIALOG' && t.classList.contains('cp-dlg')) fechar(t);
+    if (t.tagName === 'DIALOG' && t.classList.contains('cb-sheet')) fechar(t);
   });
 
   /* ------------------------------------------------------------ anexos: pré-visualização */

@@ -13,6 +13,7 @@ require_once __DIR__ . '/_vn_orcamento_layout.php';
 require_once __DIR__ . '/_vn_cobranca_equip.php';
 require_once __DIR__ . '/_vn_cobrancas_lib.php';
 require_once __DIR__ . '/_vn_cobrancas_view.php';
+require_once __DIR__ . '/_vn_cobrancas_anexos.php';
 
 /* ----------------------------------------------------------------------
    Tabelas (criadas automaticamente na primeira vez)
@@ -121,6 +122,7 @@ try {
     vn_ensure_saida_cobrancas_table();
     vn_ensure_cliente_etiquetas_table();
     vn_ensure_mensalidades_tables();
+    cba_ensure_tables();
     $clientesLista = vn_clientes_form();
 
     /* Vindo de um pedido aprovado (?orc=ID): abre "Cobrança em parcelas" já com cliente, telefone, valor e referência. */
@@ -139,6 +141,25 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $acao = (string)($_POST['acao'] ?? '');
+
+        // Arquivos grandes demais para o limite do servidor chegam como POST vazio.
+        if ($acao === '' && empty($_POST) && empty($_FILES) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+            throw new Exception('Os arquivos juntos passaram do limite de envio do servidor (' . ini_get('post_max_size') . '). Envie menos arquivos de cada vez.');
+        }
+
+        /* ---- Anexos (foto ou PDF) de uma cobrança ou mensalidade: comprovante, contrato, nota ---- */
+        if ($acao === 'add_anexo') {
+            if (empty($_FILES['fotos'])) throw new Exception('Escolha ou tire pelo menos uma foto, ou escolha um PDF.');
+            $r = cba_salvar((string)($_POST['ref_tipo'] ?? ''), (int)($_POST['ref_id'] ?? 0), $_FILES['fotos']);
+            [$tipoAv, $txtAv] = cba_texto($r);
+            if ($txtAv === '') throw new Exception('Escolha ou tire pelo menos uma foto, ou escolha um PDF.');
+            if ($tipoAv === 'err') throw new Exception($txtAv);
+            $ok = $txtAv;
+        }
+        if ($acao === 'del_anexo') {
+            if (!cba_excluir((int)($_POST['anexo_id'] ?? 0))) throw new Exception('Anexo não encontrado.');
+            $ok = 'Anexo removido.';
+        }
 
         /* ---- Peças das vendas de material (aguardando aprovação) ---- */
         if ($acao === 'adicionar_pecas') {
@@ -392,6 +413,7 @@ try {
             $idCob = (int)($_POST['cobranca_id'] ?? 0);
             vn_exec('DELETE FROM vn_cobranca_parcelas WHERE cobranca_id = ?', [$idCob]);
             vn_exec('DELETE FROM vn_cobrancas WHERE id = ?', [$idCob]);
+            cba_excluir_de('cobranca', $idCob);
             // Se a cobrança veio de uma venda aprovada, o material volta a aguardar aprovação.
             $devolvidos = 0;
             foreach (vn_fetch_all('SELECT id FROM vn_saida_cobrancas WHERE cobranca_id = ?', [$idCob]) as $iv) {
@@ -416,6 +438,7 @@ try {
             }
             vn_exec('DELETE FROM vn_cobranca_parcelas WHERE cobranca_id = ?', [$idCob]);
             vn_exec('DELETE FROM vn_cobrancas WHERE id = ?', [$idCob]);
+            cba_excluir_de('cobranca', $idCob);
 
             $ok = 'Cobrança desfeita: ' . count($itensV) . ' item(ns) de ' . (string)$cobV['cliente_nome'] . ' voltaram para a aba Vendas, aguardando aprovação de novo.';
             $abrirCli = substr((string)($itensV[0]['criado_em'] ?? ''), 0, 7) . '|' . (string)$itensV[0]['cliente_nome'];
@@ -501,6 +524,7 @@ $vendaPorCobranca = [];     // cobranca_id => qtd de itens de venda (botão "Vol
 $etqMap = []; $idPorNome = []; $telPorNome = [];
 $matMeses = []; $matPend = 0.0;
 $mensRows = [];
+$anexosCob = []; $anexosMens = [];   // anexos (foto/PDF) por cobrança e por mês de mensalidade
 $mensCategorias = ['Portaria remota', 'Monitoramento', 'CFTV', 'Alarme', 'Manutenção', 'Interfonia'];
 $catalogoPecas = []; $catalogoServicos = [];
 $itens = [];
@@ -551,6 +575,8 @@ try {
          JOIN vn_mensalidades m ON m.id = p.mensalidade_id
          WHERE (p.pago = 0 AND p.competencia <= ?) OR (p.pago = 1 AND p.pago_em >= ?)
          ORDER BY p.vencimento ASC, m.cliente_nome ASC', [$mesAtual, $limPagas]);
+    $anexosCob = cba_listar('cobranca', array_column($cobrancas, 'id'));
+    $anexosMens = cba_listar('mensalidade', array_column($mensRows, 'pagamento_id'));
 
     foreach (vn_fetch_all("SELECT DISTINCT categoria FROM vn_mensalidades WHERE COALESCE(categoria, '') NOT IN ('', 'Mensalidade')") as $r) {
         if (!in_array((string)$r['categoria'], $mensCategorias, true)) $mensCategorias[] = (string)$r['categoria'];
@@ -598,7 +624,7 @@ foreach ($cobrancas as $cob) {
         'key' => 'c' . $cid, 'tipo' => 'parcela', 'cliente' => $nome,
         'etq' => vn_etiqueta_resolver($etqMap, $idPorNome, 0, $nome),
         'cob' => $cob, 'parcelas' => $ps, 'somaPagas' => $somaPagas, 'somaAberta' => $somaAberta,
-        'pago_em' => '', 'venc' => '', 'wpp' => '', 'pix' => '',
+        'pago_em' => '', 'venc' => '', 'wpp' => '', 'pix' => '', 'anexos' => count($anexosCob[$cid] ?? []),
     ];
     if ($abertas) {
         $prox = $abertas[0];
@@ -658,7 +684,7 @@ foreach ($mensRows as $r) {
         'valor' => $v, 'venc' => $venc, 'pago_em' => (string)($r['pago_em'] ?? ''),
         'titulo' => 'Mensalidade · ' . vn_mens_categoria($r),
         'sub' => 'mês ' . vn_h(substr($comp, 5, 2) . '/' . substr($comp, 0, 4)) . ((int)($r['ativo'] ?? 1) !== 1 ? ' · pausada' : ''),
-        'wpp' => vn_mens_whatsapp($r, $r), 'pix' => vn_mens_pix($r, $r), 'raw' => $r,
+        'wpp' => vn_mens_whatsapp($r, $r), 'pix' => vn_mens_pix($r, $r), 'raw' => $r, 'anexos' => count($anexosMens[(int)$r['pagamento_id']] ?? []),
     ];
 }
 
@@ -868,8 +894,8 @@ vn_alerts($ok, $erro);
         <?php /* Detalhe de cada item (abre ao clicar na linha) */
         foreach ($itens as $it) {
             if (empty($mostrados[$it['key']])) continue;
-            if ($it['tipo'] === 'parcela')          echo cb_janela_parcela($it, $hoje, $fimSemana, isset($vendaPorCobranca[(int)$it['cob']['id']]));
-            elseif ($it['tipo'] === 'mensalidade')  echo cb_janela_mensalidade($it, $hoje);
+            if ($it['tipo'] === 'parcela')          echo cb_janela_parcela($it, $hoje, $fimSemana, isset($vendaPorCobranca[(int)$it['cob']['id']]), $anexosCob[(int)$it['cob']['id']] ?? []);
+            elseif ($it['tipo'] === 'mensalidade')  echo cb_janela_mensalidade($it, $hoje, $anexosMens[(int)$it['raw']['pagamento_id']] ?? []);
             else                                    echo cb_janela_material($it);
         } ?>
     <!-- ===================== Mensalidade ===================== -->

@@ -143,7 +143,7 @@ if (!function_exists('cb_linha')) {
             . ' data-etq="' . vn_h($it['etq']) . '" data-valor="' . vn_h((string)round((float)$it['valor'], 2)) . '" data-busca="' . vn_h($busca) . '" data-dlg="' . vn_h($dlg) . '">'
             . '<span class="cb-ico">' . cb_ico($icone) . '</span>'
             . '<div class="cb-main"><button type="button" class="cb-name" data-abrir="' . vn_h($dlg) . '">' . vn_h($it['cliente']) . '</button>' . cb_tag($it['etq'])
-            . '<div class="cb-sub">' . vn_h($it['titulo']) . ($it['sub'] !== '' ? ' · ' . $it['sub'] : '') . '</div></div>'
+            . '<div class="cb-sub">' . vn_h($it['titulo']) . ($it['sub'] !== '' ? ' · ' . $it['sub'] : '') . (!empty($it['anexos']) ? ' · ' . (int)$it['anexos'] . ((int)$it['anexos'] === 1 ? ' anexo' : ' anexos') : '') . '</div></div>'
             . '<div class="cb-when"><strong class="cb-valor">' . vn_h(vn_money($it['valor'])) . '</strong>' . $quando . '</div>'
             . '<div class="cb-acts">' . $acoes . '</div>'
             . '</article>';
@@ -168,6 +168,33 @@ if (!function_exists('cb_fato')) {
     }
 }
 
+if (!function_exists('cb_bloco_anexos')) {
+    /* Anexos (foto ou PDF) de uma cobrança ou de um mês de mensalidade: miniaturas, excluir e "Anexar" (envia sozinho ao escolher). */
+    function cb_bloco_anexos(string $refTipo, int $refId, array $lista): string {
+        $h = '<div class="cb-anexos"><h4 class="cb-h">Anexos' . ($lista ? ' (' . count($lista) . ')' : '') . '</h4>';
+        if ($lista) {
+            $h .= '<div class="cb-anexos-lista">';
+            foreach ($lista as $a) {
+                $url = 'cobrancas-anexo.php?id=' . (int)$a['id'];
+                $pdf = ($a['formato'] ?? 'img') === 'pdf';
+                $nome = vn_h((string)($a['nome_original'] ?: ($pdf ? 'documento.pdf' : 'foto')));
+                $h .= '<div class="cb-anexo' . ($pdf ? ' pdf' : '') . '">'
+                    . ($pdf
+                        ? '<a href="' . $url . '" target="_blank" rel="noopener" title="' . $nome . '">' . cb_ico('picture_as_pdf') . '<small>' . $nome . '</small></a>'
+                        : '<a href="' . $url . '" target="_blank" rel="noopener" title="' . $nome . '"><img loading="lazy" alt="' . $nome . '" src="' . $url . '&amp;mini=1"></a>')
+                    . '<form method="post" data-async data-danger data-confirm="Excluir este anexo? Isso não pode ser desfeito." data-confirm-ok="Excluir">'
+                    . '<input type="hidden" name="acao" value="del_anexo"><input type="hidden" name="anexo_id" value="' . (int)$a['id'] . '">'
+                    . '<button type="submit" aria-label="Excluir anexo" title="Excluir anexo">' . cb_ico('close') . '</button></form></div>';
+            }
+            $h .= '</div>';
+        }
+        $h .= '<form method="post" enctype="multipart/form-data" class="cb-anexo-envio" data-async data-anexo-form>'
+            . '<input type="hidden" name="acao" value="add_anexo"><input type="hidden" name="ref_tipo" value="' . vn_h($refTipo) . '"><input type="hidden" name="ref_id" value="' . $refId . '">'
+            . '<label class="cb-btn sm">' . cb_ico('photo_camera') . 'Anexar foto ou PDF<input type="file" name="fotos[]" accept="image/*,application/pdf,.pdf" multiple data-anexo-arquivo hidden></label></form></div>';
+        return $h;
+    }
+}
+
 if (!function_exists('cb_montador_linhas')) {
     /* Linhas de parcelas já existentes (edição). Parcela paga não pode ser removida. */
     function cb_montador_linhas(array $parcelas): string {
@@ -188,7 +215,7 @@ if (!function_exists('cb_montador_linhas')) {
 
 if (!function_exists('cb_janela_parcela')) {
     /* Detalhe de uma cobrança em parcelas: parcelas, editar, recibo, voltar para venda e excluir. */
-    function cb_janela_parcela(array $it, string $hoje, string $fimSemana, bool $veioDeVenda): string {
+    function cb_janela_parcela(array $it, string $hoje, string $fimSemana, bool $veioDeVenda, array $anexos = []): string {
         $cob = $it['cob']; $cid = (int)$cob['id'];
         $total = (float)$cob['valor_total'];
         $nPagas = 0; foreach ($it['parcelas'] as $p) { if ((int)$p['pago'] === 1) $nPagas++; }
@@ -231,7 +258,8 @@ if (!function_exists('cb_janela_parcela')) {
 
         $corpo = '<div data-vista="ver"><div class="cb-facts">' . $fatos . '</div>'
             . (!empty($cob['observacao']) ? '<p class="cb-note" style="margin-top:12px">' . vn_h((string)$cob['observacao']) . '</p>' : '')
-            . '<h4 class="cb-h" style="margin-top:16px">Parcelas</h4><div class="cb-parcs">' . $lista . '</div></div>' . $edicao;
+            . '<h4 class="cb-h" style="margin-top:16px">Parcelas</h4><div class="cb-parcs">' . $lista . '</div>'
+            . cb_bloco_anexos('cobranca', $cid, $anexos) . '</div>' . $edicao;
 
         $rodape = '<button type="button" class="cb-btn" data-vista-ir="editar">' . cb_ico('edit') . 'Editar</button>'
             . '<a class="cb-btn" target="_blank" rel="noopener" href="cobranca-recibo-pdf.php?id=' . $cid . '">' . cb_ico('receipt_long') . 'Recibo (PDF)</a>';
@@ -251,7 +279,7 @@ if (!function_exists('cb_janela_parcela')) {
 
 if (!function_exists('cb_janela_mensalidade')) {
     /* Detalhe de uma mensalidade: pagar/desfazer, cobrar, editar na própria janela (ver ⇄ editar), pausar/reativar. */
-    function cb_janela_mensalidade(array $it, string $hoje): string {
+    function cb_janela_mensalidade(array $it, string $hoje, array $anexos = []): string {
         $r = $it['raw'];
         $pago = $it['estado'] === 'paga';
         $mid = (int)($r['mensalidade_id'] ?? 0);
@@ -259,17 +287,16 @@ if (!function_exists('cb_janela_mensalidade')) {
         $valorMensal = (float)($r['valor_mensal'] ?? $r['valor'] ?? 0);
         $sit = $pago ? 'Paga' . (!empty($r['pago_em']) ? ' em ' . vn_date_br($r['pago_em']) : '')
                      : cb_quando((string)$it['venc'], $hoje);
+        $contato = array_filter([($r['telefone'] ?? '') !== '' ? 'Telefone: ' . $r['telefone'] : '', ($r['chave_pix'] ?? '') !== '' ? 'PIX: ' . $r['chave_pix'] : '']);
         $ver = '<div data-vista="ver"><div class="cb-facts">'
-            . cb_fato('Serviço', vn_h(vn_mens_categoria($r)))
-            . cb_fato('Mês', vn_h(substr((string)$r['competencia'], 5, 2) . '/' . substr((string)$r['competencia'], 0, 4)))
             . cb_fato('Valor', vn_h(vn_money($r['valor'])))
-            . cb_fato('Vencimento', vn_h(vn_date_br((string)($r['vencimento'] ?? ''))))
+            . cb_fato($pago ? 'Pago em' : 'Vencimento', vn_h($pago ? ($r['pago_em'] ? vn_date_br((string)$r['pago_em']) : '—') : vn_date_br((string)($r['vencimento'] ?? ''))))
             . cb_fato('Situação', vn_h($sit))
-            . cb_fato('Telefone', ($r['telefone'] ?? '') !== '' ? vn_h((string)$r['telefone']) : '—')
-            . cb_fato('Chave PIX', ($r['chave_pix'] ?? '') !== '' ? vn_h((string)$r['chave_pix']) : '—')
-            . cb_fato('Todo mês', 'dia ' . (int)($r['dia_vencimento'] ?? 0)) . '</div>'
+            . cb_fato('Mês', vn_h(substr((string)$r['competencia'], 5, 2) . '/' . substr((string)$r['competencia'], 0, 4)) . ' · todo dia ' . (int)($r['dia_vencimento'] ?? 0)) . '</div>'
+            . ($contato ? '<p class="cb-note" style="margin-top:12px">' . vn_h(implode(' · ', $contato)) . '</p>' : '')
             . (!empty($r['observacao']) ? '<p class="cb-note" style="margin-top:12px">' . vn_h((string)$r['observacao']) . '</p>' : '')
             . (!$ativa ? '<p class="cb-note" style="margin-top:12px">Esta mensalidade está pausada: não gera mais meses novos. Use "Reativar" abaixo para voltar.</p>' : '')
+            . cb_bloco_anexos('mensalidade', (int)($r['pagamento_id'] ?? 0), $anexos)
             . '</div>';
 
         $edicao = '<form method="post" class="cb-form" data-async data-vista="editar" hidden>'

@@ -71,6 +71,9 @@ function fin_render_topo(array $f, string $mes): void
         <?php echo fin_cartao('Pago em ' . $mesRot, 'task_alt', vn_money($pagoMes), $qPag . ($qPag === 1 ? ' conta paga' : ' contas pagas'), 'contas-pagar.php?ver=pagas'); ?>
     </div>
 <?php endif; ?>
+<?php $priv = $pag['privadas'] ?? null; if ($priv && ($priv['qtd'] > 0 || $priv['pago_mes']['qtd'] > 0)): ?>
+    <p class="fin-vazio-aviso" style="margin:8px 0 0;color:var(--muted);font-size:.82rem;font-weight:600">Contas privadas ficam fora destes totais (são só suas): <?php echo vn_h(vn_money($priv['abertas'])); ?> em aberto (<?php echo (int)$priv['qtd']; ?>) e <?php echo vn_h(vn_money($priv['pago_mes']['total'])); ?> pagos em <?php echo vn_h($mesRot); ?>. <a href="contas-pagar.php?de=privadas">Ver contas privadas</a></p>
+<?php endif; ?>
 </section>
 
 <?php

@@ -578,4 +578,39 @@
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar); else iniciar();
+
+  /* ------------------------------------------------------------------ anexos (foto ou PDF) de cobrança e mensalidade */
+  /* Foto de celular pesa 4-12 MB: reduz antes de enviar (PDF e fotos pequenas seguem como estão). */
+  function reduzirFoto(file) {
+    return new Promise(function (resolve) {
+      if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 500 * 1024 || !window.HTMLCanvasElement) { resolve(file); return; }
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        try {
+          var esc = Math.min(1, 1800 / Math.max(img.naturalWidth, img.naturalHeight));
+          var c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(img.naturalWidth * esc)); c.height = Math.max(1, Math.round(img.naturalHeight * esc));
+          var ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+          c.toBlob(function (blob) {
+            URL.revokeObjectURL(url);
+            if (!blob || blob.size >= file.size) { resolve(file); return; }
+            try { resolve(new File([blob], (file.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' })); } catch (e) { resolve(file); }
+          }, 'image/jpeg', 0.85);
+        } catch (e) { URL.revokeObjectURL(url); resolve(file); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+  document.addEventListener('change', function (e) {
+    var inp = e.target;
+    if (!inp.matches || !inp.matches('input[data-anexo-arquivo]')) return;
+    var form = inp.closest('form');
+    if (!form || !inp.files || !inp.files.length) return;
+    toast('Enviando anexos…', 'ok', 2500);
+    Promise.all(Array.prototype.slice.call(inp.files).map(reduzirFoto)).then(function (prontos) {
+      try { var dt = new DataTransfer(); prontos.forEach(function (f) { dt.items.add(f); }); inp.files = dt.files; } catch (err) { /* segue com os originais */ }
+      if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    });
+  });
 })();

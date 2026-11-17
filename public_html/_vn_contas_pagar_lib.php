@@ -63,6 +63,29 @@ function cp_sql_visivel(string $a = 'c'): array
     return ["($a.visibilidade <> 'privado' OR ($a.dono_id IS NOT NULL AND $a.dono_id = ?))", [$u['id']]];
 }
 
+/*
+   Escopo da lista e dos totais:
+     publicas = as contas normais da empresa (todos os administradores veem)  <- padrão: os totais da empresa NÃO misturam contas privadas
+     privadas = SÓ AS MINHAS privadas: conta privada é de cada pessoa, então a soma também é de cada uma (nem o administrador
+                principal soma as privadas dos outros nos seus totais)
+     minhas   = as que eu cadastrei (públicas e privadas)
+     todas    = públicas + as minhas privadas, juntas (só quando a pessoa pede de propósito)
+     outros   = privadas dos outros usuários: só para consulta do administrador principal (sem totais)
+   Devolve [trecho de SQL, parâmetros] para juntar ao WHERE (junto com cp_sql_visivel).
+*/
+function cp_sql_escopo(string $de, string $a = 'c'): array
+{
+    $u = cp_usuario();
+    switch ($de) {
+        case 'minhas':   return ["$a.dono_id = ?", [$u['id']]];
+        case 'publicas': return ["$a.visibilidade <> 'privado'", []];
+        case 'privadas': return ["($a.visibilidade = 'privado' AND $a.dono_id = ?)", [$u['id']]];
+        case 'todas':    return ["($a.visibilidade <> 'privado' OR $a.dono_id = ?)", [$u['id']]];
+        case 'outros':   return $u['super'] ? ["($a.visibilidade = 'privado' AND ($a.dono_id IS NULL OR $a.dono_id <> ?))", [$u['id']]] : ['1 = 0', []];
+    }
+    return ['1 = 1', []];
+}
+
 function cp_pode_ver(array $conta): bool
 {
     $u = cp_usuario();
@@ -239,13 +262,14 @@ function cp_quando(string $venc, string $hoje): string
 }
 
 /* ------------------------------------------------------------------ leitura */
-/* Totais para os cartões do topo e as contagens das abas. Não depende da busca. */
-function cp_resumo(string $hoje): array
+/* Totais para os cartões do topo e as contagens das abas, só das contas do escopo $de (padrão: públicas). Não depende da busca. */
+function cp_resumo(string $hoje, string $de = 'publicas'): array
 {
     $fim7 = date('Y-m-d', strtotime($hoje . ' +7 days'));
     $mesIni = substr($hoje, 0, 8) . '01';
     $mesFim = date('Y-m-t', strtotime($mesIni));
     [$visSql, $visPar] = cp_sql_visivel('c');
+    [$escSql, $escPar] = cp_sql_escopo($de, 'c');
     $r = vn_fetch_one(
         "SELECT
             COALESCE(SUM(CASE WHEN pago = 0 THEN 1 ELSE 0 END), 0) AS q_abertas,
@@ -257,8 +281,8 @@ function cp_resumo(string $hoje): array
             COALESCE(SUM(CASE WHEN pago = 1 THEN 1 ELSE 0 END), 0) AS q_pagas,
             COALESCE(SUM(CASE WHEN pago = 1 AND pago_em >= ? AND pago_em <= ? THEN COALESCE(valor_pago, valor) ELSE 0 END), 0) AS v_pago_mes,
             COUNT(*) AS q_todas
-         FROM vn_contas_pagar c WHERE $visSql",
-        array_merge([$hoje, $hoje, $hoje, $fim7, $hoje, $fim7, $mesIni, $mesFim], $visPar)
+         FROM vn_contas_pagar c WHERE $visSql AND $escSql",
+        array_merge([$hoje, $hoje, $hoje, $fim7, $hoje, $fim7, $mesIni, $mesFim], $visPar, $escPar)
     ) ?: [];
     foreach (['q_abertas', 'q_atrasadas', 'q_semana', 'q_pagas', 'q_todas'] as $k) $r[$k] = (int)($r[$k] ?? 0);
     foreach (['v_abertas', 'v_atrasadas', 'v_semana', 'v_pago_mes'] as $k) $r[$k] = (float)($r[$k] ?? 0);
@@ -266,17 +290,13 @@ function cp_resumo(string $hoje): array
 }
 
 /* $ver: abertas | atrasadas | semana | pagas | todas. $q: texto de busca. $de: todas | minhas | publicas | privadas. */
-function cp_listar(string $ver, string $q, string $hoje, string $de = 'todas'): array
+function cp_listar(string $ver, string $q, string $hoje, string $de = 'publicas'): array
 {
     $fim7 = date('Y-m-d', strtotime($hoje . ' +7 days'));
     [$visSql, $visPar] = cp_sql_visivel('c');
-    $where = [$visSql];
-    $params = $visPar;
-    switch ($de) {
-        case 'minhas':   $where[] = 'c.dono_id = ?'; $params[] = cp_usuario()['id']; break;
-        case 'publicas': $where[] = "c.visibilidade <> 'privado'"; break;
-        case 'privadas': $where[] = "c.visibilidade = 'privado'"; break;
-    }
+    [$escSql, $escPar] = cp_sql_escopo($de, 'c');
+    $where = [$visSql, $escSql];
+    $params = array_merge($visPar, $escPar);
     $ordem = 'c.pago ASC, c.vencimento ASC, c.id ASC';
     switch ($ver) {
         case 'atrasadas': $where[] = 'c.pago = 0 AND c.vencimento < ?'; $params[] = $hoje; break;
@@ -802,49 +822,53 @@ function cp_rel_limites(string $mes): array
 }
 
 /* Quanto foi pago no mês (pela data do pagamento): ['total' => R$, 'qtd' => n]. */
-function cp_rel_pago_no_mes(string $mes): array
+function cp_rel_pago_no_mes(string $mes, string $de = 'publicas'): array
 {
     [$ini, $fim] = cp_rel_limites($mes);
     [$visSql, $visPar] = cp_sql_visivel('c');
-    $r = vn_fetch_one("SELECT COALESCE(SUM(COALESCE(valor_pago, valor)), 0) AS t, COUNT(*) AS q FROM vn_contas_pagar c WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql", array_merge([$ini, $fim], $visPar)) ?: [];
+    [$escSql, $escPar] = cp_sql_escopo($de, 'c');
+    $r = vn_fetch_one("SELECT COALESCE(SUM(COALESCE(valor_pago, valor)), 0) AS t, COUNT(*) AS q FROM vn_contas_pagar c WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql AND $escSql", array_merge([$ini, $fim], $visPar, $escPar)) ?: [];
     return ['total' => (float)($r['t'] ?? 0), 'qtd' => (int)($r['q'] ?? 0)];
 }
 
 /* Pago no mês por categoria, do maior para o menor: [['categoria' => ..., 'total' => R$, 'qtd' => n], ...]. */
-function cp_rel_pago_por_categoria(string $mes): array
+function cp_rel_pago_por_categoria(string $mes, string $de = 'publicas'): array
 {
     [$ini, $fim] = cp_rel_limites($mes);
     [$visSql, $visPar] = cp_sql_visivel('c');
+    [$escSql, $escPar] = cp_sql_escopo($de, 'c');
     $out = [];
     foreach (vn_fetch_all("SELECT COALESCE(NULLIF(TRIM(c.categoria), ''), 'Sem categoria') AS cat, SUM(COALESCE(c.valor_pago, c.valor)) AS t, COUNT(*) AS q
-                           FROM vn_contas_pagar c WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql GROUP BY cat ORDER BY t DESC", array_merge([$ini, $fim], $visPar)) as $r) {
+                           FROM vn_contas_pagar c WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql AND $escSql GROUP BY cat ORDER BY t DESC", array_merge([$ini, $fim], $visPar, $escPar)) as $r) {
         $out[] = ['categoria' => (string)$r['cat'], 'total' => (float)$r['t'], 'qtd' => (int)$r['q']];
     }
     return $out;
 }
 
 /* Pago em cada mês entre os dois meses (inclusive): ['AAAA-MM' => R$]. */
-function cp_rel_pago_por_mes(string $mesIni, string $mesFim): array
+function cp_rel_pago_por_mes(string $mesIni, string $mesFim, string $de = 'publicas'): array
 {
     [$ini] = cp_rel_limites($mesIni);
     [, $fim] = cp_rel_limites($mesFim);
     [$visSql, $visPar] = cp_sql_visivel('c');
+    [$escSql, $escPar] = cp_sql_escopo($de, 'c');
     $out = [];
     foreach (vn_fetch_all("SELECT DATE_FORMAT(c.pago_em, '%Y-%m') AS m, SUM(COALESCE(c.valor_pago, c.valor)) AS t FROM vn_contas_pagar c
-                           WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql GROUP BY m", array_merge([$ini, $fim], $visPar)) as $r) {
+                           WHERE c.pago = 1 AND c.pago_em >= ? AND c.pago_em <= ? AND $visSql AND $escSql GROUP BY m", array_merge([$ini, $fim], $visPar, $escPar)) as $r) {
         $out[(string)$r['m']] = (float)$r['t'];
     }
     return $out;
 }
 
 /* As próximas contas a pagar (atrasadas primeiro), com a quantidade de fotos de cada uma. */
-function cp_rel_proximas(int $limite = 8): array
+function cp_rel_proximas(int $limite = 8, string $de = 'publicas'): array
 {
     $limite = max(1, min(50, $limite));
     [$visSql, $visPar] = cp_sql_visivel('c');
+    [$escSql, $escPar] = cp_sql_escopo($de, 'c');
     return vn_fetch_all("SELECT c.id, c.descricao, c.fornecedor, c.categoria, c.valor, c.vencimento, c.pago, c.parcela_num, c.parcela_ordem, c.parcela_qtd,
                                 (SELECT COUNT(*) FROM vn_contas_pagar_fotos f WHERE f.conta_id = c.id) AS fotos
-                         FROM vn_contas_pagar c WHERE c.pago = 0 AND $visSql ORDER BY c.vencimento ASC, c.id ASC LIMIT $limite", $visPar);
+                         FROM vn_contas_pagar c WHERE c.pago = 0 AND $visSql AND $escSql ORDER BY c.vencimento ASC, c.id ASC LIMIT $limite", array_merge($visPar, $escPar));
 }
 
 /* ------------------------------------------------------------------ fotos */

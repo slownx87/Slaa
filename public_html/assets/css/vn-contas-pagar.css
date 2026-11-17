@@ -7,35 +7,44 @@
 .cp *{box-sizing:border-box}
 .cp [hidden]{display:none!important}
 
-/* ------------------------------------------------------------ resumo */
-.cp-kpis .vn-card .label{gap:8px}
-.cp-kpi-atraso.alerta{border-color:var(--danger-line)}
-.cp-kpi-atraso.alerta .value{color:var(--danger-text)}
-
-/* ------------------------------------------------------------ filtros e busca */
-.cp-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:8px 0 4px}
-.cp-tools .vn-segment a small{opacity:.75;font-weight:800;margin-left:2px}
-.cp-busca{display:flex;gap:8px;align-items:center;flex:1 1 280px;justify-content:flex-end;min-width:0}
-.cp-busca input[type="search"]{
-  flex:1 1 200px;max-width:340px;min-width:0;min-height:40px;padding:8px 12px;border:1px solid var(--line-strong);
-  border-radius:var(--radius);background:var(--surface);color:var(--text);font:inherit;font-size:.9rem;
-}
-.cp-busca input[type="search"]:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring)}
-.cp-busca select{
-  flex:0 1 190px;min-width:0;min-height:40px;padding:8px 10px;border:1px solid var(--line-strong);
-  border-radius:var(--radius);background:var(--surface);color:var(--text);font:inherit;font-size:.88rem;font-weight:700;
-}
-.cp-busca select:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring)}
-
-/* ------------------------------------------------------------ lista */
-.cp-table .num strong{white-space:nowrap}
-.cp-row.atrasada td:first-child{box-shadow:inset 3px 0 0 var(--danger)}
-.cp-row.hoje td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
-.cp-row.paga .vn-row-title{color:var(--text-soft)}
-.cp-row.atrasada .cp-quando{color:var(--danger-text);font-weight:800}
-.cp-row.hoje .cp-quando{color:var(--warn-text);font-weight:800}
-.cp-obs{max-width:34ch}
+/* ------------------------------------------------------------ cabeçalho, escopo e blocos próprios do A Pagar */
+.cp .cb-head-acts{flex-wrap:wrap}
+.cp-escopo{align-self:flex-start;max-width:100%}
+.cp-escopo-nota{margin:-8px 2px 0}
 .cp-nota{margin:10px 0 0;color:var(--muted);font-size:.8rem;font-weight:600}
+.cp-tools{grid-template-columns:minmax(220px,1fr) auto}
+.cp-tools .cb-search{margin:0}
+.cp-limpar{display:inline-flex;align-items:center;color:var(--muted);text-decoration:none}
+.cp-limpar:hover{color:var(--text)}
+.cp-row{cursor:pointer}
+.cp-row .cb-sub{overflow-wrap:anywhere}
+.cp-spacer{flex:1}
+.cp-excluir{margin-right:auto}
+.cp-sec-vazio{padding:8px 0}
+
+/* contas privadas: somadas à parte, fora dos totais da empresa */
+.cp-priv{
+  display:grid;grid-template-columns:44px minmax(0,1.2fr) minmax(0,2fr) auto;gap:6px 14px;align-items:center;text-decoration:none;color:inherit;
+  background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:var(--radius-lg);padding:10px 14px;
+}
+.cp-priv:hover{border-color:var(--warn)}
+.cp-priv .ico{width:44px;height:44px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface);color:var(--warn-text)}
+.cp-priv .txt strong{display:block;font-weight:800;color:var(--warn-text);font-size:.95rem}
+.cp-priv .txt small{display:block;color:var(--text-soft);font-weight:600;font-size:.78rem;margin-top:1px}
+.cp-priv .nums{display:flex;gap:18px;flex-wrap:wrap;justify-content:flex-end}
+.cp-priv .nums>span{display:flex;flex-direction:column;font-size:.7rem;font-weight:800;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em}
+.cp-priv .nums b{font-size:1rem;color:var(--text);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
+.cp-priv .nums small{font-size:.7rem;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0}
+.cp-priv .nums .ruim b{color:var(--danger-text)}
+.cp-priv .go{color:var(--warn-text)}
+
+/* detalhe da conta (janela pequena) */
+.cp-chips{display:flex;flex-wrap:wrap;gap:6px}
+.cp-chips .cp-rec,.cp-chips .cp-vis{margin-top:0}
+.cp-cod{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.cp-cod code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;color:var(--text-soft)}
+.cp-anexos-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px}
+.cp-anexos-h .cb-h{margin:0}
 
 /* miniaturas na linha */
 .cp-thumbs{
@@ -47,25 +56,14 @@
 .cp-thumbs img{width:42px;height:42px;object-fit:cover;border-radius:6px;background:var(--surface-2);display:block}
 .cp-thumbs .cp-mais{min-width:34px;padding:0 6px;font-weight:800;font-size:.8rem;color:var(--text-soft)}
 
-/* ------------------------------------------------------------ janelas */
-.cp-dlg{width:min(540px,calc(100vw - 28px))}
-.cp-dlg-wide{width:min(720px,calc(100vw - 28px))}
-.cp-dlg form{margin:0}
-/* corpo rola e o rodapé (botões) fica sempre visível, mesmo com muitas fotos ou teclado aberto */
-.cp-dlg[open]{display:flex;flex-direction:column;max-height:min(92vh,92dvh)}
-.cp-dlg>form{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
-.cp-dlg .vn-dialog-body{overflow-y:auto;min-height:0;flex:1 1 auto}
-.cp-dlg .vn-dialog-head,.cp-dlg .vn-dialog-foot{flex:0 0 auto}
-.cp-dlg-sub{margin:4px 0 0;color:var(--text-soft);font-size:.85rem;font-weight:600}
-.cp-dlg .vn-form-grid{margin-top:4px}
-.cp-dlg .vn-dialog-foot{align-items:center}
-.cp-dlg .vn-dialog-foot .vn-spacer{flex:1}
-.cp-excluir{color:var(--danger-text);border-color:var(--danger-line);background:var(--danger-bg)}
-.cp-excluir:hover{border-color:var(--danger);color:var(--danger-text);background:var(--danger-bg)}
-.cp-dlg input[type="file"]{
+/* ------------------------------------------------------------ janelas (estilo cb-sheet, em vn-cobrancas.css) */
+.cb-sheet select:disabled{opacity:.7;cursor:not-allowed}
+.cb-sheet input[type="file"]{
   width:100%;padding:10px;border:1px dashed var(--line-strong);border-radius:var(--radius);background:var(--surface-2);
-  color:var(--text);font:inherit;font-size:.88rem;
+  color:var(--text);font:inherit;font-size:.88rem;min-height:0;
 }
+.cb-sheet input[type="checkbox"]{width:20px;height:20px;min-height:0}
+.cp-dlg-sub{margin:4px 0 0;color:var(--text-soft);font-size:.85rem;font-weight:600}
 
 /* pré-visualização das fotos escolhidas */
 .cp-previews{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
@@ -107,24 +105,20 @@
 .cp-seta{flex:0 0 auto}
 .cp-seta[data-cp-anterior] .material-symbols-outlined{transform:scaleX(-1)}
 
-@media (max-width:760px){
-  .cp-tools{flex-direction:column;align-items:stretch}
-  .cp-busca{flex:0 0 auto;justify-content:stretch}   /* sem isso o flex-basis de 280px virava ALTURA na coluna */
-  .cp-busca input[type="search"]{max-width:none}
-  .cp-busca{flex-wrap:wrap}
-  .cp-busca select{flex:1 1 100%}
-  .cp-dlg,.cp-dlg-wide{width:calc(100vw - 16px);max-height:92vh}
-  .cp-obs{max-width:none}
-  .cp-row.atrasada td:first-child,.cp-row.hoje td:first-child{box-shadow:none}
-  .cp-row.atrasada{border-color:var(--danger-line)!important}
-  .cp-viewer-palco{gap:2px;padding:0 2px 10px}
+@media (max-width:900px){
+  .cp-priv{grid-template-columns:44px minmax(0,1fr) auto}
+  .cp-priv .nums{grid-column:1/-1;grid-row:2;justify-content:flex-start;gap:14px}
+  .cp-priv .go{grid-column:3;grid-row:1}
+  .cp-tools{grid-template-columns:1fr}
+  .cp-tools .cb-seg{grid-column:auto}
 }
-
-/* título + subtítulos empilhados dentro da célula (no celular a célula vira linha flex) */
-.cp-bloco{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
-.cp-table .num .cp-bloco{align-items:flex-end}
-@media (max-width:760px){
-  .cp-table .num .cp-bloco{align-items:flex-start}
+@media (max-width:700px){
+  .cb-form.cp-duas{grid-template-columns:1fr 1fr;gap:12px}   /* valor e vencimento lado a lado: a janela fica baixa */
+  .cb-form.cp-duas .full{grid-column:1/-1}
+  .cb-more>summary .cp-mais-dica{display:none}
+  .cp-viewer-palco{gap:2px;padding:0 2px 10px}
+  .cp-escopo-nota{margin-top:-6px}
+  .cp-row .cb-ico{display:none}
 }
 
 /* ------------------------------------------------------------ contas que se repetem */
@@ -162,7 +156,7 @@ html[data-theme="dark"] .cp-resumo-parc{color:#bfdbfe;background:rgba(59,130,246
 .cp-vis.privada{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-text)}
 .cp-vis.publica{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok-text)}
 .cp-ajuda{display:block;margin-top:6px;color:var(--muted);font-weight:600;font-size:.78rem;line-height:1.4}
-.cp-dlg select:disabled{opacity:.7;cursor:not-allowed}
+
 
 /* ------------------------------------------------------------ anexos em PDF */
 .cp-pdf-mini{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:0;width:42px;height:42px;border-radius:6px;background:var(--danger-bg);color:var(--danger-text);border:1px solid var(--danger-line);font-size:.62rem;font-weight:900;letter-spacing:.04em}
