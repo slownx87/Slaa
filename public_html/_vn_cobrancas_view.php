@@ -324,7 +324,10 @@ if (!function_exists('cb_janela_mensalidade')) {
                          : cb_form_pago($it, 1, 'Marcar como pago', 'pri') . cb_btn_wpp($it['wpp']) . cb_btn_pix($it['pix']))
             . '<button type="button" class="cb-btn" data-vista-ir="editar">' . cb_ico('edit') . 'Editar</button>'
             . $pausar
-            . '<a class="cb-btn push" href="mensalidades.php">' . cb_ico('event_repeat') . 'Histórico e exclusão</a>';
+            . '<a class="cb-btn" href="mensalidades.php">' . cb_ico('event_repeat') . 'Histórico</a>'
+            . '<form method="post" class="push" data-async data-danger data-confirm="Excluir a mensalidade de ' . vn_h((string)$r['cliente_nome']) . ' e TODOS os meses dela (pagos e em aberto), com os anexos? Não dá para desfazer. Para só parar de cobrar, use Pausar." data-confirm-ok="Excluir">'
+            . '<input type="hidden" name="acao" value="excluir_mensalidade"><input type="hidden" name="mensalidade_id" value="' . $mid . '">'
+            . '<button type="submit" class="cb-btn bad">' . cb_ico('delete') . 'Excluir</button></form>';
         return cb_janela('d-' . $it['key'], vn_h((string)$r['cliente_nome']) . cb_tag($it['etq']), 'Mensalidade · ' . vn_h(vn_mens_categoria($r)), $ver . $edicao, $rodape);
     }
 }
@@ -371,7 +374,10 @@ if (!function_exists('cb_janela_material')) {
             . '<label class="cb-venc-in"><span>Vence em</span><input type="date" name="av_venc" value="' . vn_h(date('Y-m-d')) . '" required aria-label="Vencimento da cobrança"></label>'
             . '<button type="submit" class="cb-btn pri">' . cb_ico('check') . 'Aprovar venda</button></form>'
             . '<button type="button" class="cb-btn" data-add-peca data-cliente-id="' . (int)$d['cliente_id'] . '" data-cliente-nome="' . vn_h($it['cliente']) . '">' . cb_ico('add') . 'Peça / serviço</button>'
-            . cb_btn_wpp($it['wpp']);
+            . cb_btn_wpp($it['wpp'])
+            . '<form method="post" class="push" data-async data-danger data-confirm="Excluir TODA a venda de ' . vn_h($it['cliente']) . ' (' . vn_h($it['mesLabel']) . '), ' . count($d['itens']) . (count($d['itens']) === 1 ? ' peça' : ' peças') . '? O material volta para o estoque. Não dá para desfazer." data-confirm-ok="Excluir">'
+            . '<input type="hidden" name="acao" value="excluir_venda"><input type="hidden" name="av_cliente" value="' . vn_h($it['cliente']) . '"><input type="hidden" name="av_mes" value="' . vn_h($it['mes']) . '">'
+            . '<button type="submit" class="cb-btn bad">' . cb_ico('delete') . 'Excluir venda</button></form>';
         return cb_janela('d-' . $it['key'], vn_h($it['cliente']) . cb_tag($it['etq']), 'Venda de material · ' . vn_h($it['mesLabel']) . ' · ' . vn_h($textoData), $corpo, $rodape);
     }
 }

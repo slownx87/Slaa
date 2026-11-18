@@ -234,19 +234,27 @@
     if (fp && fp.requestSubmit) fp.requestSubmit(); else if (fp) fp.submit();
   });
 
-  $('[data-cp-excluir]', dlgConta).addEventListener('click', function () {
-    // conta que se repete: pergunta se é só esta ou se é para parar de repetir também
-    if (contaAberta && contaAberta.rec && contaAberta.rec.ativa) {
+  /* Excluir uma conta (do detalhe ou da edição): se ela se repete, pergunta se é só esta ou se é para parar de repetir também;
+     senão pede a confirmação e exclui. Se a pessoa desistir, volta para a janela de onde veio. */
+  function pedirExclusao(c, janela) {
+    if (!c) return;
+    if (c.rec && c.rec.ativa) {
       var dlgRec = $('#cpDlgExcluirRec');
-      Array.prototype.forEach.call(dlgRec.querySelectorAll('input[name="conta_id"]'), function (i) { i.value = contaAberta.id; });
-      $('[data-cp-excluir-rec-nome]', dlgRec).textContent = contaAberta.descricao + ' · vence ' + dataBR(contaAberta.vencimento);
-      fechar(dlgConta);
+      Array.prototype.forEach.call(dlgRec.querySelectorAll('input[name="conta_id"]'), function (i) { i.value = c.id; });
+      $('[data-cp-excluir-rec-nome]', dlgRec).textContent = c.descricao + ' · vence ' + dataBR(c.vencimento);
+      fechar(janela);
       abrir(dlgRec);
       return;
     }
     var fe = $('#cpFormExcluir', dlgConta);
-    if (fe && fe.requestSubmit) fe.requestSubmit(); else if (fe) fe.submit();
-  });
+    if (!fe) return;
+    fe.elements.conta_id.value = c.id;
+    fe.setAttribute('data-confirm', c.parc
+      ? 'Excluir só esta parcela? As outras continuam (para apagar todas, use "Cancelar parcelamento").'
+      : 'Excluir esta conta e as fotos dela? Isso não pode ser desfeito.');
+    if (fe.requestSubmit) fe.requestSubmit(); else fe.submit();
+  }
+  $('[data-cp-excluir]', dlgConta).addEventListener('click', function () { pedirExclusao(contaAberta, dlgConta); });
 
   /* ------------------------------------------------------------ janela: detalhe (pequena, abre ao tocar na linha) */
   var dlgDet = $('#cpDlgDetalhe');
@@ -322,6 +330,7 @@
     }
     if (fotos.length) rod.appendChild(botao('Anexos', 'photo_camera', '', function () { fechar(dlgDet); abrirFotos(c); }));
     rod.appendChild(botao('Editar', 'edit', '', function () { fechar(dlgDet); abrirConta(c); }));
+    rod.appendChild(botao('Excluir', 'delete', 'bad push', function () { pedirExclusao(c, dlgDet); }));
     var corpoRolagem = $('[data-cp-det-corpo]', dlgDet); if (corpoRolagem) corpoRolagem.scrollTop = 0;
     abrir(dlgDet);
   }

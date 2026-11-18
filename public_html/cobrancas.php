@@ -225,6 +225,19 @@ try {
             if ($c) $abrirCli = substr((string)$c['criado_em'], 0, 7) . '|' . (string)$c['cliente_nome'];
         }
 
+        /* ---- Excluir a venda inteira (todas as peças do cliente naquele mês, ainda sem aprovar): o material volta para o estoque ---- */
+        if ($acao === 'excluir_venda') {
+            $nomeCli = vn_clean((string)($_POST['av_cliente'] ?? ''));
+            $mesAv = (string)($_POST['av_mes'] ?? '');
+            if ($nomeCli === '' || !preg_match('/^\d{4}-\d{2}$/', $mesAv)) throw new Exception('Cliente ou mês inválido.');
+            $iniMes = $mesAv . '-01 00:00:00';
+            $fimMes = date('Y-m-01 00:00:00', strtotime($mesAv . '-01 +1 month'));
+            $itensEx = vn_fetch_all('SELECT id FROM vn_saida_cobrancas WHERE cliente_nome = ? AND cobranca_id IS NULL AND criado_em >= ? AND criado_em < ? ORDER BY id ASC', [$nomeCli, $iniMes, $fimMes]);
+            if (!$itensEx) throw new Exception('Nenhuma peça aguardando aprovação para este cliente neste mês.');
+            foreach ($itensEx as $iEx) vn_cobr_excluir_peca((int)$iEx['id']);
+            $ok = 'Venda de ' . $nomeCli . ' (' . substr($mesAv, 5, 2) . '/' . substr($mesAv, 0, 4) . ') excluída: ' . count($itensEx) . (count($itensEx) === 1 ? ' peça removida' : ' peças removidas') . ' e o estoque foi devolvido.';
+        }
+
         /* ---- Aprovar venda: o material do cliente/mês vira uma cobrança avulsa ---- */
         if ($acao === 'aprovar_venda') {
             $nomeCli = vn_clean((string)($_POST['av_cliente'] ?? ''));
@@ -330,6 +343,17 @@ try {
             }
             if ($vencMudou && (int)$pgAlvoEd['pago'] === 1) vn_exec('UPDATE vn_mensalidade_pagamentos SET vencimento = ? WHERE id = ?', [$vencEd, $pgIdEd]);
             $ok = 'Mensalidade de ' . $nomeEd . ' atualizada' . ($vencMudou ? ': vencimento de ' . substr((string)$pgAlvoEd['competencia'], 5, 2) . '/' . substr((string)$pgAlvoEd['competencia'], 0, 4) . ' agora em ' . vn_date_br($vencEd) : '') . '.';
+        }
+
+        /* ---- Excluir a mensalidade inteira: todos os meses (pagos e em aberto) e os anexos deles ---- */
+        if ($acao === 'excluir_mensalidade') {
+            $midEx = (int)($_POST['mensalidade_id'] ?? 0);
+            $mEx = vn_fetch_one('SELECT * FROM vn_mensalidades WHERE id = ?', [$midEx]);
+            if (!$mEx) throw new Exception('Mensalidade não encontrada.');
+            foreach (vn_fetch_all('SELECT id FROM vn_mensalidade_pagamentos WHERE mensalidade_id = ?', [$midEx]) as $pgEx) cba_excluir_de('mensalidade', (int)$pgEx['id']);
+            vn_exec('DELETE FROM vn_mensalidade_pagamentos WHERE mensalidade_id = ?', [$midEx]);
+            vn_exec('DELETE FROM vn_mensalidades WHERE id = ?', [$midEx]);
+            $ok = 'Mensalidade de ' . $mEx['cliente_nome'] . ' excluída, com todos os meses.';
         }
 
         /* ---- Pausar / reativar mensalidade (pausada não gera meses novos) ---- */
