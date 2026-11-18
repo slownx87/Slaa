@@ -165,5 +165,15 @@
     abrir(vazio);
   }, true);
 
+  // Campo ainda não tocado (então ainda não está "só leitura") e vazio: o navegador barra o envio com o aviso dele; aqui o calendário abre no lugar.
+  document.addEventListener('invalid', function (e) {
+    var t = e.target;
+    if (!usa(t) || t.value || !t.required) return;
+    e.preventDefault();
+    if (dlg && dlg.open) return;
+    toast('Escolha a data: ' + nomeDoCampo(t).toLowerCase() + '.');
+    abrir(t);
+  }, true);
+
   window.VNCalendario = { abrir: abrir };
 })();

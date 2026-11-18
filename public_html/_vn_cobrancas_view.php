@@ -305,10 +305,13 @@ if (!function_exists('cb_janela_mensalidade')) {
             . '<div class="cb-f full"><label>Serviço cobrado</label><input name="categoria" list="cb-cat-lista" maxlength="80" value="' . vn_h((string)($r['categoria'] ?? '')) . '" placeholder="Ex.: Portaria remota, Monitoramento…"></div>'
             . '<div class="cb-f"><label>Valor mensal (R$) *</label><input name="valor_mensal" inputmode="decimal" required autocomplete="off" value="' . vn_h(number_format($valorMensal, 2, ',', '.')) . '"></div>'
             . '<div class="cb-f"><label>Vence todo dia *</label><input name="dia_vencimento" type="number" min="1" max="31" required inputmode="numeric" value="' . (int)($r['dia_vencimento'] ?? 10) . '"></div>'
+            . '<input type="hidden" name="pagamento_id" value="' . (int)($r['pagamento_id'] ?? 0) . '">'
+            . '<div class="cb-f full"><label>Vencimento de ' . vn_h(substr((string)$r['competencia'], 5, 2) . '/' . substr((string)$r['competencia'], 0, 4)) . ' (só este mês)</label>'
+            . '<input type="date" name="venc_mes" value="' . vn_h((string)($r['vencimento'] ?? '')) . '"' . (!empty($r['vencimento']) ? ' required' : '') . '></div>'
             . '<div class="cb-f"><label>WhatsApp / telefone</label><input name="telefone" inputmode="tel" value="' . vn_h((string)($r['telefone'] ?? '')) . '"></div>'
             . '<div class="cb-f"><label>Chave PIX</label><input name="chave_pix" value="' . vn_h((string)($r['chave_pix'] ?? '')) . '" placeholder="CPF, e-mail, telefone ou aleatória"></div>'
             . '<div class="cb-f full"><label>Observação</label><textarea name="observacao">' . vn_h((string)($r['observacao'] ?? '')) . '</textarea></div>'
-            . '<p class="cb-note full">Os meses que ainda não foram pagos passam a usar o novo valor e o novo dia de vencimento. Os já pagos não mudam.</p>'
+            . '<p class="cb-note full">A data acima muda só este mês (dia, mês e ano). "Vence todo dia" muda o dia dos meses que ainda não foram pagos; o valor novo também vale para eles. Os já pagos não mudam.</p>'
             . '<div class="cb-f full" style="flex-direction:row;gap:8px"><button type="submit" class="cb-btn pri" style="min-height:46px">Salvar alterações</button>'
             . '<button type="button" class="cb-btn" style="min-height:46px" data-vista-ir="ver">Cancelar</button></div></form>';
 

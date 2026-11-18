@@ -338,6 +338,15 @@ if (!function_exists('vn_ensure_mensalidades_tables')) {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
         vn_add_col_if_missing('vn_mensalidades', 'categoria', "VARCHAR(80) NULL");
+        vn_add_col_if_missing('vn_mensalidades', 'inicio', "DATE NULL");   // data do primeiro vencimento (vazio = mês do cadastro)
+    }
+}
+
+if (!function_exists('vn_mens_data_valida')) {
+    /* Data AAAA-MM-DD existente no calendário (rejeita 2026-02-31, lixo e anos fora de 2000–2100). */
+    function vn_mens_data_valida(string $d): bool {
+        if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $d, $m)) return false;
+        return (int)$m[1] >= 2000 && (int)$m[1] <= 2100 && checkdate((int)$m[2], (int)$m[3], (int)$m[1]);
     }
 }
 
@@ -359,12 +368,25 @@ if (!function_exists('vn_mens_gerar_mes')) {
         if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $competencia) || $competencia > date('Y-m', strtotime('+36 months'))) return;
         $lista = vn_fetch_all('SELECT * FROM vn_mensalidades WHERE ativo = 1');
         foreach ($lista as $m) {
-            $inicio = substr((string)($m['criado_em'] ?? ''), 0, 7);
-            if ($inicio !== '' && $competencia < $inicio) continue; // não gera mês anterior ao cadastro
+            $inicio = substr((string)(!empty($m['inicio']) ? $m['inicio'] : ($m['criado_em'] ?? '')), 0, 7);   // mês do primeiro vencimento (ou do cadastro)
+            if ($inicio !== '' && $competencia < $inicio) continue; // não gera mês anterior ao início
             $existe = vn_fetch_one('SELECT id FROM vn_mensalidade_pagamentos WHERE mensalidade_id = ? AND competencia = ? LIMIT 1', [(int)$m['id'], $competencia]);
             if ($existe) continue;
             vn_exec('INSERT INTO vn_mensalidade_pagamentos (mensalidade_id, competencia, valor, vencimento, pago) VALUES (?, ?, ?, ?, 0)',
                 [(int)$m['id'], $competencia, (float)$m['valor_mensal'], vn_mens_vencimento($competencia, (int)$m['dia_vencimento'])]);
+        }
+    }
+}
+
+if (!function_exists('vn_mens_gerar_desde')) {
+    /* Gera os meses de $deYm até $ateYm (AAAA-MM), no máximo 24 para trás: usado quando o primeiro vencimento escolhido já passou. */
+    function vn_mens_gerar_desde(string $deYm, string $ateYm): void {
+        if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $deYm) || !preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $ateYm)) return;
+        $min = date('Y-m', strtotime($ateYm . '-01 -24 months'));
+        if ($deYm < $min) $deYm = $min;
+        for ($c = $deYm, $guarda = 0; $c <= $ateYm && $guarda < 30; $guarda++) {
+            vn_mens_gerar_mes($c);
+            $c = date('Y-m', strtotime($c . '-01 +1 month'));
         }
     }
 }
@@ -420,6 +442,14 @@ if (!function_exists('vn_mens_criar')) {
         if ($valor <= 0) throw new Exception('Informe o valor da mensalidade.');
         $dia = (int)($post['dia_vencimento'] ?? 10);
         if ($dia < 1 || $dia > 31) $dia = 10;
+        // Primeiro vencimento (data completa): o dia dele vira "todo dia X" e o mês dele é o primeiro mês cobrado.
+        $inicio = trim((string)($post['primeiro_venc'] ?? ''));
+        if ($inicio !== '') {
+            if (!vn_mens_data_valida($inicio)) throw new Exception('Escolha uma data válida para o primeiro vencimento.');
+            $dia = (int)substr($inicio, 8, 2);
+        } else {
+            $inicio = null;
+        }
         $telefone = vn_clean($post['telefone'] ?? '');
         if ($telefone === '') $telefone = $telefoneCliente;
         $categoria = vn_clean($post['categoria'] ?? '');
@@ -434,11 +464,13 @@ if (!function_exists('vn_mens_criar')) {
             'chave_pix'      => vn_clean($post['chave_pix'] ?? ''),
             'valor_mensal'   => $valor,
             'dia_vencimento' => $dia,
+            'inicio'         => $inicio,
             'ativo'          => 1,
             'observacao'     => trim((string)($post['observacao'] ?? '')),
             'criado_em'      => vn_now_sp(),
         ]);
-        return 'Cobrança "' . $categoria . '" de ' . $nome . ' cadastrada: ' . vn_money($valor) . ' todo dia ' . $dia . '.';
+        return 'Cobrança "' . $categoria . '" de ' . $nome . ' cadastrada: ' . vn_money($valor) . ' todo dia ' . $dia
+            . ($inicio ? ', a partir de ' . vn_date_br($inicio) : '') . '.';
     }
 }
 

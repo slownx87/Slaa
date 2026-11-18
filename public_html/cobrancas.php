@@ -285,7 +285,9 @@ try {
         /* ---- Nova mensalidade (criada por aqui mesmo) ---- */
         if ($acao === 'nova_mensalidade') {
             $ok = vn_mens_criar($_POST, $clientesLista);
-            vn_mens_gerar_mes(vn_mes_atual());
+            $iniMens = substr(trim((string)($_POST['primeiro_venc'] ?? '')), 0, 7);
+            if (preg_match('/^\d{4}-\d{2}$/', $iniMens) && $iniMens < vn_mes_atual()) vn_mens_gerar_desde($iniMens, vn_mes_atual());   // primeiro vencimento já passou: cria os meses desde lá
+            else vn_mens_gerar_mes(vn_mes_atual());
         }
 
         /* ---- Pagar/desfazer mensalidade do mês (igual à página de Mensalidades) ---- */
@@ -307,16 +309,27 @@ try {
             if ($valorEd <= 0) throw new Exception('Informe o valor da mensalidade.');
             $diaEd = (int)($_POST['dia_vencimento'] ?? 10);
             if ($diaEd < 1 || $diaEd > 31) $diaEd = (int)$mEd['dia_vencimento'];
+            // Vencimento só deste mês (data completa: dia, mês e ano). Vazio = não mexe.
+            $pgIdEd = (int)($_POST['pagamento_id'] ?? 0);
+            $vencEd = trim((string)($_POST['venc_mes'] ?? ''));
+            if ($vencEd !== '' && !vn_mens_data_valida($vencEd)) throw new Exception('Escolha uma data de vencimento válida.');
+            $pgAlvoEd = $pgIdEd > 0 ? vn_fetch_one('SELECT * FROM vn_mensalidade_pagamentos WHERE id = ? AND mensalidade_id = ?', [$pgIdEd, $midEd]) : null;
+            $vencMudou = $pgAlvoEd && $vencEd !== '' && $vencEd !== (string)($pgAlvoEd['vencimento'] ?? '');
+            $diaMudou = $diaEd !== (int)$mEd['dia_vencimento'];
             $catEd = vn_clean($_POST['categoria'] ?? '');
             if ($catEd === '') $catEd = 'Mensalidade';
             vn_exec('UPDATE vn_mensalidades SET cliente_nome = ?, categoria = ?, telefone = ?, chave_pix = ?, valor_mensal = ?, dia_vencimento = ?, observacao = ? WHERE id = ?',
                 [$nomeEd, $catEd, vn_clean($_POST['telefone'] ?? ''), vn_clean($_POST['chave_pix'] ?? ''), $valorEd, $diaEd, trim((string)($_POST['observacao'] ?? '')), $midEd]);
-            // os meses que ainda não foram pagos passam a usar o novo valor e o novo dia; os pagos não mudam
+            // os meses que ainda não foram pagos passam a usar o novo valor; o dia novo só entra se foi mudado
+            // (assim a data que você acertou à mão para um mês não é desfeita ao editar outra coisa). Os pagos não mudam.
             foreach (vn_fetch_all('SELECT * FROM vn_mensalidade_pagamentos WHERE mensalidade_id = ? AND pago = 0', [$midEd]) as $pgEd) {
-                vn_exec('UPDATE vn_mensalidade_pagamentos SET valor = ?, vencimento = ? WHERE id = ?',
-                    [$valorEd, vn_mens_vencimento((string)$pgEd['competencia'], $diaEd), (int)$pgEd['id']]);
+                if ($vencMudou && (int)$pgEd['id'] === $pgIdEd) $vNovo = $vencEd;
+                elseif ($diaMudou) $vNovo = vn_mens_vencimento((string)$pgEd['competencia'], $diaEd);
+                else $vNovo = $pgEd['vencimento'];
+                vn_exec('UPDATE vn_mensalidade_pagamentos SET valor = ?, vencimento = ? WHERE id = ?', [$valorEd, $vNovo, (int)$pgEd['id']]);
             }
-            $ok = 'Mensalidade de ' . $nomeEd . ' atualizada.';
+            if ($vencMudou && (int)$pgAlvoEd['pago'] === 1) vn_exec('UPDATE vn_mensalidade_pagamentos SET vencimento = ? WHERE id = ?', [$vencEd, $pgIdEd]);
+            $ok = 'Mensalidade de ' . $nomeEd . ' atualizada' . ($vencMudou ? ': vencimento de ' . substr((string)$pgAlvoEd['competencia'], 5, 2) . '/' . substr((string)$pgAlvoEd['competencia'], 0, 4) . ' agora em ' . vn_date_br($vencEd) : '') . '.';
         }
 
         /* ---- Pausar / reativar mensalidade (pausada não gera meses novos) ---- */
@@ -947,7 +960,8 @@ vn_alerts($ok, $erro);
             <datalist id="cb-cat-lista"><?php foreach ($mensCategorias as $cat): ?><option value="<?php echo vn_h($cat); ?>"></option><?php endforeach; ?></datalist>
         </div>
         <div class="cb-f"><label for="cb-m-valor">Valor mensal (R$) *</label><input id="cb-m-valor" name="valor_mensal" inputmode="decimal" required placeholder="0,00" autocomplete="off"></div>
-        <div class="cb-f"><label for="cb-m-dia">Vence todo dia *</label><input id="cb-m-dia" name="dia_vencimento" type="number" min="1" max="31" value="10" required inputmode="numeric"></div>
+        <div class="cb-f"><label for="cb-m-venc">Primeiro vencimento *</label><input id="cb-m-venc" name="primeiro_venc" type="date" value="<?php echo vn_h(substr(vn_today_sp(), 0, 7) . '-10'); ?>" required></div>
+        <p class="cb-note full" style="margin:0">Depois vence todo mês nesse mesmo dia. Em "Editar" dá para mudar o dia de todos os meses ou a data de um mês só.</p>
         <details class="cb-more full"><summary>Telefone, chave PIX e observação</summary>
             <div class="cb-form">
                 <div class="cb-f"><label for="cb-m-tel">WhatsApp / telefone</label><input id="cb-m-tel" name="telefone" inputmode="tel" placeholder="(11) 90000-0000"></div>
