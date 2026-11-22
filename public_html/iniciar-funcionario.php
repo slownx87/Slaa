@@ -1581,6 +1581,13 @@ function statusLabelPhpVN(string $s): string {
     };
 }
 
+/* Envio maior que o limite do servidor (post_max_size): o PHP joga fora o envio inteiro e a página voltaria como HTML.
+   Responde com um aviso claro em vez de deixar o celular achando que foi "falha de conexão". */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && empty($_FILES) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0
+    && stripos((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data') === 0) {
+    jsonResponse(['ok' => false, 'msg' => 'O arquivo é maior que o limite de envio do servidor (' . ini_get('post_max_size') . '). Envie um menor ou peça para aumentarem o limite.'], 413);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
     vn_os_check_csrf();
     $action = $_POST['action'] ?? '';
@@ -1962,7 +1969,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
     if ($action === 'upload_arquivo') {
         if (!isset($_FILES['arquivo']) || $_FILES['arquivo']['error'] !== UPLOAD_ERR_OK) {
-            jsonResponse(['ok' => false, 'msg' => 'Arquivo não enviado.'], 422);
+            $erroUp = (int)($_FILES['arquivo']['error'] ?? UPLOAD_ERR_NO_FILE);
+            $motivoUp = match ($erroUp) {
+                UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'o arquivo é maior que o limite do servidor (' . ini_get('upload_max_filesize') . ')',
+                UPLOAD_ERR_PARTIAL => 'o envio foi interrompido no meio (internet instável); tente de novo',
+                UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE, UPLOAD_ERR_EXTENSION => 'o servidor não conseguiu gravar o arquivo (erro ' . $erroUp . ')',
+                default => 'o arquivo não chegou ao servidor',
+            };
+            jsonResponse(['ok' => false, 'msg' => 'Arquivo não enviado: ' . $motivoUp . '.'], 422);
         }
 
         $file = $_FILES['arquivo'];
@@ -4766,6 +4780,29 @@ function prepararUploadMultiplo() {
     }
 }
 
+/* Envia 1 arquivo da OS. Sempre devolve {ok, msg}: se o servidor responder algo que não é JSON (limite de tamanho, sessão vencida,
+   erro do servidor), explica o que houve em vez de só "falha de conexão". */
+async function enviarArquivoOS(fd) {
+    fd.append('ajax', '1');
+    fd.append('csrf_token', VN_OS_CSRF_TOKEN);
+    let r, corpo = '';
+    try {
+        r = await fetch(location.href, { method: 'POST', body: fd, credentials: 'same-origin' });
+        corpo = await r.text();
+    } catch (e) {
+        return { ok: false, msg: 'sem conexão com o servidor (confira a internet e tente de novo)' };
+    }
+    try {
+        const j = JSON.parse(corpo);
+        if (j && !j.ok && !j.msg) j.msg = j.erro || j.error || j.message || ('erro ' + r.status);   // a página de sessão vencida responde com "erro", não "msg"
+        return j;
+    } catch (e) { /* não é JSON: segue para explicar */ }
+    if (r.status === 413) return { ok: false, msg: 'arquivo grande demais para o servidor (erro 413)' };
+    if (r.redirected || /name=["']senha["']|login\.php/i.test(corpo.slice(0, 4000))) return { ok: false, msg: 'sua sessão expirou: entre no sistema de novo' };
+    const limpo = corpo.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+    return { ok: false, msg: 'o servidor respondeu com erro ' + r.status + (limpo ? ' (' + limpo + ')' : '') };
+}
+
 async function uploadArquivo() {
     const v = visitaById(selectedId);
     if (!canEditVisit(v)) return;
@@ -4797,7 +4834,7 @@ async function uploadArquivo() {
         fd.append('visita_id', selectedId);
         fd.append('arquivo', file);
         try {
-            const res = await ajax(fd, true);
+            const res = await enviarArquivoOS(fd);
             if (res.ok) okCount++;
             else falhas.push(file.name + ': ' + (res.msg || 'erro'));
         } catch (e) {
@@ -4816,6 +4853,13 @@ async function uploadArquivo() {
         toast(okCount + ' arquivo(s) salvo(s).');
     }
 
+    if (falhas.length && okCount === 0) {   // nada foi: deixa a janela aberta com o motivo e a chance de tentar de novo
+        if (txt) txt.textContent = 'Não enviou: ' + falhas.join(' · ');
+        if (botao) { botao.disabled = false; botao.textContent = 'Tentar de novo'; }
+        return;
+    }
+    if (falhas.length && txt) txt.textContent = okCount + ' de ' + fila.length + ' enviado(s). Não enviou: ' + falhas.join(' · ');
+
     vnMarcarRecarga();
     setTimeout(() => {
         const url = new URL(location.href);
@@ -4824,7 +4868,7 @@ async function uploadArquivo() {
         url.searchParams.set('tab', currentTab || 'pendentes');
         url.searchParams.set('_t', Date.now().toString());
         location.href = url.toString();
-    }, falhas.length ? 2200 : 700);
+    }, falhas.length ? 6000 : 700);
 }
 
 function openAssinatura() {
