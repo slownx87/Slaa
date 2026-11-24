@@ -10,6 +10,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
+import android.database.Cursor;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -26,6 +27,7 @@ import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -50,8 +52,10 @@ import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -257,7 +261,7 @@ public final class MainActivity extends Activity {
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setAllowFileAccess(false);
-        s.setAllowContentAccess(false);
+        s.setAllowContentAccess(true);          // padrão do Android: os arquivos escolhidos na galeria chegam como content://
         s.setAllowFileAccessFromFileURLs(false);
         s.setAllowUniversalAccessFromFileURLs(false);
         s.setUseWideViewPort(true);
@@ -824,8 +828,14 @@ public final class MainActivity extends Activity {
             } else {
                 arquivos = midiaCapturada();
             }
+            if (arquivos == null || arquivos.length == 0) {
+                Toast.makeText(this, "O aparelho não devolveu o arquivo escolhido. Escolha de novo ou use a câmera.", Toast.LENGTH_LONG).show();
+            }
         }
-        if (retorno != null) retorno.onReceiveValue(arquivos);
+        if (retorno != null) {
+            if (arquivos != null && arquivos.length > 0 && algumSemTamanho(arquivos)) copiarEEntregar(retorno, arquivos);
+            else retorno.onReceiveValue(arquivos);
+        }
         // foto/vídeo que ninguém gravou não fica sobrando na pasta
         if (fotoTemp != null && fotoTemp.exists() && fotoTemp.length() == 0) //noinspection ResultOfMethodCallIgnored
             fotoTemp.delete();
@@ -833,6 +843,124 @@ public final class MainActivity extends Activity {
             videoTemp.delete();
         fotoTemp = null;
         videoTemp = null;
+    }
+
+    /** Tamanho que o app de origem informa para o arquivo (content://); -1 se não informar. */
+    private long tamanhoInformado(Uri u) {
+        Cursor c = null;
+        try {
+            c = getContentResolver().query(u, new String[] { OpenableColumns.SIZE }, null, null, null);
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(OpenableColumns.SIZE);
+                if (i >= 0 && !c.isNull(i)) return c.getLong(i);
+            }
+        } catch (Exception e) {
+            /* o app de origem não informa o tamanho */
+        } finally {
+            if (c != null) c.close();
+        }
+        return -1;
+    }
+
+    private boolean deOutroApp(Uri u) {
+        return u != null && "content".equals(u.getScheme()) && !VNFileProvider.AUTORIDADE.equals(u.getAuthority());
+    }
+
+    /** Alguns apps de galeria entregam o arquivo sem informar o tamanho: o site vê um arquivo de 0 bytes e não envia nada. */
+    private boolean algumSemTamanho(Uri[] uris) {
+        for (Uri u : uris) {
+            if (deOutroApp(u) && tamanhoInformado(u) <= 0) return true;
+        }
+        return false;
+    }
+
+    /** Copia para a pasta temporária do app só os arquivos sem tamanho (os demais seguem direto) e só então entrega ao site. */
+    private void copiarEEntregar(final ValueCallback<Uri[]> retorno, final Uri[] origem) {
+        Toast.makeText(this, "Preparando os arquivos…", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final Uri[] saida = new Uri[origem.length];
+                try {
+                    apagarEnviosAntigos(new File(getCacheDir(), "envio"), System.currentTimeMillis() - 24L * 3600L * 1000L);
+                } catch (Exception e) {
+                    /* limpeza é só um capricho */
+                }
+                for (int i = 0; i < origem.length; i++) {
+                    Uri u = origem[i];
+                    try {
+                        saida[i] = (deOutroApp(u) && tamanhoInformado(u) <= 0) ? copiarParaCache(u, i) : u;
+                    } catch (Exception e) {
+                        saida[i] = u;
+                    }
+                }
+                runOnUiThread(new Runnable() {
+                    @Override public void run() { retorno.onReceiveValue(saida); }
+                });
+            }
+        }).start();
+    }
+
+    private Uri copiarParaCache(Uri u, int indice) {
+        InputStream in = null;
+        OutputStream out = null;
+        File pasta = null;
+        File dest = null;
+        try {
+            String nome = null;
+            Cursor c = null;
+            try {
+                c = getContentResolver().query(u, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null);
+                if (c != null && c.moveToFirst()) nome = c.getString(0);
+            } catch (Exception e) {
+                /* sem nome: usa um padrão */
+            } finally {
+                if (c != null) c.close();
+            }
+            nome = Names.clean(nome == null ? "" : nome);
+            String tipo = getContentResolver().getType(u);
+            if (nome.isEmpty()) nome = "arquivo";
+            if (nome.indexOf('.') < 0) {
+                String ext = Names.extForMime(tipo == null ? "" : tipo);
+                if (ext != null && !ext.isEmpty()) nome = nome + (ext.startsWith(".") ? ext : "." + ext);
+            }
+            pasta = new File(new File(getCacheDir(), "envio"), System.currentTimeMillis() + "_" + indice);
+            if (!pasta.isDirectory() && !pasta.mkdirs()) return u;
+            dest = new File(pasta, nome);
+            in = getContentResolver().openInputStream(u);
+            if (in == null) return u;
+            out = new FileOutputStream(dest);
+            byte[] buf = new byte[64 * 1024];
+            long total = 0;
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                out.write(buf, 0, n);
+                total += n;
+            }
+            out.flush();
+            out.close();
+            out = null;
+            if (total <= 0) {
+                //noinspection ResultOfMethodCallIgnored
+                dest.delete();
+                return u;
+            }
+            return Uri.fromFile(dest);
+        } catch (Exception e) {
+            return u;
+        } finally {
+            try { if (in != null) in.close(); } catch (IOException ignorar) { /* nada */ }
+            try { if (out != null) out.close(); } catch (IOException ignorar) { /* nada */ }
+        }
+    }
+
+    private void apagarEnviosAntigos(File pasta, long limite) {
+        File[] itens = pasta.listFiles();
+        if (itens == null) return;
+        for (File f : itens) {
+            if (f.isDirectory()) apagarEnviosAntigos(f, limite);
+            if (f.lastModified() < limite) //noinspection ResultOfMethodCallIgnored
+                f.delete();
+        }
     }
 
     private Uri[] midiaCapturada() {

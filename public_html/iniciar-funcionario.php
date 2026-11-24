@@ -4720,6 +4720,7 @@ function prepararUploadMultiplo() {
     if (window.VNCamera) VNCamera.attach(input, { bloco: true });
 
     function tamanhoBonito(b) {
+        if (!b) return 'sem tamanho';
         if (b >= 1024 * 1024) return (b / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';
         return Math.max(1, Math.round(b / 1024)) + ' KB';
     }
@@ -4803,15 +4804,37 @@ async function enviarArquivoOS(fd) {
     return { ok: false, msg: 'o servidor respondeu com erro ' + r.status + (limpo ? ' (' + limpo + ')' : '') };
 }
 
+/* Aviso do envio: fica escrito na própria janela (o aviso rápido some em 2 s e, no celular, passava despercebido). */
+function avisoUpload(msg) {
+    const box = document.getElementById('upProgressoBox');
+    const txt = document.getElementById('upProgressoTxt');
+    if (box) box.hidden = false;
+    if (txt) txt.textContent = msg;
+    toast(msg);
+}
+
 async function uploadArquivo() {
+    try {
+        await uploadArquivoPassos();
+    } catch (e) {
+        actionRunning = false;
+        const b = document.getElementById('upBotao');
+        if (b) { b.disabled = false; b.textContent = 'Tentar de novo'; }
+        avisoUpload('Não foi possível enviar: ' + (e && e.message ? e.message : 'erro inesperado') + '.');
+    }
+}
+
+async function uploadArquivoPassos() {
     const v = visitaById(selectedId);
     if (!canEditVisit(v)) return;
     const input = document.getElementById('arquivoUpload');
-    if (!input.files.length) return toast('Selecione fotos ou vídeos.');
+    if (!input || !input.files.length) return avisoUpload('Escolha as fotos ou vídeos antes de enviar.');
+    avisoUpload('Preparando o envio…');
 
     const MAX_BYTES = 120 * 1024 * 1024;
-    const fila = Array.from(input.files).filter(f => f.size > 0 && f.size <= MAX_BYTES);
-    if (!fila.length) return toast('Nenhum arquivo válido para enviar.');
+    // tamanho 0 = o celular não informou o tamanho: tenta enviar mesmo assim (o servidor avisa se chegou vazio)
+    const fila = Array.from(input.files).filter(f => f.size <= MAX_BYTES);
+    if (!fila.length) return avisoUpload('Os arquivos escolhidos passam de 120 MB. Escolha arquivos menores.');
 
     const botao = document.getElementById('upBotao');
     const box = document.getElementById('upProgressoBox');
