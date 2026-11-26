@@ -762,38 +762,65 @@ public final class MainActivity extends Activity {
                 if (p.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) conteudo.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             }
 
-            List<Intent> cameras = new ArrayList<Intent>();
             fotoTemp = null;
             videoTemp = null;
+            Intent foto = null, vid = null;
             if (comCamera) {
                 boolean[] t = tipos(p);
-                if (t[0]) {
-                    Intent foto = intentCamera(MediaStore.ACTION_IMAGE_CAPTURE, "foto_", ".jpg", true);
-                    if (foto != null) cameras.add(foto);
-                }
-                if (t[1] && t[2]) {   // vídeo só quando o campo pede vídeo de verdade
-                    Intent vid = intentCamera(MediaStore.ACTION_VIDEO_CAPTURE, "video_", ".mp4", false);
-                    if (vid != null) cameras.add(vid);
-                }
+                if (t[0]) foto = intentCamera(MediaStore.ACTION_IMAGE_CAPTURE, "foto_", ".jpg", true);
+                if (t[1] && t[2]) vid = intentCamera(MediaStore.ACTION_VIDEO_CAPTURE, "video_", ".mp4", false);   // vídeo só quando o campo pede vídeo de verdade
             }
 
-            Intent escolha;
-            if (p.isCaptureEnabled() && !cameras.isEmpty()) {
-                escolha = cameras.get(0);
-                if (cameras.size() > 1) {
-                    escolha = Intent.createChooser(cameras.get(0), "Câmera");
-                    escolha.putExtra(Intent.EXTRA_INITIAL_INTENTS, cameras.subList(1, cameras.size()).toArray(new Intent[0]));
-                }
+            if (p.isCaptureEnabled() && (foto != null || vid != null)) {
+                iniciarSeletor(foto != null ? foto : vid);      // o campo pede a câmera direto
+            } else if (foto == null && vid == null) {
+                iniciarSeletor(conteudo);                       // só galeria/arquivos
             } else {
-                escolha = Intent.createChooser(conteudo, "Selecionar arquivo");
-                if (!cameras.isEmpty()) escolha.putExtra(Intent.EXTRA_INITIAL_INTENTS, cameras.toArray(new Intent[0]));
+                perguntarOrigem(conteudo, foto, vid);
             }
-            startActivityForResult(escolha, REQ_ARQUIVO);
         } catch (Exception e) {
-            retornoArquivo = null;
-            retorno.onReceiveValue(null);
+            cancelarSeletor();
             Toast.makeText(this, "Não consegui abrir o seletor de arquivos.", Toast.LENGTH_LONG).show();
         }
+    }
+
+    /**
+     * Galeria, foto ou vídeo: o app mostra a própria lista e abre cada opção direto.
+     * (Antes as opções de câmera iam dentro do seletor do sistema; nesse caminho o Android não repassa a permissão de gravar
+     * a foto no app e alguns celulares devolviam "OK" sem arquivo nenhum.)
+     */
+    private void perguntarOrigem(final Intent conteudo, final Intent foto, final Intent vid) {
+        final List<String> rotulos = new ArrayList<String>();
+        final List<Intent> intents = new ArrayList<Intent>();
+        rotulos.add("Galeria ou arquivos");
+        intents.add(conteudo);
+        if (foto != null) { rotulos.add("Tirar foto"); intents.add(foto); }
+        if (vid != null) { rotulos.add("Gravar vídeo"); intents.add(vid); }
+        new AlertDialog.Builder(this)
+            .setTitle("Enviar fotos e vídeos")
+            .setItems(rotulos.toArray(new String[0]), new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int qual) { iniciarSeletor(intents.get(qual)); }
+            })
+            .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                @Override public void onCancel(DialogInterface d) { cancelarSeletor(); }
+            })
+            .show();
+    }
+
+    private void iniciarSeletor(Intent i) {
+        try {
+            startActivityForResult(i, REQ_ARQUIVO);
+        } catch (Exception e) {
+            cancelarSeletor();
+            Toast.makeText(this, "Não consegui abrir o seletor de arquivos.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Fecha o pedido de arquivo do site sem arquivo nenhum (a pessoa desistiu ou não deu para abrir). */
+    private void cancelarSeletor() {
+        ValueCallback<Uri[]> r = retornoArquivo;
+        retornoArquivo = null;
+        if (r != null) r.onReceiveValue(null);
     }
 
     /** Intent da câmera (foto ou vídeo) que grava o arquivo numa pasta do app, entregue pelo VNFileProvider. */
@@ -829,7 +856,7 @@ public final class MainActivity extends Activity {
                 arquivos = midiaCapturada();
             }
             if (arquivos == null || arquivos.length == 0) {
-                Toast.makeText(this, "O aparelho não devolveu o arquivo escolhido. Escolha de novo ou use a câmera.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "O aparelho não devolveu o arquivo escolhido (código " + resultado + (dados == null ? ", sem dados" : ", com dados") + "). Escolha de novo.", Toast.LENGTH_LONG).show();
             }
         }
         if (retorno != null) {
