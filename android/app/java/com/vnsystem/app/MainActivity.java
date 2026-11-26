@@ -833,7 +833,10 @@ public final class MainActivity extends Activity {
             }
         }
         if (retorno != null) {
-            if (arquivos != null && arquivos.length > 0 && algumSemTamanho(arquivos)) copiarEEntregar(retorno, arquivos);
+            if (arquivos != null && arquivos.length > 0) {
+                Toast.makeText(this, arquivos.length == 1 ? "1 arquivo escolhido" : arquivos.length + " arquivos escolhidos", Toast.LENGTH_SHORT).show();
+            }
+            if (arquivos != null && arquivos.length > 0 && algumDeOutroApp(arquivos)) copiarEEntregar(retorno, arquivos);
             else retorno.onReceiveValue(arquivos);
         }
         // foto/vídeo que ninguém gravou não fica sobrando na pasta
@@ -845,36 +848,23 @@ public final class MainActivity extends Activity {
         videoTemp = null;
     }
 
-    /** Tamanho que o app de origem informa para o arquivo (content://); -1 se não informar. */
-    private long tamanhoInformado(Uri u) {
-        Cursor c = null;
-        try {
-            c = getContentResolver().query(u, new String[] { OpenableColumns.SIZE }, null, null, null);
-            if (c != null && c.moveToFirst()) {
-                int i = c.getColumnIndex(OpenableColumns.SIZE);
-                if (i >= 0 && !c.isNull(i)) return c.getLong(i);
-            }
-        } catch (Exception e) {
-            /* o app de origem não informa o tamanho */
-        } finally {
-            if (c != null) c.close();
-        }
-        return -1;
-    }
-
     private boolean deOutroApp(Uri u) {
         return u != null && "content".equals(u.getScheme()) && !VNFileProvider.AUTORIDADE.equals(u.getAuthority());
     }
 
-    /** Alguns apps de galeria entregam o arquivo sem informar o tamanho: o site vê um arquivo de 0 bytes e não envia nada. */
-    private boolean algumSemTamanho(Uri[] uris) {
+    /**
+     * Arquivo escolhido na galeria / gerenciador (content:// de outro app). Alguns entregam sem tamanho, outros só deixam o app
+     * ler por pouco tempo: o site recebia um arquivo de 0 bytes (ou ilegível) e o envio não saía. Por isso o app lê o arquivo
+     * e entrega ao site uma cópia dentro da própria pasta temporária, que ele sempre consegue ler.
+     */
+    private boolean algumDeOutroApp(Uri[] uris) {
         for (Uri u : uris) {
-            if (deOutroApp(u) && tamanhoInformado(u) <= 0) return true;
+            if (deOutroApp(u)) return true;
         }
         return false;
     }
 
-    /** Copia para a pasta temporária do app só os arquivos sem tamanho (os demais seguem direto) e só então entrega ao site. */
+    /** Copia para a pasta temporária do app os arquivos de outros apps e só então entrega ao site (câmera e arquivos do app seguem direto). */
     private void copiarEEntregar(final ValueCallback<Uri[]> retorno, final Uri[] origem) {
         Toast.makeText(this, "Preparando os arquivos…", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
@@ -888,7 +878,7 @@ public final class MainActivity extends Activity {
                 for (int i = 0; i < origem.length; i++) {
                     Uri u = origem[i];
                     try {
-                        saida[i] = (deOutroApp(u) && tamanhoInformado(u) <= 0) ? copiarParaCache(u, i) : u;
+                        saida[i] = deOutroApp(u) ? copiarParaCache(u, i) : u;
                     } catch (Exception e) {
                         saida[i] = u;
                     }
@@ -944,7 +934,7 @@ public final class MainActivity extends Activity {
                 dest.delete();
                 return u;
             }
-            return Uri.fromFile(dest);
+            return VNFileProvider.uriDe(MainActivity.this, dest);
         } catch (Exception e) {
             return u;
         } finally {
