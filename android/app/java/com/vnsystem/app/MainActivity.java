@@ -20,6 +20,7 @@ import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Parcelable;
 import android.os.Environment;
 import android.os.Message;
 import android.os.SystemClock;
@@ -102,6 +103,7 @@ public final class MainActivity extends Activity {
     // seleção de arquivos / câmera
     private ValueCallback<Uri[]> retornoArquivo;
     private WebChromeClient.FileChooserParams parametrosArquivo;
+    private String origemSeletor = "";
     private File fotoTemp;
     private File videoTemp;
 
@@ -809,6 +811,8 @@ public final class MainActivity extends Activity {
 
     private void iniciarSeletor(Intent i) {
         try {
+            String a = i.getAction();
+            origemSeletor = MediaStore.ACTION_IMAGE_CAPTURE.equals(a) ? "foto" : MediaStore.ACTION_VIDEO_CAPTURE.equals(a) ? "video" : "galeria (" + a + ")";
             startActivityForResult(i, REQ_ARQUIVO);
         } catch (Exception e) {
             cancelarSeletor();
@@ -850,14 +854,10 @@ public final class MainActivity extends Activity {
         retornoArquivo = null;
         Uri[] arquivos = null;
         if (retorno != null && resultado == RESULT_OK) {
-            if (dados != null && (dados.getData() != null || dados.getClipData() != null)) {
-                arquivos = WebChromeClient.FileChooserParams.parseResult(resultado, dados);
-            } else {
-                arquivos = midiaCapturada();
-            }
-            if (arquivos == null || arquivos.length == 0) {
-                Toast.makeText(this, "O aparelho não devolveu o arquivo escolhido (código " + resultado + (dados == null ? ", sem dados" : ", com dados") + "). Escolha de novo.", Toast.LENGTH_LONG).show();
-            }
+            arquivos = extrairUris(dados);                                              // galeria / gerenciador de arquivos
+            if (arquivos == null || arquivos.length == 0) arquivos = midiaCapturada();  // câmera gravou no arquivo combinado
+            if (arquivos == null || arquivos.length == 0) arquivos = miniaturaDaCamera(dados);   // câmera que devolve só a foto pequena
+            if (arquivos == null || arquivos.length == 0) mostrarFalhaSeletor(resultado, dados);
         }
         if (retorno != null) {
             if (arquivos != null && arquivos.length > 0) {
@@ -873,6 +873,94 @@ public final class MainActivity extends Activity {
             videoTemp.delete();
         fotoTemp = null;
         videoTemp = null;
+    }
+
+    /** Endereços dos arquivos na resposta do seletor: ClipData, data e, por garantia, EXTRA_STREAM e textos content:// nos extras. */
+    private Uri[] extrairUris(Intent dados) {
+        List<Uri> lista = new ArrayList<Uri>();
+        if (dados == null) return new Uri[0];
+        try {
+            ClipData cd = dados.getClipData();
+            if (cd != null) {
+                for (int i = 0; i < cd.getItemCount(); i++) {
+                    Uri u = cd.getItemAt(i).getUri();
+                    if (u != null) lista.add(u);
+                }
+            }
+            if (lista.isEmpty() && dados.getData() != null) lista.add(dados.getData());
+            if (lista.isEmpty()) {
+                Bundle b = dados.getExtras();
+                if (b != null) {
+                    for (String chave : b.keySet()) {
+                        Object v = b.get(chave);
+                        if (v instanceof Uri) lista.add((Uri) v);
+                        else if (v instanceof String && (((String) v).startsWith("content://") || ((String) v).startsWith("file://"))) lista.add(Uri.parse((String) v));
+                        else if (v instanceof List) {
+                            for (Object o : (List<?>) v) {
+                                if (o instanceof Uri) lista.add((Uri) o);
+                                else if (o instanceof String && ((String) o).startsWith("content://")) lista.add(Uri.parse((String) o));
+                            }
+                        } else if (v instanceof Parcelable && v instanceof Intent) {
+                            Intent in = (Intent) v;
+                            if (in.getData() != null) lista.add(in.getData());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            /* resposta fora do padrão: segue com o que achou */
+        }
+        return lista.toArray(new Uri[0]);
+    }
+
+    /** Alguns apps de câmera ignoram o arquivo combinado e devolvem só a foto pequena (miniatura): salva como foto para não perder. */
+    private Uri[] miniaturaDaCamera(Intent dados) {
+        try {
+            if (dados == null || dados.getExtras() == null) return null;
+            Object o = dados.getExtras().get("data");
+            if (!(o instanceof Bitmap)) return null;
+            File pasta = new File(new File(getCacheDir(), "envio"), System.currentTimeMillis() + "_cam");
+            if (!pasta.isDirectory() && !pasta.mkdirs()) return null;
+            File dest = new File(pasta, "foto_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".jpg");
+            OutputStream out = new FileOutputStream(dest);
+            try {
+                ((Bitmap) o).compress(Bitmap.CompressFormat.JPEG, 92, out);
+            } finally {
+                out.close();
+            }
+            if (dest.length() <= 0) return null;
+            return new Uri[] { VNFileProvider.uriDe(this, dest) };
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Quadro com o que o seletor devolveu (o aviso rápido era cortado na tela): serve para tirar print e achar o motivo. */
+    private void mostrarFalhaSeletor(int resultado, Intent dados) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Origem: ").append(origemSeletor.isEmpty() ? "?" : origemSeletor);
+        sb.append("\nCódigo: ").append(resultado);
+        sb.append("\nResposta: ").append(dados == null ? "nenhuma" : "sim");
+        if (dados != null) {
+            sb.append("\nAção: ").append(dados.getAction());
+            sb.append("\nTipo: ").append(dados.getType());
+            sb.append("\nData: ").append(dados.getData());
+            ClipData cd = dados.getClipData();
+            sb.append("\nClip: ").append(cd == null ? "não" : cd.getItemCount() + " item(ns)");
+            try {
+                Bundle b = dados.getExtras();
+                sb.append("\nExtras: ").append(b == null ? "nenhum" : b.keySet().toString());
+            } catch (Exception e) {
+                sb.append("\nExtras: ilegíveis");
+            }
+        }
+        sb.append("\nArquivo da câmera: ").append(fotoTemp != null && fotoTemp.exists() ? fotoTemp.length() + " bytes" : "não gravado");
+        sb.append("\nApp ").append(Config.VERSION).append(" · Android ").append(Build.VERSION.SDK_INT);
+        new AlertDialog.Builder(this)
+            .setTitle("O aparelho não devolveu o arquivo")
+            .setMessage(sb.toString() + "\n\nTire um print desta tela e envie para o suporte.")
+            .setPositiveButton("OK", null)
+            .show();
     }
 
     private boolean deOutroApp(Uri u) {
